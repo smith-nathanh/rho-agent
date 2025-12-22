@@ -1,0 +1,17 @@
+[project]
+name = "ro-agent"
+version = "0.1.0"
+description = "A read-only agent"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "openai>=2.14.0",
+    "python-dotenv>=1.2.1",
+]
+
+[project.scripts]
+ro-agent = "ro_agent.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
