@@ -55,21 +55,17 @@ class ModelClient:
 
     def __init__(
         self,
-        model: str = "gpt-4o",
-        max_tokens: int = 8192,
+        model: str = "gpt-5-nano",
         base_url: str | None = None,
         api_key: str | None = None,
     ) -> None:
         self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         self._model = model
-        self._max_tokens = max_tokens
 
     async def stream(self, prompt: Prompt) -> AsyncIterator[StreamEvent]:
         """Stream a response from the model."""
         # Build messages
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": prompt.system}
-        ]
+        messages: list[dict[str, Any]] = [{"role": "system", "content": prompt.system}]
         for msg in prompt.messages:
             m: dict[str, Any] = {"role": msg.role}
             if msg.content is not None:
@@ -82,7 +78,6 @@ class ModelClient:
 
         kwargs: dict[str, Any] = {
             "model": self._model,
-            "max_tokens": self._max_tokens,
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
@@ -130,16 +125,24 @@ class ModelClient:
                                 tool_calls_in_progress[idx]["id"] = tc.id
                             if tc.function:
                                 if tc.function.name:
-                                    tool_calls_in_progress[idx]["name"] = tc.function.name
+                                    tool_calls_in_progress[idx]["name"] = (
+                                        tc.function.name
+                                    )
                                 if tc.function.arguments:
-                                    tool_calls_in_progress[idx]["arguments"] += tc.function.arguments
+                                    tool_calls_in_progress[idx]["arguments"] += (
+                                        tc.function.arguments
+                                    )
 
                     # Check for finish
                     if choice.finish_reason:
                         # Emit any completed tool calls
                         for tc_data in tool_calls_in_progress.values():
                             try:
-                                args = json.loads(tc_data["arguments"]) if tc_data["arguments"] else {}
+                                args = (
+                                    json.loads(tc_data["arguments"])
+                                    if tc_data["arguments"]
+                                    else {}
+                                )
                             except json.JSONDecodeError:
                                 args = {}
                             yield StreamEvent(

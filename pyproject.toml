@@ -6,12 +6,20 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "openai>=2.14.0",
+    "prompt-toolkit>=3.0.52",
     "python-dotenv>=1.2.1",
+    "rich>=14.2.0",
+    "typer>=0.21.0",
 ]
 
 [project.scripts]
-ro-agent = "ro_agent.cli:main"
+ro-agent = "ro_agent.cli:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.10",
+]

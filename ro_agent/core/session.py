@@ -26,34 +26,42 @@ class Session:
 
     def add_user_message(self, content: str) -> None:
         """Add a user message to history."""
-        self.history.append({
-            "role": "user",
-            "content": content,
-        })
+        self.history.append(
+            {
+                "role": "user",
+                "content": content,
+            }
+        )
 
     def add_assistant_message(self, content: str) -> None:
         """Add an assistant text message to history."""
-        self.history.append({
-            "role": "assistant",
-            "content": content,
-        })
+        self.history.append(
+            {
+                "role": "assistant",
+                "content": content,
+            }
+        )
 
     def add_assistant_tool_calls(self, tool_calls: list[dict[str, Any]]) -> None:
         """Add assistant message with tool calls."""
-        self.history.append({
-            "role": "assistant",
-            "content": None,
-            "tool_calls": tool_calls,
-        })
+        self.history.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": tool_calls,
+            }
+        )
 
     def add_tool_results(self, results: list[ToolResult]) -> None:
         """Add tool results as tool messages."""
         for r in results:
-            self.history.append({
-                "role": "tool",
-                "tool_call_id": r.tool_call_id,
-                "content": r.content,
-            })
+            self.history.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": r.tool_call_id,
+                    "content": r.content,
+                }
+            )
 
     def update_token_usage(self, input_tokens: int, output_tokens: int) -> None:
         """Update cumulative token usage."""

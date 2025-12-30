@@ -1,31 +1,46 @@
 """CLI entry point for ro-agent."""
 
-import argparse
 import asyncio
 import os
-import sys
-from typing import Any
+import re
+from pathlib import Path
+from typing import Annotated, Any, Iterable, Optional
 
+import typer
 from dotenv import load_dotenv
 
-
-# ANSI color codes
-class Colors:
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    CYAN = "\033[36m"
-    YELLOW = "\033[33m"
-    RED = "\033[31m"
-    GREEN = "\033[32m"
-    BLUE = "\033[34m"
+# Load .env before anything else so env vars are available for defaults
+load_dotenv()
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import (
+    Completer,
+    Completion,
+    WordCompleter,
+    merge_completers,
+)
+from prompt_toolkit.document import Document
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.history import FileHistory
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.syntax import Syntax
 
 from .client.model import ModelClient
 from .core.agent import Agent, AgentEvent
 from .core.session import Session
-from .tools.registry import ToolRegistry
 from .tools.handlers.shell import ShellHandler
+from .tools.registry import ToolRegistry
 
+# Rich console for all output
+console = Console()
+
+# Typer app
+app = typer.Typer(
+    name="ro-agent",
+    help="A read-only research assistant for inspecting logs, files, and databases.",
+    add_completion=False,
+)
 
 DEFAULT_SYSTEM_PROMPT = """\
 You are a research assistant that helps inspect logs, files, and databases.
@@ -34,32 +49,97 @@ You are read-only - you cannot modify files or execute destructive commands.
 Be thorough in your investigation and provide clear summaries of what you find.
 """
 
+# Commands the user can type during the session
+COMMANDS = ["/approve", "/help", "/clear", "exit", "quit"]
 
-class ApprovalHandler:
-    """Handles command approval prompts."""
+# Pattern to detect path-like strings in text
+PATH_PATTERN = re.compile(
+    r"(~/?|\.{1,2}/|/)?([a-zA-Z0-9_\-./]+/[a-zA-Z0-9_\-.]*|~[a-zA-Z0-9_\-./]*)$"
+)
 
-    def __init__(self, auto_approve: bool = False) -> None:
-        self.auto_approve = auto_approve
-        self.always_allow = False
 
-    async def check_approval(self, tool_name: str, tool_args: dict[str, Any]) -> bool:
-        """Prompt user for approval. Returns True if approved."""
-        if self.auto_approve or self.always_allow:
-            return True
+class InlinePathCompleter(Completer):
+    """Completes file paths that appear anywhere in the input text."""
 
-        cmd = tool_args.get("command", str(tool_args))
-        print(f"\n{Colors.YELLOW}[Approve? {tool_name}: {cmd}]{Colors.RESET}")
-        print(f"{Colors.YELLOW}[y]es / [n]o / [a]lways allow:{Colors.RESET} ", end="", flush=True)
+    def __init__(self, working_dir: str | None = None) -> None:
+        self.working_dir = Path(working_dir).expanduser() if working_dir else Path.cwd()
+
+    def get_completions(
+        self, document: Document, complete_event: Any
+    ) -> Iterable[Completion]:
+        text_before_cursor = document.text_before_cursor
+
+        match = PATH_PATTERN.search(text_before_cursor)
+        if not match:
+            return
+
+        path_text = match.group(0)
+        start_pos = -len(path_text)
+
+        # Expand paths for lookup
+        if path_text.startswith("~"):
+            expanded = os.path.expanduser(path_text)
+        elif path_text.startswith("/"):
+            expanded = path_text
+        else:
+            expanded = str(self.working_dir / path_text)
+
+        path = Path(expanded)
+        if expanded.endswith("/"):
+            parent = path
+            prefix = ""
+        else:
+            parent = path.parent
+            prefix = path.name
 
         try:
-            response = input().strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            return False
+            if not parent.exists():
+                return
 
-        if response in ("a", "always"):
-            self.always_allow = True
-            return True
-        return response in ("y", "yes")
+            for entry in sorted(parent.iterdir()):
+                name = entry.name
+                if not name.startswith(prefix):
+                    continue
+                if name.startswith(".") and not prefix.startswith("."):
+                    continue
+
+                # Build completion text preserving user's path style
+                if path_text.startswith("~"):
+                    if expanded.endswith("/"):
+                        completion_text = path_text + name
+                    else:
+                        completion_text = (
+                            path_text.rsplit("/", 1)[0] + "/" + name
+                            if "/" in path_text
+                            else "~/" + name
+                        )
+                else:
+                    if expanded.endswith("/"):
+                        completion_text = path_text + name
+                    else:
+                        completion_text = (
+                            str(path.parent / name) if "/" in path_text else name
+                        )
+
+                display = name + "/" if entry.is_dir() else name
+                if entry.is_dir():
+                    completion_text += "/"
+
+                yield Completion(
+                    completion_text,
+                    start_position=start_pos,
+                    display=display,
+                    display_meta="dir" if entry.is_dir() else "",
+                )
+        except PermissionError:
+            return
+
+
+def create_completer(working_dir: str | None = None) -> Completer:
+    """Create a merged completer for commands and paths."""
+    command_completer = WordCompleter(COMMANDS, ignore_case=True)
+    path_completer = InlinePathCompleter(working_dir=working_dir)
+    return merge_completers([command_completer, path_completer])
 
 
 def create_registry(working_dir: str | None = None) -> ToolRegistry:
@@ -69,117 +149,208 @@ def create_registry(working_dir: str | None = None) -> ToolRegistry:
     return registry
 
 
-async def run_interactive(session: Session, agent: Agent) -> None:
+class ApprovalHandler:
+    """Handles command approval prompts with Rich UI."""
+
+    def __init__(self, auto_approve: bool = False) -> None:
+        self.auto_approve = auto_approve
+
+    def enable_auto_approve(self) -> None:
+        """Enable auto-approve mode for this session."""
+        self.auto_approve = True
+        console.print("[green]Auto-approve enabled for this session[/green]")
+
+    async def check_approval(self, tool_name: str, tool_args: dict[str, Any]) -> bool:
+        """Prompt user for approval. Returns True if approved."""
+        if self.auto_approve:
+            return True
+
+        console.print("[yellow]Approve? \\[Y/n]:[/yellow] ", end="")
+
+        try:
+            response = input().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return False
+
+        # Default to yes (empty input = approve)
+        return response not in ("n", "no")
+
+
+def handle_event(event: AgentEvent, text_buffer: list[str]) -> None:
+    """Handle an agent event by printing to console."""
+    if event.type == "text":
+        # Buffer text for markdown rendering at end
+        text_buffer.append(event.content or "")
+
+    elif event.type == "tool_start":
+        # Flush any buffered text first
+        if text_buffer:
+            console.print(Markdown("".join(text_buffer)))
+            text_buffer.clear()
+
+        cmd = event.tool_args.get("command", "") if event.tool_args else ""
+        console.print(
+            Panel(
+                cmd or str(event.tool_args),
+                title=f"[cyan]{event.tool_name}[/cyan]",
+                border_style="cyan",
+                expand=False,
+            )
+        )
+
+    elif event.type == "tool_end":
+        result = event.tool_result or ""
+        if len(result) > 1000:
+            result = result[:1000] + "\n... (truncated)"
+        console.print(
+            Panel(
+                Syntax(result, "text", theme="monokai", word_wrap=True),
+                border_style="dim",
+                expand=False,
+            )
+        )
+
+    elif event.type == "tool_blocked":
+        console.print("[red]Command rejected[/red]")
+
+    elif event.type == "turn_complete":
+        # Flush any remaining buffered text
+        if text_buffer:
+            console.print(Markdown("".join(text_buffer)))
+            text_buffer.clear()
+
+        usage = event.usage or {}
+        console.print(
+            f"\n[dim][{usage.get('total_input_tokens', 0)} in, "
+            f"{usage.get('total_output_tokens', 0)} out][/dim]"
+        )
+
+    elif event.type == "error":
+        console.print(f"[red]Error: {event.content}[/red]")
+
+
+def handle_command(cmd: str, approval_handler: ApprovalHandler) -> bool:
+    """Handle slash commands. Returns True if should continue loop."""
+    if cmd == "/approve":
+        approval_handler.enable_auto_approve()
+        return True
+
+    if cmd == "/help":
+        console.print(
+            Panel(
+                "[bold]Commands:[/bold]\n"
+                "  /approve  - Enable auto-approve for all tool calls\n"
+                "  /help     - Show this help\n"
+                "  /clear    - Clear the screen\n"
+                "  exit      - Quit the session",
+                title="Help",
+                border_style="blue",
+            )
+        )
+        return True
+
+    if cmd == "/clear":
+        console.clear()
+        return True
+
+    return True
+
+
+async def run_interactive(
+    agent: Agent,
+    approval_handler: ApprovalHandler,
+    model: str,
+    working_dir: str | None,
+) -> None:
     """Run an interactive REPL session."""
-    print("ro-agent interactive mode. Type 'exit' or Ctrl+C to quit.\n")
+    # Prompt toolkit session with history and completion
+    prompt_session: PromptSession[str] = PromptSession(
+        history=FileHistory(".ro_agent_history"),
+        completer=create_completer(working_dir=working_dir),
+        complete_while_typing=False,
+        complete_in_thread=True,
+    )
+
+    # Welcome message
+    console.print(
+        Panel(
+            "[bold]ro-agent[/bold] - Read-only research assistant\n"
+            f"Model: [cyan]{model}[/cyan]\n"
+            "Type [bold]/help[/bold] for commands, [bold]exit[/bold] to quit.",
+            border_style="green",
+        )
+    )
 
     while True:
         try:
-            user_input = input("> ").strip()
+            console.print()
+            user_input = await prompt_session.prompt_async(
+                HTML("<ansigreen><b>&gt;</b></ansigreen> ")
+            )
+            user_input = user_input.strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nGoodbye!")
+            console.print("\n[dim]Goodbye![/dim]")
             break
 
         if not user_input:
             continue
 
         if user_input.lower() in ("exit", "quit"):
-            print("Goodbye!")
+            console.print("[dim]Goodbye![/dim]")
             break
 
-        # Run the turn and print events
+        if user_input.startswith("/"):
+            handle_command(user_input.lower(), approval_handler)
+            continue
+
+        # Run the turn and handle events
+        text_buffer: list[str] = []
         async for event in agent.run_turn(user_input):
-            handle_event(event)
+            handle_event(event, text_buffer)
 
 
-def handle_event(event: AgentEvent) -> None:
-    """Handle an agent event by printing to console."""
-    if event.type == "text":
-        # LLM response - default color
-        print(event.content, end="", flush=True)
-
-    elif event.type == "tool_start":
-        # Command being run - cyan
-        cmd = event.tool_args.get("command", "") if event.tool_args else ""
-        if cmd:
-            print(f"\n{Colors.CYAN}▶ {event.tool_name}: {cmd}{Colors.RESET}", flush=True)
-        else:
-            print(f"\n{Colors.CYAN}▶ {event.tool_name}{Colors.RESET}", flush=True)
-
-    elif event.type == "tool_end":
-        # Command result - dim
-        result = event.tool_result or ""
-        if len(result) > 500:
-            result = result[:500] + "...(truncated)"
-        print(f"{Colors.DIM}{result}{Colors.RESET}\n", flush=True)
-
-    elif event.type == "tool_blocked":
-        print(f"{Colors.RED}✗ Command rejected{Colors.RESET}\n", flush=True)
-
-    elif event.type == "turn_complete":
-        usage = event.usage or {}
-        print(f"\n{Colors.DIM}[{usage.get('total_input_tokens', 0)} in, "
-              f"{usage.get('total_output_tokens', 0)} out]{Colors.RESET}\n", flush=True)
-
-    elif event.type == "error":
-        print(f"\n{Colors.RED}[Error: {event.content}]{Colors.RESET}\n", file=sys.stderr, flush=True)
-
-
-async def run_single(session: Session, agent: Agent, prompt: str) -> None:
+async def run_single(agent: Agent, prompt: str) -> None:
     """Run a single prompt and exit."""
+    text_buffer: list[str] = []
     async for event in agent.run_turn(prompt):
-        handle_event(event)
+        handle_event(event, text_buffer)
 
 
-def main() -> None:
-    """Main entry point."""
-    load_dotenv()
-
-    parser = argparse.ArgumentParser(
-        description="ro-agent: A read-only research assistant"
-    )
-    parser.add_argument(
-        "prompt",
-        nargs="?",
-        help="Single prompt to run (omit for interactive mode)",
-    )
-    parser.add_argument(
-        "--model",
-        default=os.getenv("OPENAI_MODEL", "gpt-4o"),
-        help="Model to use (default: gpt-4o, or OPENAI_MODEL env var)",
-    )
-    parser.add_argument(
-        "--base-url",
-        default=os.getenv("OPENAI_BASE_URL"),
-        help="API base URL for vLLM or other OpenAI-compatible endpoints",
-    )
-    parser.add_argument(
-        "--system",
-        default=DEFAULT_SYSTEM_PROMPT,
-        help="System prompt for the agent",
-    )
-    parser.add_argument(
-        "--working-dir",
-        help="Working directory for shell commands",
-    )
-    parser.add_argument(
-        "--auto-approve",
-        action="store_true",
-        help="Automatically approve all tool calls (no prompts)",
-    )
-
-    args = parser.parse_args()
-
+@app.command()
+def main(
+    prompt: Annotated[
+        Optional[str],
+        typer.Argument(help="Single prompt to run (omit for interactive mode)"),
+    ] = None,
+    model: Annotated[
+        str,
+        typer.Option("--model", "-m", help="Model to use"),
+    ] = os.getenv("OPENAI_MODEL", "gpt-5-nano"),
+    base_url: Annotated[
+        Optional[str],
+        typer.Option("--base-url", help="API base URL for OpenAI-compatible endpoints"),
+    ] = os.getenv("OPENAI_BASE_URL"),
+    system: Annotated[
+        Optional[str],
+        typer.Option("--system", "-s", help="System prompt"),
+    ] = None,
+    working_dir: Annotated[
+        Optional[str],
+        typer.Option(
+            "--working-dir", "-w", help="Working directory for shell commands"
+        ),
+    ] = None,
+    auto_approve: Annotated[
+        bool,
+        typer.Option("--auto-approve", "-y", help="Auto-approve all tool calls"),
+    ] = False,
+) -> None:
+    """ro-agent: A read-only research assistant."""
     # Set up components
-    session = Session(system_prompt=args.system)
-    registry = create_registry(working_dir=args.working_dir)
-    client = ModelClient(
-        model=args.model,
-        base_url=args.base_url,
-    )
-
-    # Set up approval handler
-    approval_handler = ApprovalHandler(auto_approve=args.auto_approve)
+    session = Session(system_prompt=system or DEFAULT_SYSTEM_PROMPT)
+    registry = create_registry(working_dir=working_dir)
+    client = ModelClient(model=model, base_url=base_url)
+    approval_handler = ApprovalHandler(auto_approve=auto_approve)
 
     agent = Agent(
         session=session,
@@ -188,12 +359,11 @@ def main() -> None:
         approval_callback=approval_handler.check_approval,
     )
 
-    # Run
-    if args.prompt:
-        asyncio.run(run_single(session, agent, args.prompt))
+    if prompt:
+        asyncio.run(run_single(agent, prompt))
     else:
-        asyncio.run(run_interactive(session, agent))
+        asyncio.run(run_interactive(agent, approval_handler, model, working_dir))
 
 
 if __name__ == "__main__":
-    main()
+    app()

@@ -77,7 +77,9 @@ class Agent:
             # Track what we get in this turn
             text_content = ""
             tool_calls: list[dict[str, Any]] = []
-            pending_tool_calls: list[tuple[str, str, dict[str, Any]]] = []  # (id, name, args)
+            pending_tool_calls: list[
+                tuple[str, str, dict[str, Any]]
+            ] = []  # (id, name, args)
 
             # Stream response
             async for event in self._client.stream(prompt):
@@ -94,14 +96,16 @@ class Agent:
                             tool_args=tc.arguments,
                         )
                         # OpenAI format for tool calls
-                        tool_calls.append({
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.name,
-                                "arguments": __import__("json").dumps(tc.arguments),
-                            },
-                        })
+                        tool_calls.append(
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.name,
+                                    "arguments": __import__("json").dumps(tc.arguments),
+                                },
+                            }
+                        )
                         pending_tool_calls.append((tc.id, tc.name, tc.arguments))
 
                 elif event.type == "done":
@@ -134,21 +138,37 @@ class Agent:
 
             # Execute tool calls
             tool_results: list[ToolResult] = []
+            rejected = False
             for tool_id, tool_name, tool_args in pending_tool_calls:
                 # Check approval if callback is set
                 if self._approval_callback:
                     approved = await self._approval_callback(tool_name, tool_args)
                     if not approved:
-                        tool_results.append(ToolResult(
-                            tool_call_id=tool_id,
-                            content="Command rejected by user",
-                        ))
+                        # Must add result to keep API happy, then end turn
+                        tool_results.append(
+                            ToolResult(
+                                tool_call_id=tool_id,
+                                content="Command rejected by user. Awaiting new instructions.",
+                            )
+                        )
                         yield AgentEvent(
                             type="tool_blocked",
                             tool_name=tool_name,
                             tool_args=tool_args,
                         )
-                        continue
+                        rejected = True
+                        # Add dummy results for remaining tool calls
+                        for remaining_id, _, _ in pending_tool_calls[
+                            pending_tool_calls.index((tool_id, tool_name, tool_args))
+                            + 1 :
+                        ]:
+                            tool_results.append(
+                                ToolResult(
+                                    tool_call_id=remaining_id,
+                                    content="Command skipped - user rejected previous command.",
+                                )
+                            )
+                        break
 
                 invocation = ToolInvocation(
                     call_id=tool_id,
@@ -156,15 +176,28 @@ class Agent:
                     arguments=tool_args,
                 )
                 output = await self._registry.dispatch(invocation)
-                tool_results.append(ToolResult(
-                    tool_call_id=tool_id,
-                    content=output.content,
-                ))
+                tool_results.append(
+                    ToolResult(
+                        tool_call_id=tool_id,
+                        content=output.content,
+                    )
+                )
                 yield AgentEvent(
                     type="tool_end",
                     tool_name=tool_name,
                     tool_result=output.content,
                 )
 
-            # Add tool results to history and loop
+            # Add tool results to history
             self._session.add_tool_results(tool_results)
+
+            # If user rejected, end turn now (don't loop back to model)
+            if rejected:
+                yield AgentEvent(
+                    type="turn_complete",
+                    usage={
+                        "total_input_tokens": self._session.total_input_tokens,
+                        "total_output_tokens": self._session.total_output_tokens,
+                    },
+                )
+                return

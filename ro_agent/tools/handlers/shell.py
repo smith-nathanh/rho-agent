@@ -102,14 +102,14 @@ ALLOWED_COMMANDS = {
 
 # Patterns that indicate write operations (block these)
 DANGEROUS_PATTERNS = [
-    ">",      # Redirect (overwrite)
-    ">>",     # Redirect (append)
+    ">",  # Redirect (overwrite)
+    ">>",  # Redirect (append)
     "rm ",
     "rm\t",
     "rmdir",
     "mv ",
     "mv\t",
-    "cp ",    # Could overwrite
+    "cp ",  # Could overwrite
     "cp\t",
     "chmod",
     "chown",
@@ -189,7 +189,9 @@ def is_command_allowed(command: str) -> tuple[bool, str]:
 class ShellHandler(ToolHandler):
     """Execute shell commands for inspection and research."""
 
-    def __init__(self, working_dir: str | None = None, timeout: int = DEFAULT_TIMEOUT) -> None:
+    def __init__(
+        self, working_dir: str | None = None, timeout: int = DEFAULT_TIMEOUT
+    ) -> None:
         self._working_dir = working_dir or os.getcwd()
         self._timeout = timeout
 
