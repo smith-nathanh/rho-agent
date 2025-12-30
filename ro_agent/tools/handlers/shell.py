@@ -2,7 +2,6 @@
 
 import asyncio
 import os
-import shlex
 from typing import Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
@@ -198,6 +197,10 @@ class ShellHandler(ToolHandler):
     @property
     def name(self) -> str:
         return "shell"
+
+    @property
+    def requires_approval(self) -> bool:
+        return True
 
     @property
     def description(self) -> str:

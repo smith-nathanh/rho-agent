@@ -23,6 +23,11 @@ class ToolRegistry:
         """Get all tool specs for the LLM."""
         return [handler.to_spec() for handler in self._handlers.values()]
 
+    def requires_approval(self, tool_name: str) -> bool:
+        """Check if a tool requires user approval before execution."""
+        handler = self._handlers.get(tool_name)
+        return handler.requires_approval if handler else True
+
     async def dispatch(self, invocation: ToolInvocation) -> ToolOutput:
         """Dispatch a tool invocation to the appropriate handler."""
         handler = self._handlers.get(invocation.tool_name)

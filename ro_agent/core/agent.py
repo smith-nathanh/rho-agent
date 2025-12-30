@@ -9,9 +9,18 @@ from ..tools.base import ToolInvocation
 from ..tools.registry import ToolRegistry
 from .session import Session, ToolResult
 
+# Max characters to store in history per tool result (roughly 5-8k tokens)
+MAX_TOOL_OUTPUT_CHARS = 20000
 
 # Type for approval callback: (tool_name, tool_args) -> approved
 ApprovalCallback = Callable[[str, dict[str, Any]], Awaitable[bool]]
+
+
+def truncate_output(content: str, max_chars: int = MAX_TOOL_OUTPUT_CHARS) -> str:
+    """Truncate tool output to prevent context overflow."""
+    if len(content) <= max_chars:
+        return content
+    return content[:max_chars] + f"\n\n... (truncated, showing {max_chars} of {len(content)} chars)"
 
 
 @dataclass
@@ -140,8 +149,8 @@ class Agent:
             tool_results: list[ToolResult] = []
             rejected = False
             for tool_id, tool_name, tool_args in pending_tool_calls:
-                # Check approval if callback is set
-                if self._approval_callback:
+                # Check approval if callback is set and tool requires it
+                if self._approval_callback and self._registry.requires_approval(tool_name):
                     approved = await self._approval_callback(tool_name, tool_args)
                     if not approved:
                         # Must add result to keep API happy, then end turn
@@ -176,16 +185,18 @@ class Agent:
                     arguments=tool_args,
                 )
                 output = await self._registry.dispatch(invocation)
+                # Truncate output to prevent context overflow
+                truncated_content = truncate_output(output.content)
                 tool_results.append(
                     ToolResult(
                         tool_call_id=tool_id,
-                        content=output.content,
+                        content=truncated_content,
                     )
                 )
                 yield AgentEvent(
                     type="tool_end",
                     tool_name=tool_name,
-                    tool_result=output.content,
+                    tool_result=truncated_content,
                 )
 
             # Add tool results to history

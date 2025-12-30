@@ -48,6 +48,15 @@ class ToolHandler(ABC):
         """JSON Schema for the tool's parameters."""
         ...
 
+    @property
+    def requires_approval(self) -> bool:
+        """Whether this tool requires user approval before execution.
+
+        Override to return True for potentially dangerous tools.
+        Safe read-only tools should leave this as False.
+        """
+        return False
+
     @abstractmethod
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
         """Execute the tool and return the result."""

@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import platform
 import re
 from pathlib import Path
 from typing import Annotated, Any, Iterable, Optional
@@ -22,15 +23,17 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.syntax import Syntax
 
 from .client.model import ModelClient
 from .core.agent import Agent, AgentEvent
 from .core.session import Session
-from .tools.handlers.shell import ShellHandler
+from .tools.handlers import GrepFilesHandler, ListDirHandler, ReadFileHandler, ShellHandler
 from .tools.registry import ToolRegistry
+
+# Config directory for ro-agent data
+CONFIG_DIR = Path.home() / ".config" / "ro-agent"
+HISTORY_FILE = CONFIG_DIR / "history"
 
 # Rich console for all output
 console = Console()
@@ -44,9 +47,17 @@ app = typer.Typer(
 
 DEFAULT_SYSTEM_PROMPT = """\
 You are a research assistant that helps inspect logs, files, and databases.
-You have access to shell commands for investigating issues.
+You have access to tools for investigating issues.
 You are read-only - you cannot modify files or execute destructive commands.
 Be thorough in your investigation and provide clear summaries of what you find.
+
+## Environment
+- Platform: {platform}
+- Home directory: {home_dir}
+- Working directory: {working_dir}
+
+When users reference paths with ~, expand them to {home_dir}.
+Always use absolute paths in tool calls.
 """
 
 # Commands the user can type during the session
@@ -145,6 +156,11 @@ def create_completer(working_dir: str | None = None) -> Completer:
 def create_registry(working_dir: str | None = None) -> ToolRegistry:
     """Create and configure the tool registry."""
     registry = ToolRegistry()
+    # Dedicated read-only tools (preferred for inspection)
+    registry.register(ReadFileHandler())
+    registry.register(ListDirHandler())
+    registry.register(GrepFilesHandler())
+    # Shell for commands that need it (jq, custom tools, etc.)
     registry.register(ShellHandler(working_dir=working_dir))
     return registry
 
@@ -176,18 +192,15 @@ class ApprovalHandler:
         return response not in ("n", "no")
 
 
-def handle_event(event: AgentEvent, text_buffer: list[str]) -> None:
+def handle_event(event: AgentEvent) -> None:
     """Handle an agent event by printing to console."""
     if event.type == "text":
-        # Buffer text for markdown rendering at end
-        text_buffer.append(event.content or "")
+        # Stream text immediately as it arrives
+        print(event.content or "", end="", flush=True)
 
     elif event.type == "tool_start":
-        # Flush any buffered text first
-        if text_buffer:
-            console.print(Markdown("".join(text_buffer)))
-            text_buffer.clear()
-
+        # Ensure we're on a new line before showing tool
+        print()
         cmd = event.tool_args.get("command", "") if event.tool_args else ""
         console.print(
             Panel(
@@ -200,11 +213,11 @@ def handle_event(event: AgentEvent, text_buffer: list[str]) -> None:
 
     elif event.type == "tool_end":
         result = event.tool_result or ""
-        if len(result) > 1000:
-            result = result[:1000] + "\n... (truncated)"
+        if len(result) > 2000:
+            result = result[:2000] + "\n... (truncated)"
         console.print(
             Panel(
-                Syntax(result, "text", theme="monokai", word_wrap=True),
+                result,
                 border_style="dim",
                 expand=False,
             )
@@ -214,14 +227,11 @@ def handle_event(event: AgentEvent, text_buffer: list[str]) -> None:
         console.print("[red]Command rejected[/red]")
 
     elif event.type == "turn_complete":
-        # Flush any remaining buffered text
-        if text_buffer:
-            console.print(Markdown("".join(text_buffer)))
-            text_buffer.clear()
-
+        # Ensure we end on a new line
+        print()
         usage = event.usage or {}
         console.print(
-            f"\n[dim][{usage.get('total_input_tokens', 0)} in, "
+            f"[dim][{usage.get('total_input_tokens', 0)} in, "
             f"{usage.get('total_output_tokens', 0)} out][/dim]"
         )
 
@@ -263,9 +273,12 @@ async def run_interactive(
     working_dir: str | None,
 ) -> None:
     """Run an interactive REPL session."""
+    # Ensure config directory exists
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
     # Prompt toolkit session with history and completion
     prompt_session: PromptSession[str] = PromptSession(
-        history=FileHistory(".ro_agent_history"),
+        history=FileHistory(str(HISTORY_FILE)),
         completer=create_completer(working_dir=working_dir),
         complete_while_typing=False,
         complete_in_thread=True,
@@ -304,16 +317,14 @@ async def run_interactive(
             continue
 
         # Run the turn and handle events
-        text_buffer: list[str] = []
         async for event in agent.run_turn(user_input):
-            handle_event(event, text_buffer)
+            handle_event(event)
 
 
 async def run_single(agent: Agent, prompt: str) -> None:
     """Run a single prompt and exit."""
-    text_buffer: list[str] = []
     async for event in agent.run_turn(prompt):
-        handle_event(event, text_buffer)
+        handle_event(event)
 
 
 @app.command()
@@ -346,9 +357,24 @@ def main(
     ] = False,
 ) -> None:
     """ro-agent: A read-only research assistant."""
+    # Resolve working directory
+    resolved_working_dir = (
+        str(Path(working_dir).expanduser().resolve()) if working_dir else os.getcwd()
+    )
+
+    # Build system prompt with environment context
+    if system:
+        system_prompt = system
+    else:
+        system_prompt = DEFAULT_SYSTEM_PROMPT.format(
+            platform=platform.system(),
+            home_dir=str(Path.home()),
+            working_dir=resolved_working_dir,
+        )
+
     # Set up components
-    session = Session(system_prompt=system or DEFAULT_SYSTEM_PROMPT)
-    registry = create_registry(working_dir=working_dir)
+    session = Session(system_prompt=system_prompt)
+    registry = create_registry(working_dir=resolved_working_dir)
     client = ModelClient(model=model, base_url=base_url)
     approval_handler = ApprovalHandler(auto_approve=auto_approve)
 
