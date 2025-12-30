@@ -76,9 +76,41 @@ class Session:
         """Clear conversation history."""
         self.history.clear()
 
-    def compact(self) -> None:
-        """Placeholder for future compaction implementation.
+    def replace_with_summary(self, summary: str, recent_user_messages: list[str] | None = None) -> None:
+        """Replace history with a compacted summary.
 
-        Would summarize older messages to reduce context size.
+        Args:
+            summary: The summary text from compaction.
+            recent_user_messages: Optional list of recent user messages to preserve.
         """
-        pass
+        self.history.clear()
+
+        # Add recent user messages if provided
+        if recent_user_messages:
+            for msg in recent_user_messages:
+                self.history.append({"role": "user", "content": msg})
+
+        # Add the summary as a user message (following Codex pattern)
+        self.history.append({"role": "user", "content": summary})
+
+    def get_user_messages(self) -> list[str]:
+        """Extract all user messages from history."""
+        return [
+            m["content"]
+            for m in self.history
+            if m.get("role") == "user" and m.get("content")
+        ]
+
+    def estimate_tokens(self) -> int:
+        """Rough estimate of tokens in history (4 chars ≈ 1 token)."""
+        total_chars = len(self.system_prompt)
+        for m in self.history:
+            content = m.get("content")
+            if isinstance(content, str):
+                total_chars += len(content)
+            elif isinstance(content, list):
+                total_chars += sum(len(str(c)) for c in content)
+            # Tool calls
+            if m.get("tool_calls"):
+                total_chars += len(str(m["tool_calls"]))
+        return total_chars // 4

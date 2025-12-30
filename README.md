@@ -32,18 +32,18 @@ uv run ro-agent --base-url http://localhost:8000/v1 --model qwen2.5-72b
 ```
 ╭──────────────────────────────────────────────────────────────────╮
 │ ro-agent - Read-only research assistant                          │
-│ Model: gpt-4o                                                    │
+│ Model: gpt-5-nano                                                │
 │ Type /help for commands, exit to quit.                           │
 ╰──────────────────────────────────────────────────────────────────╯
 
-> What's in ~/proj/safeguarding?
+> What's in ~/proj/myapp?
 
 ╭────────────────────────────────── list_dir ──────────────────────────────────╮
-│ {'path': '/Users/nate/proj/safeguarding', 'show_hidden': False}              │
+│ {'path': '/home/user/proj/myapp', 'show_hidden': False}                      │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ drwxr-xr-x         -  2025-12-07 15:46  src/                                 │
-│ drwxr-xr-x         -  2025-12-07 15:46  results/                             │
+│ drwxr-xr-x         -  2025-12-07 15:46  tests/                               │
 │ -rw-r--r--      6739  2025-12-07 15:47  main.py                              │
 │ -rw-r--r--      3536  2025-12-07 16:26  README.md                            │
 │ -rw-r--r--       757  2025-12-07 15:48  pyproject.toml                       │
@@ -52,33 +52,33 @@ uv run ro-agent --base-url http://localhost:8000/v1 --model qwen2.5-72b
 > Find files with "error" in them
 
 ╭────────────────────────────────── grep_files ────────────────────────────────╮
-│ {'pattern': 'error', 'path': '/Users/nate/proj/safeguarding', 'glob': '*.py'}│
+│ {'pattern': 'error', 'path': '/home/user/proj/myapp', 'glob': '*.py'}        │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────╮
-│ /Users/nate/proj/safeguarding/src/agents.py                                  │
-│ /Users/nate/proj/safeguarding/src/graph.py                                   │
+│ /home/user/proj/myapp/src/api.py                                             │
+│ /home/user/proj/myapp/src/handlers.py                                        │
 │                                                                              │
 │ [2 matching files]                                                           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 
-> Show me the error handling in agents.py
+> Show me the error handling in api.py
 
 ╭────────────────────────────────── grep_files ────────────────────────────────╮
-│ {'pattern': 'error', 'path': '/Users/nate/proj/safeguarding/src/agents.py',  │
+│ {'pattern': 'error', 'path': '/home/user/proj/myapp/src/api.py',             │
 │  'output_mode': 'content', 'context_lines': 2}                               │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────╮
-│ ── /Users/nate/proj/safeguarding/src/agents.py ──                            │
+│ ── /home/user/proj/myapp/src/api.py ──                                       │
 │      41      try:                                                            │
-│      42          response = self.client.moderate(text)                       │
+│      42          response = self.client.request(endpoint)                    │
 │ >    43      except Exception as error:                                      │
-│      44          logger.warning(f"Moderation failed: {error}")               │
+│      44          logger.warning(f"Request failed: {error}")                  │
 │      45          return None                                                 │
 │                                                                              │
 │ [1 matches in 1 files]                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 
-The error handling in agents.py catches exceptions from the moderation API
+The error handling in api.py catches exceptions from client requests
 and logs a warning before returning None...
 
 [1247 in, 156 out]
@@ -216,6 +216,36 @@ class MyHandler(ToolHandler):
 | Command | Description |
 |---------|-------------|
 | `/approve` | Enable auto-approve for session |
+| `/compact [guidance]` | Compact conversation history (see below) |
 | `/help` | Show help |
 | `/clear` | Clear screen |
 | `exit` | Quit |
+
+## Context Management
+
+ro-agent includes compaction features to manage long conversations:
+
+### Manual Compaction
+Use `/compact` to summarize the conversation when context gets long:
+```
+> /compact
+Compacting conversation...
+Compacted: 45000 → 3200 tokens
+
+> /compact focus on the database schema findings
+Compacting conversation...
+Compacted: 32000 → 2800 tokens
+```
+
+### Auto-Compaction
+When context approaches 80% of the limit (default 100k tokens), ro-agent automatically compacts before processing your next message:
+```
+Context limit approaching, auto-compacting...
+Compacted: 82000 → 4500 tokens
+```
+
+The compaction creates a handoff summary that preserves:
+- Progress and key decisions made
+- Important context and user preferences
+- Next steps and remaining work
+- Critical file paths and references

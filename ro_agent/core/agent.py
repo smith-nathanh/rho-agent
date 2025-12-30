@@ -12,8 +12,32 @@ from .session import Session, ToolResult
 # Max characters to store in history per tool result (roughly 5-8k tokens)
 MAX_TOOL_OUTPUT_CHARS = 20000
 
+# Default context window threshold for auto-compaction (80% of typical 128k window)
+DEFAULT_CONTEXT_LIMIT = 100_000  # tokens
+AUTO_COMPACT_THRESHOLD = 0.8
+
+# Compaction prompts (following Codex/Claude Code patterns)
+COMPACTION_SYSTEM_PROMPT = """\
+You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
+
+Include:
+- Current progress and key decisions made
+- Important context, constraints, or user preferences discovered
+- What remains to be done (clear next steps)
+- Any critical data, file paths, or references needed to continue
+
+Be concise, structured, and focused on helping the next LLM seamlessly continue the work."""
+
+SUMMARY_PREFIX = """\
+Another language model worked on this task and produced a summary of its progress. Use this to build on the work that has already been done and avoid duplicating effort. Here is the summary:
+
+"""
+
 # Type for approval callback: (tool_name, tool_args) -> approved
 ApprovalCallback = Callable[[str, dict[str, Any]], Awaitable[bool]]
+
+# Type for compaction callback: (trigger: "manual" | "auto") -> None
+CompactCallback = Callable[[str], Awaitable[None]]
 
 
 def truncate_output(content: str, max_chars: int = MAX_TOOL_OUTPUT_CHARS) -> str:
@@ -27,12 +51,22 @@ def truncate_output(content: str, max_chars: int = MAX_TOOL_OUTPUT_CHARS) -> str
 class AgentEvent:
     """Event emitted by the agent during execution."""
 
-    type: str  # "text", "tool_start", "tool_end", "turn_complete", "error", "tool_blocked"
+    type: str  # "text", "tool_start", "tool_end", "turn_complete", "error", "tool_blocked", "compact_start", "compact_end"
     content: str | None = None
     tool_name: str | None = None
     tool_args: dict[str, Any] | None = None
     tool_result: str | None = None
     usage: dict[str, int] | None = None
+
+
+@dataclass
+class CompactResult:
+    """Result of a compaction operation."""
+
+    summary: str
+    tokens_before: int
+    tokens_after: int
+    trigger: str  # "manual" or "auto"
 
 
 class Agent:
@@ -52,17 +86,114 @@ class Agent:
         registry: ToolRegistry,
         client: ModelClient | None = None,
         approval_callback: ApprovalCallback | None = None,
+        context_limit: int = DEFAULT_CONTEXT_LIMIT,
+        auto_compact: bool = True,
     ) -> None:
         self._session = session
         self._registry = registry
         self._client = client or ModelClient()
         self._approval_callback = approval_callback
+        self._context_limit = context_limit
+        self._auto_compact = auto_compact
+
+    async def compact(self, custom_instructions: str = "", trigger: str = "manual") -> CompactResult:
+        """Compact the conversation history into a summary.
+
+        Args:
+            custom_instructions: Optional guidance for what to prioritize in summary.
+            trigger: "manual" (user-initiated) or "auto" (context limit reached).
+
+        Returns:
+            CompactResult with summary and token counts.
+        """
+        tokens_before = self._session.estimate_tokens()
+
+        # Build the summarization prompt
+        system = COMPACTION_SYSTEM_PROMPT
+        if custom_instructions:
+            system += f"\n\nUser guidance: {custom_instructions}"
+
+        # Build conversation content for summarization
+        conversation_text = self._format_history_for_summary()
+
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"Here is the conversation to summarize:\n\n{conversation_text}"},
+        ]
+
+        # Get the summary from the model
+        summary, usage = await self._client.complete(messages)
+        self._session.update_token_usage(
+            usage.get("input_tokens", 0),
+            usage.get("output_tokens", 0),
+        )
+
+        # Format the summary with prefix
+        formatted_summary = SUMMARY_PREFIX + summary
+
+        # Get recent user messages to preserve (last 2-3 for context)
+        user_messages = self._session.get_user_messages()
+        recent_messages = user_messages[-3:] if len(user_messages) > 3 else []
+
+        # Replace history with summary
+        self._session.replace_with_summary(formatted_summary, recent_messages)
+
+        tokens_after = self._session.estimate_tokens()
+
+        return CompactResult(
+            summary=summary,
+            tokens_before=tokens_before,
+            tokens_after=tokens_after,
+            trigger=trigger,
+        )
+
+    def _format_history_for_summary(self) -> str:
+        """Format conversation history as text for summarization."""
+        parts = []
+        for msg in self._session.get_messages():
+            role = msg.get("role", "unknown")
+            content = msg.get("content")
+
+            if role == "user":
+                parts.append(f"User: {content}")
+            elif role == "assistant":
+                if content:
+                    parts.append(f"Assistant: {content}")
+                if msg.get("tool_calls"):
+                    for tc in msg["tool_calls"]:
+                        func = tc.get("function", {})
+                        parts.append(f"Assistant called tool: {func.get('name', 'unknown')}")
+            elif role == "tool":
+                # Summarize tool results briefly
+                result = content or ""
+                if len(result) > 500:
+                    result = result[:500] + "..."
+                parts.append(f"Tool result: {result}")
+
+        return "\n\n".join(parts)
+
+    def should_auto_compact(self) -> bool:
+        """Check if auto-compaction should be triggered."""
+        if not self._auto_compact:
+            return False
+        estimated_tokens = self._session.estimate_tokens()
+        threshold = int(self._context_limit * AUTO_COMPACT_THRESHOLD)
+        return estimated_tokens > threshold
 
     async def run_turn(self, user_input: str) -> AsyncIterator[AgentEvent]:
         """Run a single conversation turn.
 
         This may involve multiple model calls if tools are invoked.
         """
+        # Check if auto-compaction is needed before processing
+        if self.should_auto_compact():
+            yield AgentEvent(type="compact_start", content="auto")
+            result = await self.compact(trigger="auto")
+            yield AgentEvent(
+                type="compact_end",
+                content=f"Compacted: {result.tokens_before} → {result.tokens_after} tokens",
+            )
+
         # Add user message to history
         self._session.add_user_message(user_input)
 

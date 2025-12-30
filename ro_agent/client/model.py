@@ -157,3 +157,23 @@ class ModelClient:
 
         except Exception as e:
             yield StreamEvent(type="error", content=str(e))
+
+    async def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, int]]:
+        """Non-streaming completion for simple requests like summarization.
+
+        Returns (content, usage_dict).
+        """
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                stream=False,
+            )
+            content = response.choices[0].message.content or ""
+            usage = {
+                "input_tokens": response.usage.prompt_tokens if response.usage else 0,
+                "output_tokens": response.usage.completion_tokens if response.usage else 0,
+            }
+            return content, usage
+        except Exception as e:
+            return f"Error: {e}", {"input_tokens": 0, "output_tokens": 0}

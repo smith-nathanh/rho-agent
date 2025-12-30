@@ -61,7 +61,7 @@ Always use absolute paths in tool calls.
 """
 
 # Commands the user can type during the session
-COMMANDS = ["/approve", "/help", "/clear", "exit", "quit"]
+COMMANDS = ["/approve", "/compact", "/help", "/clear", "exit", "quit"]
 
 # Pattern to detect path-like strings in text
 PATH_PATTERN = re.compile(
@@ -226,6 +226,20 @@ def handle_event(event: AgentEvent) -> None:
     elif event.type == "tool_blocked":
         console.print("[red]Command rejected[/red]")
 
+    elif event.type == "compact_start":
+        trigger = event.content or "manual"
+        if trigger == "auto":
+            console.print("[yellow]Context limit approaching, auto-compacting...[/yellow]")
+        else:
+            console.print("[yellow]Compacting conversation...[/yellow]")
+
+    elif event.type == "compact_end":
+        console.print(f"[green]{event.content}[/green]")
+        console.print(
+            "[dim]Note: Multiple compactions can reduce accuracy. "
+            "Start a new session when possible.[/dim]"
+        )
+
     elif event.type == "turn_complete":
         # Ensure we end on a new line
         print()
@@ -239,31 +253,45 @@ def handle_event(event: AgentEvent) -> None:
         console.print(f"[red]Error: {event.content}[/red]")
 
 
-def handle_command(cmd: str, approval_handler: ApprovalHandler) -> bool:
-    """Handle slash commands. Returns True if should continue loop."""
+def handle_command(cmd: str, approval_handler: ApprovalHandler) -> str | None:
+    """Handle slash commands.
+
+    Returns:
+        None to continue loop normally
+        "compact" or "compact:<instructions>" if /compact was called
+        Other string values for future special handling
+    """
     if cmd == "/approve":
         approval_handler.enable_auto_approve()
-        return True
+        return None
+
+    if cmd.startswith("/compact"):
+        # Extract optional instructions after /compact
+        parts = cmd.split(maxsplit=1)
+        if len(parts) > 1:
+            return f"compact:{parts[1]}"
+        return "compact"
 
     if cmd == "/help":
         console.print(
             Panel(
                 "[bold]Commands:[/bold]\n"
-                "  /approve  - Enable auto-approve for all tool calls\n"
-                "  /help     - Show this help\n"
-                "  /clear    - Clear the screen\n"
-                "  exit      - Quit the session",
+                "  /approve             - Enable auto-approve for all tool calls\n"
+                "  /compact [guidance]  - Compact conversation history\n"
+                "  /help                - Show this help\n"
+                "  /clear               - Clear the screen\n"
+                "  exit                 - Quit the session",
                 title="Help",
                 border_style="blue",
             )
         )
-        return True
+        return None
 
     if cmd == "/clear":
         console.clear()
-        return True
+        return None
 
-    return True
+    return None
 
 
 async def run_interactive(
@@ -313,7 +341,18 @@ async def run_interactive(
             break
 
         if user_input.startswith("/"):
-            handle_command(user_input.lower(), approval_handler)
+            action = handle_command(user_input, approval_handler)
+            if action and action.startswith("compact"):
+                # Handle /compact command
+                instructions = ""
+                if ":" in action:
+                    instructions = action.split(":", 1)[1]
+                handle_event(AgentEvent(type="compact_start", content="manual"))
+                result = await agent.compact(custom_instructions=instructions, trigger="manual")
+                handle_event(AgentEvent(
+                    type="compact_end",
+                    content=f"Compacted: {result.tokens_before} → {result.tokens_after} tokens",
+                ))
             continue
 
         # Run the turn and handle events
