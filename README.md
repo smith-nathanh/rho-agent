@@ -1,6 +1,6 @@
 # ro-agent
 
-A read-only research agent for compute clusters. Assists developers by inspecting logs, probing database schemas, and finding relevant documentation—without modifying anything.
+A read-only research agent for searching directories, inspecting files, and exploring code or databases—without modifying anything.
 
 ## Installation
 
@@ -15,36 +15,91 @@ uv sync
 uv run ro-agent
 
 # Single prompt (agent completes task and exits)
-uv run ro-agent "why did job 12345 fail?"
+uv run ro-agent "what does this project do?"
 
 # With working directory context
-uv run ro-agent --working-dir /data/jobs/12345/logs "find the errors"
+uv run ro-agent --working-dir ~/proj/myapp "find the error handling code"
 
 # Auto-approve shell commands
-uv run ro-agent --auto-approve "inspect the error logs"
+uv run ro-agent --auto-approve "inspect the logs"
 
 # Custom model/endpoint
 uv run ro-agent --base-url http://localhost:8000/v1 --model qwen2.5-72b
 ```
 
+## Interactive Example
+
+```
+╭──────────────────────────────────────────────────────────────────╮
+│ ro-agent - Read-only research assistant                          │
+│ Model: gpt-4o                                                    │
+│ Type /help for commands, exit to quit.                           │
+╰──────────────────────────────────────────────────────────────────╯
+
+> What's in ~/proj/safeguarding?
+
+╭────────────────────────────────── list_dir ──────────────────────────────────╮
+│ {'path': '/Users/nate/proj/safeguarding', 'show_hidden': False}              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ drwxr-xr-x         -  2025-12-07 15:46  src/                                 │
+│ drwxr-xr-x         -  2025-12-07 15:46  results/                             │
+│ -rw-r--r--      6739  2025-12-07 15:47  main.py                              │
+│ -rw-r--r--      3536  2025-12-07 16:26  README.md                            │
+│ -rw-r--r--       757  2025-12-07 15:48  pyproject.toml                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+> Find files with "error" in them
+
+╭────────────────────────────────── grep_files ────────────────────────────────╮
+│ {'pattern': 'error', 'path': '/Users/nate/proj/safeguarding', 'glob': '*.py'}│
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ /Users/nate/proj/safeguarding/src/agents.py                                  │
+│ /Users/nate/proj/safeguarding/src/graph.py                                   │
+│                                                                              │
+│ [2 matching files]                                                           │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+> Show me the error handling in agents.py
+
+╭────────────────────────────────── grep_files ────────────────────────────────╮
+│ {'pattern': 'error', 'path': '/Users/nate/proj/safeguarding/src/agents.py',  │
+│  'output_mode': 'content', 'context_lines': 2}                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ ── /Users/nate/proj/safeguarding/src/agents.py ──                            │
+│      41      try:                                                            │
+│      42          response = self.client.moderate(text)                       │
+│ >    43      except Exception as error:                                      │
+│      44          logger.warning(f"Moderation failed: {error}")               │
+│      45          return None                                                 │
+│                                                                              │
+│ [1 matches in 1 files]                                                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+The error handling in agents.py catches exceptions from the moderation API
+and logs a warning before returning None...
+
+[1247 in, 156 out]
+
+> exit
+```
+
 ## Tools
 
-The agent has four built-in tools, modeled after Claude Code's patterns:
-
-### `read_file`
-Read file contents with optional line ranges.
-```
-read_file(path="/path/to/file.log", start_line=100, end_line=200)
-```
+Four built-in tools, modeled after Claude Code's patterns:
 
 ### `list_dir`
-List directory contents (flat or recursive tree).
+Explore directory structures with flat or recursive tree views.
 ```
-list_dir(path="/data/logs", recursive=true, max_depth=2)
+list_dir(path="/data/logs")                           # flat listing
+list_dir(path="/project", recursive=true, max_depth=3) # tree view
+list_dir(path="/project", show_hidden=true)           # include dotfiles
 ```
 
 ### `grep_files`
-Search for patterns in files. Three output modes to control context usage:
+Search for patterns across directory trees. Three output modes to control context usage:
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
@@ -53,18 +108,29 @@ Search for patterns in files. Three output modes to control context usage:
 | `count` | Returns match counts per file | Gauge match distribution |
 
 ```
-# First, find which files match
-grep_files(pattern="ERROR", path="/logs", glob="*.log")
-# Output: /logs/app.log, /logs/worker.log [2 matching files]
+# Find all Python files containing "TODO"
+grep_files(pattern="TODO", path="/project/src", glob="*.py")
 
-# Then drill into specific file
-grep_files(pattern="ERROR", path="/logs/app.log", output_mode="content", context_lines=3)
+# Search logs for errors, see surrounding context
+grep_files(pattern="ERROR|FATAL", path="/var/log", glob="*.log",
+           output_mode="content", context_lines=3)
+
+# Count matches per file
+grep_files(pattern="import", path="/project", glob="*.py", output_mode="count")
+```
+
+### `read_file`
+Read file contents with optional line ranges.
+```
+read_file(path="/path/to/file.py")                    # full file (up to 500 lines)
+read_file(path="/path/to/file.py", start_line=100, end_line=200)  # specific range
 ```
 
 ### `shell`
 Execute shell commands (requires approval). Allowlisted to safe read-only commands.
 ```
 shell(command="jq '.errors' /data/results.json")
+shell(command="wc -l *.py")
 ```
 
 ## Safety
@@ -82,7 +148,7 @@ Create a `.env` file:
 ```bash
 OPENAI_API_KEY=your-key-here
 OPENAI_BASE_URL=http://your-vllm-server:8000/v1  # optional
-OPENAI_MODEL=gpt-4o  # optional, defaults to gpt-5-nano
+OPENAI_MODEL=gpt-4o  # optional
 ```
 
 History is stored at `~/.config/ro-agent/history`.
