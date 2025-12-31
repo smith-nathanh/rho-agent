@@ -1,0 +1,312 @@
+"""Base class for read-only database handlers."""
+
+import re
+from abc import abstractmethod
+from typing import Any
+
+from ..base import ToolHandler, ToolInvocation, ToolOutput
+
+
+# SQL patterns that indicate write operations (case-insensitive)
+MUTATION_PATTERNS = [
+    r"\bINSERT\b",
+    r"\bUPDATE\b",
+    r"\bDELETE\b",
+    r"\bDROP\b",
+    r"\bCREATE\b",
+    r"\bALTER\b",
+    r"\bTRUNCATE\b",
+    r"\bMERGE\b",
+    r"\bGRANT\b",
+    r"\bREVOKE\b",
+    r"\bEXEC\b",
+    r"\bEXECUTE\b",
+    r"\bCALL\b",
+]
+
+MUTATION_RE = re.compile("|".join(MUTATION_PATTERNS), re.IGNORECASE)
+
+DEFAULT_ROW_LIMIT = 100
+
+
+def is_read_only_sql(sql: str) -> tuple[bool, str]:
+    """Check if SQL is read-only. Returns (is_safe, reason)."""
+    # Strip comments and normalize whitespace
+    cleaned = re.sub(r"--.*$", "", sql, flags=re.MULTILINE)
+    cleaned = re.sub(r"/\*.*?\*/", "", cleaned, flags=re.DOTALL)
+    cleaned = " ".join(cleaned.split())
+
+    if MUTATION_RE.search(cleaned):
+        match = MUTATION_RE.search(cleaned)
+        return False, f"Query contains mutation keyword: {match.group()}"
+
+    return True, ""
+
+
+def format_rows(columns: list[str], rows: list[tuple], max_rows: int) -> str:
+    """Format query results as a readable ASCII table."""
+    if not rows:
+        return "(no rows returned)"
+
+    # Calculate column widths
+    widths = [len(str(col)) for col in columns]
+    for row in rows[:max_rows]:
+        for i, val in enumerate(row):
+            widths[i] = max(widths[i], len(str(val) if val is not None else "NULL"))
+
+    # Cap widths at 50 chars for readability
+    widths = [min(w, 50) for w in widths]
+
+    # Build header
+    header = " | ".join(
+        str(col).ljust(widths[i])[: widths[i]] for i, col in enumerate(columns)
+    )
+    separator = "-+-".join("-" * w for w in widths)
+
+    # Build rows
+    lines = [header, separator]
+    for row in rows[:max_rows]:
+        line = " | ".join(
+            (str(val) if val is not None else "NULL").ljust(widths[i])[: widths[i]]
+            for i, val in enumerate(row)
+        )
+        lines.append(line)
+
+    if len(rows) > max_rows:
+        lines.append(f"... ({len(rows) - max_rows} more rows)")
+
+    return "\n".join(lines)
+
+
+class DatabaseHandler(ToolHandler):
+    """Base class for read-only database handlers.
+
+    Subclasses implement connection management and catalog queries
+    for their specific database systems.
+    """
+
+    def __init__(self, row_limit: int = DEFAULT_ROW_LIMIT) -> None:
+        self._row_limit = row_limit
+
+    @property
+    @abstractmethod
+    def db_type(self) -> str:
+        """Database type identifier (e.g., 'oracle', 'sqlite', 'vertica')."""
+        ...
+
+    @property
+    def name(self) -> str:
+        return self.db_type
+
+    @property
+    def requires_approval(self) -> bool:
+        return True
+
+    @property
+    def description(self) -> str:
+        return (
+            f"Query a {self.db_type.title()} database for schema inspection and read-only data access. "
+            f"Use 'query' for SQL queries, 'list_tables' to find tables, "
+            f"'describe' for detailed table schema. All operations are read-only."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "enum": ["query", "list_tables", "describe"],
+                    "description": "Operation to perform",
+                },
+                "sql": {
+                    "type": "string",
+                    "description": "SQL query to execute (for 'query' operation)",
+                },
+                "table_pattern": {
+                    "type": "string",
+                    "description": "Table name pattern for filtering (for 'list_tables')",
+                },
+                "table_name": {
+                    "type": "string",
+                    "description": "Table name to describe (for 'describe')",
+                },
+                "schema": {
+                    "type": "string",
+                    "description": "Schema/owner name (optional)",
+                },
+                "row_limit": {
+                    "type": "integer",
+                    "description": f"Max rows to return (default: {DEFAULT_ROW_LIMIT})",
+                },
+            },
+            "required": ["operation"],
+        }
+
+    @abstractmethod
+    def _get_connection(self) -> Any:
+        """Get or create database connection."""
+        ...
+
+    @abstractmethod
+    def _execute_query(
+        self, sql: str, params: dict[str, Any] | None = None
+    ) -> tuple[list[str], list[tuple]]:
+        """Execute SQL and return (columns, rows)."""
+        ...
+
+    @abstractmethod
+    def _get_list_tables_sql(self, schema: str | None) -> tuple[str, dict[str, Any]]:
+        """Return (SQL, params) for listing tables."""
+        ...
+
+    @abstractmethod
+    def _get_describe_sql(
+        self, table_name: str, schema: str | None
+    ) -> tuple[str, dict[str, Any]]:
+        """Return (SQL, params) for describing a table's columns."""
+        ...
+
+    def _format_describe_output(
+        self,
+        table_name: str,
+        columns: list[tuple],
+        extra_info: dict[str, Any] | None = None,
+    ) -> str:
+        """Format describe output. Subclasses can override for custom formatting."""
+        lines = [f"Table: {table_name.upper()}", "", "Columns:", "-" * 80]
+
+        for col in columns:
+            # Expect at least (name, type, nullable) - subclasses may provide more
+            name = col[0]
+            dtype = col[1] if len(col) > 1 else "UNKNOWN"
+            nullable = col[2] if len(col) > 2 else "Y"
+
+            null_str = "NULL" if nullable in ("Y", "YES", 1, True, None) else "NOT NULL"
+            lines.append(f"  {str(name):30} {str(dtype):20} {null_str}")
+
+        if extra_info:
+            if extra_info.get("primary_key"):
+                lines.append("")
+                lines.append(f"Primary Key: ({', '.join(extra_info['primary_key'])})")
+            if extra_info.get("indexes"):
+                lines.append("")
+                lines.append("Indexes:")
+                for idx in extra_info["indexes"]:
+                    lines.append(f"  {idx}")
+
+        return "\n".join(lines)
+
+    async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Execute the database operation."""
+        operation = invocation.arguments.get("operation", "")
+        row_limit = invocation.arguments.get("row_limit", self._row_limit)
+
+        try:
+            if operation == "query":
+                return await self._handle_query(invocation, row_limit)
+            elif operation == "list_tables":
+                return await self._handle_list_tables(invocation, row_limit)
+            elif operation == "describe":
+                return await self._handle_describe(invocation)
+            else:
+                return ToolOutput(
+                    content=f"Unknown operation: {operation}. Use: query, list_tables, describe",
+                    success=False,
+                )
+        except Exception as e:
+            return ToolOutput(content=f"{self.db_type.title()} error: {e}", success=False)
+
+    async def _handle_query(
+        self, invocation: ToolInvocation, row_limit: int
+    ) -> ToolOutput:
+        """Execute a read-only SQL query."""
+        sql = invocation.arguments.get("sql", "")
+        if not sql:
+            return ToolOutput(content="No SQL query provided", success=False)
+
+        is_safe, reason = is_read_only_sql(sql)
+        if not is_safe:
+            return ToolOutput(content=f"Query blocked: {reason}", success=False)
+
+        columns, rows = self._execute_query(sql)
+
+        if not columns:
+            return ToolOutput(content="Query executed (no result set)", success=True)
+
+        # Fetch only what we need
+        rows = rows[: row_limit + 1]
+        content = format_rows(columns, rows, row_limit)
+
+        return ToolOutput(
+            content=content,
+            success=True,
+            metadata={
+                "columns": columns,
+                "row_count": min(len(rows), row_limit),
+                "truncated": len(rows) > row_limit,
+            },
+        )
+
+    async def _handle_list_tables(
+        self, invocation: ToolInvocation, row_limit: int
+    ) -> ToolOutput:
+        """List tables matching a pattern."""
+        pattern = invocation.arguments.get("table_pattern", "%")
+        schema = invocation.arguments.get("schema")
+
+        sql, params = self._get_list_tables_sql(schema)
+        # Inject pattern into params
+        params["pattern"] = pattern
+
+        columns, rows = self._execute_query(sql, params)
+
+        if not rows:
+            return ToolOutput(
+                content=f"No tables found matching pattern: {pattern}",
+                success=True,
+            )
+
+        rows = rows[: row_limit + 1]
+        content = format_rows(columns, rows, row_limit)
+
+        return ToolOutput(
+            content=content,
+            success=True,
+            metadata={"table_count": min(len(rows), row_limit)},
+        )
+
+    async def _handle_describe(self, invocation: ToolInvocation) -> ToolOutput:
+        """Get detailed schema for a table."""
+        table_name = invocation.arguments.get("table_name", "")
+        schema = invocation.arguments.get("schema")
+
+        if not table_name:
+            return ToolOutput(content="No table_name provided", success=False)
+
+        sql, params = self._get_describe_sql(table_name, schema)
+        columns, rows = self._execute_query(sql, params)
+
+        if not rows:
+            return ToolOutput(content=f"Table not found: {table_name}", success=False)
+
+        # Get extra info (PK, indexes) if available
+        extra_info = self._get_table_extra_info(table_name, schema)
+
+        content = self._format_describe_output(table_name, rows, extra_info)
+
+        return ToolOutput(
+            content=content,
+            success=True,
+            metadata={
+                "table_name": table_name.upper(),
+                "column_count": len(rows),
+            },
+        )
+
+    def _get_table_extra_info(
+        self, table_name: str, schema: str | None
+    ) -> dict[str, Any] | None:
+        """Get additional table info (PK, indexes). Override in subclasses."""
+        return None

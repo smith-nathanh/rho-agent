@@ -133,6 +133,94 @@ shell(command="jq '.errors' /data/results.json")
 shell(command="wc -l *.py")
 ```
 
+## Database Handlers
+
+Read-only database inspection for Oracle, SQLite, and Vertica. Each handler exposes three operations through a single tool interface—keeping context overhead minimal while providing full schema exploration.
+
+### Installation
+
+```bash
+uv add oracledb          # Oracle
+uv add vertica-python    # Vertica
+# sqlite3 is in stdlib
+```
+
+### Configuration
+
+Set connection details via environment variables:
+
+```bash
+# Oracle
+export ORACLE_DSN="host:port/service_name"
+export ORACLE_USER="readonly_user"
+export ORACLE_PASSWORD="..."
+
+# Vertica
+export VERTICA_HOST="vertica.example.com"
+export VERTICA_PORT="5433"
+export VERTICA_DATABASE="analytics"
+export VERTICA_USER="readonly_user"
+export VERTICA_PASSWORD="..."
+
+# SQLite
+export SQLITE_DB="/path/to/database.db"
+```
+
+Database handlers are only registered when their respective env vars are set.
+
+### Operations
+
+All three handlers (`oracle`, `sqlite`, `vertica`) support the same operations:
+
+| Operation | Description | Key Parameters |
+|-----------|-------------|----------------|
+| `list_tables` | Find tables by pattern | `table_pattern` (% wildcards), `schema` |
+| `describe` | Get table schema details | `table_name`, `schema` |
+| `query` | Run read-only SQL | `sql`, `row_limit` |
+
+### Examples
+
+```
+# List all tables starting with "CUSTOMER"
+oracle(operation="list_tables", table_pattern="CUSTOMER%")
+
+# Describe a specific table
+oracle(operation="describe", table_name="orders", schema="sales")
+
+# Run a query (mutations are blocked)
+sqlite(operation="query", sql="SELECT * FROM users LIMIT 10")
+
+# Query with row limit
+vertica(operation="query", sql="SELECT * FROM events", row_limit=50)
+```
+
+### Safety
+
+- **Read-only enforcement**: SQL is validated to block INSERT, UPDATE, DELETE, DROP, etc.
+- **Connection-level protection**: SQLite opens with `?mode=ro`, Vertica uses `read_only=True`
+- **Row limits**: Default 100 rows per query to prevent context overflow
+- **Requires approval**: All database operations require user confirmation
+
+### Architecture
+
+The handlers share a common base class (`DatabaseHandler`) that provides:
+- SQL mutation detection and blocking
+- Result formatting as ASCII tables
+- Consistent tool schema and operation dispatch
+
+Each subclass implements only the database-specific parts:
+- Connection handling
+- System catalog queries (e.g., `USER_TABLES` vs `sqlite_master` vs `V_CATALOG`)
+- Extra metadata fetching (primary keys, indexes)
+
+```
+ro_agent/tools/handlers/
+├── database.py   # Base class with shared logic
+├── oracle.py     # Oracle-specific catalog queries
+├── sqlite.py     # SQLite pragma-based introspection
+└── vertica.py    # Vertica V_CATALOG queries
+```
+
 ## Safety
 
 - **Dedicated read-only tools**: `read_file`, `list_dir`, `grep_files` run without approval
@@ -163,15 +251,18 @@ ro_agent/
 │   └── session.py      # Conversation history management
 ├── client/
 │   └── model.py        # OpenAI-compatible streaming client
-├── tools/
-│   ├── base.py         # ToolHandler ABC
-│   ├── registry.py     # Tool registration and dispatch
-│   └── handlers/
-│       ├── read_file.py
-│       ├── list_dir.py
-│       ├── grep_files.py
-│       └── shell.py
-└── mcp/                # MCP integration (planned)
+└── tools/
+    ├── base.py         # ToolHandler ABC
+    ├── registry.py     # Tool registration and dispatch
+    └── handlers/
+        ├── read_file.py
+        ├── list_dir.py
+        ├── grep_files.py
+        ├── shell.py
+        ├── database.py  # Base class for DB handlers
+        ├── oracle.py    # Oracle handler
+        ├── sqlite.py    # SQLite handler
+        └── vertica.py   # Vertica handler
 ```
 
 Based on [Codex CLI](https://github.com/openai/codex) architecture patterns.

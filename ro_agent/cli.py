@@ -28,7 +28,16 @@ from rich.panel import Panel
 from .client.model import ModelClient
 from .core.agent import Agent, AgentEvent
 from .core.session import Session
-from .tools.handlers import GrepFilesHandler, ListDirHandler, ReadFileHandler, ShellHandler
+from .tools.handlers import (
+    GrepFilesHandler,
+    ListDirHandler,
+    OracleHandler,
+    ReadExcelHandler,
+    ReadFileHandler,
+    ShellHandler,
+    SqliteHandler,
+    VerticaHandler,
+)
 from .tools.registry import ToolRegistry
 
 # Config directory for ro-agent data
@@ -158,10 +167,20 @@ def create_registry(working_dir: str | None = None) -> ToolRegistry:
     registry = ToolRegistry()
     # Dedicated read-only tools (preferred for inspection)
     registry.register(ReadFileHandler())
+    registry.register(ReadExcelHandler())
     registry.register(ListDirHandler())
     registry.register(GrepFilesHandler())
     # Shell for commands that need it (jq, custom tools, etc.)
     registry.register(ShellHandler(working_dir=working_dir))
+
+    # Database handlers - register if configured via env vars
+    if os.environ.get("ORACLE_DSN"):
+        registry.register(OracleHandler())
+    if os.environ.get("SQLITE_DB"):
+        registry.register(SqliteHandler())
+    if os.environ.get("VERTICA_HOST"):
+        registry.register(VerticaHandler())
+
     return registry
 
 
