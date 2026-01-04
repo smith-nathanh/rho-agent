@@ -126,63 +126,59 @@ The layout's `structure`, `key_paths`, `error_patterns`, and `cluster_context` a
 ```
 ╭──────────────────────────────────────────────────────────────────╮
 │ ro-agent - Read-only research assistant                          │
-│ Model: gpt-5-nano                                                │
+│ Model: gpt-4o                                                    │
+│ Enter to send, Esc then Enter for newline.                       │
 │ Type /help for commands, exit to quit.                           │
 ╰──────────────────────────────────────────────────────────────────╯
 
 > What's in ~/proj/myapp?
 
-╭────────────────────────────────── list_dir ──────────────────────────────────╮
-│ {'path': '/home/user/proj/myapp', 'show_hidden': False}                      │
-╰──────────────────────────────────────────────────────────────────────────────╯
-╭──────────────────────────────────────────────────────────────────────────────╮
-│ drwxr-xr-x         -  2025-12-07 15:46  src/                                 │
-│ drwxr-xr-x         -  2025-12-07 15:46  tests/                               │
-│ -rw-r--r--      6739  2025-12-07 15:47  main.py                              │
-│ -rw-r--r--      3536  2025-12-07 16:26  README.md                            │
-│ -rw-r--r--       757  2025-12-07 15:48  pyproject.toml                       │
-╰──────────────────────────────────────────────────────────────────────────────╯
+list_dir(path='/home/user/proj/myapp', show_hidden=False)
+  → 5 items
+
+The directory contains:
+- src/ and tests/ directories
+- main.py (6.7KB) - likely the entry point
+- README.md and pyproject.toml for project config
 
 > Find files with "error" in them
 
-╭────────────────────────────────── grep_files ────────────────────────────────╮
-│ {'pattern': 'error', 'path': '/home/user/proj/myapp', 'glob': '*.py'}        │
-╰──────────────────────────────────────────────────────────────────────────────╯
-╭──────────────────────────────────────────────────────────────────────────────╮
-│ /home/user/proj/myapp/src/api.py                                             │
-│ /home/user/proj/myapp/src/handlers.py                                        │
-│                                                                              │
-│ [2 matching files]                                                           │
-╰──────────────────────────────────────────────────────────────────────────────╯
+grep_files(pattern='error', path='/home/user/proj/myapp', glob='*.py')
+  → 2 files match
+
+Found matches in:
+- src/api.py
+- src/handlers.py
 
 > Show me the error handling in api.py
 
-╭────────────────────────────────── grep_files ────────────────────────────────╮
-│ {'pattern': 'error', 'path': '/home/user/proj/myapp/src/api.py',             │
-│  'output_mode': 'content', 'context_lines': 2}                               │
-╰──────────────────────────────────────────────────────────────────────────────╯
-╭──────────────────────────────────────────────────────────────────────────────╮
-│ ── /home/user/proj/myapp/src/api.py ──                                       │
-│      41      try:                                                            │
-│      42          response = self.client.request(endpoint)                    │
-│ >    43      except Exception as error:                                      │
-│      44          logger.warning(f"Request failed: {error}")                  │
-│      45          return None                                                 │
-│                                                                              │
-│ [1 matches in 1 files]                                                       │
-╰──────────────────────────────────────────────────────────────────────────────╯
+grep_files(pattern='error', path='/home/user/proj/myapp/src/api.py', output_mode='content')
+  → 1 matches in 1 files
 
-The error handling in api.py catches exceptions from client requests
-and logs a warning before returning None...
+The error handling in api.py (line 43) catches exceptions from client
+requests and logs a warning before returning None:
 
-[1247 in, 156 out]
+    try:
+        response = self.client.request(endpoint)
+    except Exception as error:
+        logger.warning(f"Request failed: {error}")
+        return None
+
+> Write a summary to /tmp/findings.md
+
+write_output(path='/tmp/findings.md', content='# Error Handling Summary...')
+  → Wrote 256 bytes (12 lines)
+
+Done! Summary written to /tmp/findings.md.
+
+[2847 in, 892 out]
 
 > exit
 ```
 
 ## Tools
 
-Four built-in tools, modeled after Claude Code's patterns:
+Five built-in tools, modeled after Claude Code's patterns:
 
 ### `list_dir`
 Explore directory structures with flat or recursive tree views.
