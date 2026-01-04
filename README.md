@@ -26,6 +26,9 @@ uv run ro-agent --auto-approve "inspect the logs"
 # Custom model/endpoint
 uv run ro-agent --base-url http://localhost:8000/v1 --model qwen2.5-72b
 
+# Save output to file
+uv run ro-agent --output ./summary.md "summarize this project"
+
 # Template-based dispatch (see Templates section)
 uv run ro-agent --template job-failure --var cluster=prod --var log_path=/mnt/logs/12345
 ```
@@ -224,6 +227,12 @@ shell(command="jq '.errors' /data/results.json")
 shell(command="wc -l *.py")
 ```
 
+### `write_output`
+Write content to a file (requires approval). Use this to export research findings.
+```
+write_output(path="/tmp/summary.md", content="# Summary\n...")
+```
+
 ## Database Handlers
 
 Read-only database inspection for Oracle, SQLite, and Vertica. Each handler exposes three operations through a single tool interface—keeping context overhead minimal while providing full schema exploration.
@@ -350,10 +359,11 @@ ro_agent/
         ├── list_dir.py
         ├── grep_files.py
         ├── shell.py
-        ├── database.py  # Base class for DB handlers
-        ├── oracle.py    # Oracle handler
-        ├── sqlite.py    # SQLite handler
-        └── vertica.py   # Vertica handler
+        ├── write_output.py  # Export findings to files
+        ├── database.py      # Base class for DB handlers
+        ├── oracle.py        # Oracle handler
+        ├── sqlite.py        # SQLite handler
+        └── vertica.py       # Vertica handler
 ```
 
 Based on [Codex CLI](https://github.com/openai/codex) architecture patterns.

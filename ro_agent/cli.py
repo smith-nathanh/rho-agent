@@ -41,6 +41,7 @@ from .tools.handlers import (
     ShellHandler,
     SqliteHandler,
     VerticaHandler,
+    WriteOutputHandler,
 )
 from .tools.registry import ToolRegistry
 
@@ -62,7 +63,8 @@ app = typer.Typer(
 DEFAULT_SYSTEM_PROMPT = """\
 You are a research assistant that helps inspect logs, files, and databases.
 You have access to tools for investigating issues.
-You are read-only - you cannot modify files or execute destructive commands.
+You are read-only - you cannot modify existing files or execute destructive commands.
+However, you CAN use the write_output tool to create new output files (summaries, reports, scripts) when the user asks you to.
 Be thorough in your investigation and provide clear summaries of what you find.
 
 ## Environment
@@ -259,6 +261,8 @@ def create_registry(working_dir: str | None = None) -> ToolRegistry:
     registry.register(GrepFilesHandler())
     # Shell for commands that need it (jq, custom tools, etc.)
     registry.register(ShellHandler(working_dir=working_dir))
+    # Output tool for exporting findings
+    registry.register(WriteOutputHandler())
 
     # Database handlers - register if configured via env vars
     if os.environ.get("ORACLE_DSN"):
@@ -560,8 +564,19 @@ async def run_single(agent: Agent, prompt: str) -> None:
         handle_event(event)
 
 
-async def run_single_with_output(agent: Agent, prompt: str, output_path: str) -> None:
-    """Run a single prompt and write final response to file."""
+async def run_single_with_output(agent: Agent, prompt: str, output_path: str) -> bool:
+    """Run a single prompt and write final response to file.
+
+    Returns True if successful, False if output file already exists.
+    """
+    output_file = Path(output_path).expanduser().resolve()
+
+    # Check if output file already exists before running
+    if output_file.exists():
+        console.print(f"[red]Output file already exists: {output_file}[/red]")
+        console.print("[dim]Use a different path or delete the existing file first.[/dim]")
+        return False
+
     collected_text: list[str] = []
 
     async for event in agent.run_turn(prompt):
@@ -571,13 +586,14 @@ async def run_single_with_output(agent: Agent, prompt: str, output_path: str) ->
             collected_text.append(event.content)
 
     # Write collected text to output file
-    output_file = Path(output_path).expanduser().resolve()
     try:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text("".join(collected_text), encoding="utf-8")
         console.print(f"\n[green]Output written to: {output_file}[/green]")
+        return True
     except Exception as exc:
         console.print(f"\n[red]Failed to write output: {exc}[/red]")
+        return False
 
 
 @app.command()

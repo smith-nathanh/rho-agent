@@ -8,6 +8,7 @@ from .read_file import ReadFileHandler
 from .shell import ShellHandler
 from .sqlite import SqliteHandler
 from .vertica import VerticaHandler
+from .write_output import WriteOutputHandler
 
 __all__ = [
     "GrepFilesHandler",
@@ -18,4 +19,5 @@ __all__ = [
     "ShellHandler",
     "SqliteHandler",
     "VerticaHandler",
+    "WriteOutputHandler",
 ]
