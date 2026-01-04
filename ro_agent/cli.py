@@ -298,6 +298,35 @@ class ApprovalHandler:
         return response not in ("n", "no")
 
 
+def _format_tool_signature(tool_name: str, tool_args: dict[str, Any] | None) -> str:
+    """Format tool call as a compact signature like: read_file(path='/foo/bar.py')"""
+    if not tool_args:
+        return f"{tool_name}()"
+
+    # For shell commands, show just the command
+    if tool_name == "shell" and "command" in tool_args:
+        cmd = tool_args["command"]
+        if len(cmd) > 80:
+            cmd = cmd[:77] + "..."
+        return f"shell({cmd})"
+
+    # For other tools, show key args compactly
+    parts = []
+    for key, val in tool_args.items():
+        if isinstance(val, str):
+            if len(val) > 40:
+                val = val[:37] + "..."
+            parts.append(f"{key}='{val}'")
+        else:
+            parts.append(f"{key}={val}")
+
+    args_str = ", ".join(parts)
+    if len(args_str) > 100:
+        args_str = args_str[:97] + "..."
+
+    return f"{tool_name}({args_str})"
+
+
 def handle_event(event: AgentEvent) -> None:
     """Handle an agent event by printing to console."""
     if event.type == "text":
@@ -305,29 +334,13 @@ def handle_event(event: AgentEvent) -> None:
         print(event.content or "", end="", flush=True)
 
     elif event.type == "tool_start":
-        # Ensure we're on a new line before showing tool
-        print()
-        cmd = event.tool_args.get("command", "") if event.tool_args else ""
-        console.print(
-            Panel(
-                cmd or str(event.tool_args),
-                title=f"[cyan]{event.tool_name}[/cyan]",
-                border_style="cyan",
-                expand=False,
-            )
-        )
+        # Show compact tool signature (like Claude Code)
+        sig = _format_tool_signature(event.tool_name, event.tool_args)
+        console.print(f"[cyan]{sig}[/cyan]")
 
     elif event.type == "tool_end":
-        result = event.tool_result or ""
-        if len(result) > 2000:
-            result = result[:2000] + "\n... (truncated for display)"
-        console.print(
-            Panel(
-                result,
-                border_style="dim",
-                expand=False,
-            )
-        )
+        # Don't show output - just let the agent summarize what it found
+        pass
 
     elif event.type == "tool_blocked":
         console.print("[red]Command rejected[/red]")

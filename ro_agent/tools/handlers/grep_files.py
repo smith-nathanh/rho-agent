@@ -83,7 +83,14 @@ class GrepFilesHandler(ToolHandler):
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
         pattern_str = invocation.arguments.get("pattern", "")
         path_str = invocation.arguments.get("path", "")
-        glob_pattern = invocation.arguments.get("glob", "*")
+        glob_pattern = invocation.arguments.get("glob") or "*"
+
+        # Validate glob pattern - reject patterns with semicolons or other separators
+        if ";" in glob_pattern or "," in glob_pattern:
+            return ToolOutput(
+                content=f"Invalid glob pattern: '{glob_pattern}'. Use a single pattern (e.g., '*.py'), not multiple patterns separated by ; or ,",
+                success=False,
+            )
         output_mode = invocation.arguments.get("output_mode", "files_with_matches")
         ignore_case = invocation.arguments.get("ignore_case", False)
         context_lines = invocation.arguments.get("context_lines", 0)

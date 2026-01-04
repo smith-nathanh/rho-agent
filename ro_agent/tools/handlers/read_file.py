@@ -10,6 +10,24 @@ DEFAULT_MAX_LINES = 500
 # Max characters per line to avoid huge single-line payloads
 MAX_LINE_LENGTH = 500
 
+# Binary file extensions to reject
+BINARY_EXTENSIONS = {
+    # Images
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
+    # Audio/Video
+    ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv", ".flac", ".ogg", ".webm",
+    # Archives
+    ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar",
+    # Compiled/Binary
+    ".exe", ".dll", ".so", ".dylib", ".o", ".a", ".pyc", ".pyo", ".class", ".wasm",
+    # Documents (binary formats)
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    # Fonts
+    ".ttf", ".otf", ".woff", ".woff2", ".eot",
+    # Other binary
+    ".bin", ".dat", ".db", ".sqlite", ".sqlite3",
+}
+
 
 class ReadFileHandler(ToolHandler):
     """Read contents of a file with optional line range."""
@@ -61,6 +79,14 @@ class ReadFileHandler(ToolHandler):
 
         if not path.is_file():
             return ToolOutput(content=f"Not a file: {path}", success=False)
+
+        # Check for binary files
+        suffix = path.suffix.lower()
+        if suffix in BINARY_EXTENSIONS:
+            return ToolOutput(
+                content=f"Cannot read binary file: {path} ({suffix} files are not text-readable). Use shell commands like 'file', 'exiftool', or 'strings' for binary inspection.",
+                success=False,
+            )
 
         # Ensure start_line is at least 1
         start_line = max(1, start_line)
