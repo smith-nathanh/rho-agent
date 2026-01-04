@@ -25,7 +25,98 @@ uv run ro-agent --auto-approve "inspect the logs"
 
 # Custom model/endpoint
 uv run ro-agent --base-url http://localhost:8000/v1 --model qwen2.5-72b
+
+# Template-based dispatch (see Templates section)
+uv run ro-agent --template job-failure --var cluster=prod --var log_path=/mnt/logs/12345
 ```
+
+## Templates
+
+Templates enable dispatch mode—launching the agent with pre-configured prompts and context for specific tasks like investigating job failures.
+
+### Usage
+
+```bash
+# Run with a template
+uv run ro-agent --template job-failure \
+  --var cluster=prod-gpu \
+  --var log_path=/mnt/logs/job-12345
+
+# Variables from file
+uv run ro-agent --template job-failure --vars-file ./job-context.yaml
+
+# Capture output to file
+uv run ro-agent --template job-failure \
+  --var log_path=/mnt/logs/12345 \
+  --output findings.txt
+```
+
+### Template Format
+
+Templates live in `~/.config/ro-agent/templates/`. Each template defines variables, a system prompt, and an optional initial prompt:
+
+```yaml
+# ~/.config/ro-agent/templates/job-failure.yaml
+name: job-failure
+description: Investigate a failed distributed job
+
+variables:
+  cluster:
+    description: Cluster name
+    required: true
+  log_path:
+    description: Path to log directory
+    required: true
+  job_id:
+    required: false
+    default: "unknown"
+
+# Reference a layout file for repo context
+repo_layout: "ml-training"
+
+system_prompt: |
+  You are investigating a failed job on {{ cluster }}.
+  Log location: {{ log_path }}
+
+  ## Repository Layout
+  {{ repo_layout }}
+
+  Find the root cause and recommend a fix.
+
+initial_prompt: |
+  Job {{ job_id }} has failed. Investigate the logs at {{ log_path }}.
+```
+
+### Layouts
+
+Layouts provide reusable repo/cluster context. They live in `~/.config/ro-agent/layouts/`:
+
+```yaml
+# ~/.config/ro-agent/layouts/ml-training.yaml
+name: ml-training
+
+structure: |
+  ml-training/
+  ├── scripts/       # Job entrypoints
+  ├── src/models/    # Model architectures
+  ├── src/data/      # Data loaders
+  └── configs/       # Training configs
+
+key_paths:
+  entrypoints: scripts/
+  models: src/models/
+
+error_patterns:
+  - pattern: "CUDA out of memory"
+    likely_cause: "Batch size too large"
+    look_in: ["configs/", "src/data/"]
+
+cluster_context: |
+  - Logs at /mnt/logs/{job_id}/
+  - GPU nodes: 8x A100 80GB
+```
+
+The layout's `structure`, `key_paths`, `error_patterns`, and `cluster_context` are formatted and injected into `{{ repo_layout }}` in the template.
 
 ## Interactive Example
 

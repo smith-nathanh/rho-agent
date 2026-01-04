@@ -30,6 +30,8 @@ from rich.panel import Panel
 from .client.model import ModelClient
 from .core.agent import Agent, AgentEvent
 from .core.session import Session
+from .templates import load_template, prepare_template
+from .templates.renderer import parse_vars
 from .tools.handlers import (
     GrepFilesHandler,
     ListDirHandler,
@@ -545,6 +547,26 @@ async def run_single(agent: Agent, prompt: str) -> None:
         handle_event(event)
 
 
+async def run_single_with_output(agent: Agent, prompt: str, output_path: str) -> None:
+    """Run a single prompt and write final response to file."""
+    collected_text: list[str] = []
+
+    async for event in agent.run_turn(prompt):
+        handle_event(event)
+        # Collect text for output file
+        if event.type == "text" and event.content:
+            collected_text.append(event.content)
+
+    # Write collected text to output file
+    output_file = Path(output_path).expanduser().resolve()
+    try:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("".join(collected_text), encoding="utf-8")
+        console.print(f"\n[green]Output written to: {output_file}[/green]")
+    except Exception as exc:
+        console.print(f"\n[red]Failed to write output: {exc}[/red]")
+
+
 @app.command()
 def main(
     prompt: Annotated[
@@ -571,6 +593,22 @@ def main(
         Optional[str],
         typer.Option("--profile", help="Prompt profile name from config"),
     ] = None,
+    template: Annotated[
+        Optional[str],
+        typer.Option("--template", "-t", help="Template name for dispatch mode"),
+    ] = None,
+    var: Annotated[
+        Optional[list[str]],
+        typer.Option("--var", help="Template variable (key=value, repeatable)"),
+    ] = None,
+    vars_file: Annotated[
+        Optional[str],
+        typer.Option("--vars-file", help="YAML file with template variables"),
+    ] = None,
+    output: Annotated[
+        Optional[str],
+        typer.Option("--output", "-o", help="Write final response to file"),
+    ] = None,
     working_dir: Annotated[
         Optional[str],
         typer.Option(
@@ -594,8 +632,50 @@ def main(
         else PROMPT_CONFIG_FILE
     )
 
-    # Build system prompt with environment context
-    if system:
+    # Build system prompt and initial prompt
+    initial_prompt: str | None = None
+
+    # Template mode takes precedence
+    if template:
+        try:
+            tmpl = load_template(template)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+
+        # Collect variables from --vars-file and --var flags
+        template_vars: dict[str, str] = {}
+
+        if vars_file:
+            vars_path = Path(vars_file).expanduser().resolve()
+            if not vars_path.exists():
+                console.print(f"[red]Vars file not found: {vars_path}[/red]")
+                raise typer.Exit(1)
+            try:
+                with open(vars_path, encoding="utf-8") as f:
+                    file_vars = yaml.safe_load(f)
+                if isinstance(file_vars, dict):
+                    template_vars.update({k: str(v) for k, v in file_vars.items()})
+            except Exception as exc:
+                console.print(f"[red]Failed to load vars file: {exc}[/red]")
+                raise typer.Exit(1) from exc
+
+        # --var flags override vars file
+        if var:
+            try:
+                template_vars.update(parse_vars(var))
+            except ValueError as exc:
+                console.print(f"[red]{exc}[/red]")
+                raise typer.Exit(1) from exc
+
+        # Prepare the template
+        try:
+            system_prompt, initial_prompt = prepare_template(tmpl, template_vars)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+
+    elif system:
         system_prompt = system
     else:
         config = None
@@ -642,8 +722,17 @@ def main(
         approval_callback=approval_handler.check_approval,
     )
 
-    if prompt:
-        asyncio.run(run_single(agent, prompt))
+    # Determine the prompt to run
+    # Positional prompt overrides template's initial_prompt
+    run_prompt = prompt if prompt else initial_prompt
+
+    if run_prompt:
+        # Single prompt mode (from --template or positional arg)
+        if output:
+            # Capture output to file
+            asyncio.run(run_single_with_output(agent, run_prompt, output))
+        else:
+            asyncio.run(run_single(agent, run_prompt))
     else:
         asyncio.run(
             run_interactive(
