@@ -15,5 +15,6 @@ wheels/
 # Ignore markdown except README
 *.md
 !README.md
+!ARCHITECTURE.md
 
 .ro_agent_history
