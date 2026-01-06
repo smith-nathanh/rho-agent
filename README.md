@@ -402,6 +402,141 @@ class MyHandler(ToolHandler):
 | `/clear` | Clear screen |
 | `exit` | Quit |
 
+## Programmatic Usage
+
+You can embed ro-agent in Python scripts to run it programmatically—either for simple queries or autonomous multi-turn exploration with tools.
+
+### Basic Example
+
+```python
+import asyncio
+from dotenv import load_dotenv
+
+load_dotenv()  # Load OPENAI_API_KEY from .env
+
+from ro_agent.core.agent import Agent
+from ro_agent.core.session import Session
+from ro_agent.client.model import ModelClient
+from ro_agent.tools.registry import ToolRegistry
+from ro_agent.tools.handlers import (
+    ReadFileHandler,
+    SearchHandler,
+    FindFilesHandler,
+    ListDirHandler,
+)
+
+
+async def run_agent(task: str, working_dir: str) -> str:
+    """Run agent with tools, let it explore autonomously."""
+
+    session = Session(
+        system_prompt=f"You are a research assistant. Working directory: {working_dir}"
+    )
+
+    # Register tools
+    registry = ToolRegistry()
+    registry.register(ReadFileHandler())
+    registry.register(SearchHandler())
+    registry.register(FindFilesHandler())
+    registry.register(ListDirHandler())
+
+    # Create client and agent
+    client = ModelClient(model="gpt-4o")
+
+    # Auto-approve all tool calls (or implement custom logic)
+    async def auto_approve(tool_name: str, tool_args: dict) -> bool:
+        return True
+
+    agent = Agent(
+        session=session,
+        registry=registry,
+        client=client,
+        approval_callback=auto_approve,
+    )
+
+    # Run and collect response
+    response = ""
+    async for event in agent.run_turn(task):
+        if event.type == "text" and event.content:
+            response += event.content
+            print(event.content, end="", flush=True)  # Stream to console
+        elif event.type == "tool_start":
+            print(f"\n[{event.tool_name}]")
+        elif event.type == "turn_complete":
+            print(f"\n[Done: {event.usage}]")
+
+    return response
+
+
+# Usage
+result = asyncio.run(run_agent(
+    task="What does this project do?",
+    working_dir="/path/to/project"
+))
+```
+
+### Key Concepts
+
+| Component | Purpose |
+|-----------|---------|
+| `Session` | Manages conversation history and system prompt |
+| `ToolRegistry` | Holds tool handlers, dispatches invocations |
+| `ModelClient` | OpenAI-compatible API client (streaming) |
+| `Agent` | Orchestrates the turn loop (prompt → model → tools → loop) |
+| `AgentEvent` | Events yielded during execution (`text`, `tool_start`, `tool_end`, `turn_complete`, `error`) |
+
+### Event Types
+
+The `run_turn()` method yields `AgentEvent` objects:
+
+- `text` - Streaming text from the model (access via `event.content`)
+- `tool_start` - Tool invocation started (`event.tool_name`, `event.tool_args`)
+- `tool_end` - Tool completed (`event.tool_result`, `event.tool_metadata`)
+- `turn_complete` - Turn finished (`event.usage` has token counts)
+- `error` - Error occurred (`event.content`)
+
+### Approval Callback
+
+Control which tools require approval:
+
+```python
+async def my_approval(tool_name: str, tool_args: dict) -> bool:
+    # Auto-approve read-only tools
+    if tool_name in ("read_file", "search", "list_dir", "find_files"):
+        return True
+    # Reject shell commands with certain patterns
+    if tool_name == "shell" and "rm" in tool_args.get("command", ""):
+        return False
+    # Prompt user for others
+    return input(f"Approve {tool_name}? [y/N] ").lower() == "y"
+```
+
+### Simple Query (No Tools)
+
+For simple context + question scenarios without tool use:
+
+```python
+async def simple_query(context: str, question: str) -> str:
+    session = Session(system_prompt=f"Context:\n{context}")
+    registry = ToolRegistry()  # No tools
+    client = ModelClient(model="gpt-4o")
+    agent = Agent(session=session, registry=registry, client=client)
+
+    response = ""
+    async for event in agent.run_turn(question):
+        if event.type == "text":
+            response += event.content or ""
+    return response
+
+# Usage
+answer = asyncio.run(simple_query(
+    context="Error: Connection refused at line 42",
+    question="What caused this error?"
+))
+```
+
+See `examples/programmatic_usage.py` for a complete working example.
+
 ## Context Management
 
 ro-agent includes compaction features to manage long conversations:
