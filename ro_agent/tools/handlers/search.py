@@ -31,9 +31,8 @@ class SearchHandler(ToolHandler):
     @property
     def description(self) -> str:
         return (
-            "Search for a regex pattern in files. Returns matching lines with "
-            "file paths and line numbers. Efficient for large files. "
-            "Use glob parameter to filter by file type (e.g., '*.log', '*.py')."
+            "Search for a pattern in file contents. Returns matching lines "
+            "with file paths and line numbers."
         )
 
     @property
@@ -43,7 +42,7 @@ class SearchHandler(ToolHandler):
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "Regex pattern to search for",
+                    "description": "Text or regex pattern to search for in file contents (e.g., 'ERROR', 'connection failed', 'error|warning', 'def \\w+\\(')",
                 },
                 "path": {
                     "type": "string",
@@ -51,7 +50,7 @@ class SearchHandler(ToolHandler):
                 },
                 "glob": {
                     "type": "string",
-                    "description": "File pattern to filter (e.g., '*.py', '*.log'). Only used when path is a directory.",
+                    "description": "Glob pattern to filter which files to search (e.g., '*.py', '*.log', '*.yaml', 'test_*.py')",
                 },
                 "ignore_case": {
                     "type": "boolean",

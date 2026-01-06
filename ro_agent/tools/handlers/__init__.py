@@ -1,5 +1,6 @@
 """Tool handlers for ro-agent."""
 
+from .find_files import FindFilesHandler
 from .list_dir import ListDirHandler
 from .oracle import OracleHandler
 from .read_excel import ReadExcelHandler
@@ -11,6 +12,7 @@ from .vertica import VerticaHandler
 from .write_output import WriteOutputHandler
 
 __all__ = [
+    "FindFilesHandler",
     "ListDirHandler",
     "OracleHandler",
     "ReadExcelHandler",

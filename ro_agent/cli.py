@@ -33,6 +33,7 @@ from .core.session import Session
 from .templates import load_template, prepare_template
 from .templates.renderer import parse_vars
 from .tools.handlers import (
+    FindFilesHandler,
     ListDirHandler,
     OracleHandler,
     ReadExcelHandler,
@@ -258,6 +259,7 @@ def create_registry(working_dir: str | None = None) -> ToolRegistry:
     registry.register(ReadFileHandler())
     registry.register(ReadExcelHandler())
     registry.register(ListDirHandler())
+    registry.register(FindFilesHandler())
     registry.register(SearchHandler())
     # Shell for commands that need it (jq, custom tools, etc.)
     registry.register(ShellHandler(working_dir=working_dir))

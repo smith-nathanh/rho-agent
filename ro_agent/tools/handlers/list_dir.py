@@ -21,10 +21,7 @@ class ListDirHandler(ToolHandler):
 
     @property
     def description(self) -> str:
-        return (
-            "List the contents of a directory. Shows file names, sizes, and types. "
-            "Use this to explore directory structures and find files."
-        )
+        return "List the contents of a single directory. Shows file names, sizes, and modification times."
 
     @property
     def parameters(self) -> dict[str, Any]:
