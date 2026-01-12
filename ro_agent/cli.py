@@ -54,6 +54,9 @@ CONFIG_DIR = Path.home() / ".config" / "ro-agent"
 HISTORY_FILE = CONFIG_DIR / "history"
 PROMPT_CONFIG_FILE = CONFIG_DIR / "prompts.yaml"
 
+# Tool output preview lines (0 to disable)
+TOOL_PREVIEW_LINES = int(os.getenv("RO_AGENT_PREVIEW_LINES", "6"))
+
 # Rich console for all output
 console = Console()
 
@@ -404,6 +407,24 @@ def _format_tool_summary(
     return None
 
 
+def _format_tool_preview(result: str | None, max_lines: int | None = None) -> str | None:
+    """Get first N lines of tool output as a preview."""
+    if max_lines is None:
+        max_lines = TOOL_PREVIEW_LINES
+
+    if not result or max_lines <= 0:
+        return None
+
+    lines = result.split("\n")
+    if len(lines) <= max_lines:
+        return result
+
+    preview_lines = lines[:max_lines]
+    remaining = len(lines) - max_lines
+    preview_lines.append(f"... ({remaining} more lines)")
+    return "\n".join(preview_lines)
+
+
 def handle_event(event: AgentEvent) -> None:
     """Handle an agent event by printing to console."""
     if event.type == "text":
@@ -420,6 +441,13 @@ def handle_event(event: AgentEvent) -> None:
         summary = _format_tool_summary(event.tool_name, event.tool_metadata, event.tool_result)
         if summary:
             console.print(f"[dim]  → {summary}[/dim]")
+
+        # Show preview of the actual output
+        preview = _format_tool_preview(event.tool_result)
+        if preview:
+            # Indent each line for visual grouping
+            indented = "\n".join(f"    {line}" for line in preview.split("\n"))
+            console.print(f"[dim]{indented}[/dim]")
 
     elif event.type == "tool_blocked":
         console.print("[red]Command rejected[/red]")
@@ -810,8 +838,16 @@ def main(
         bool,
         typer.Option("--list", "-l", help="List saved conversations and exit"),
     ] = False,
+    preview_lines: Annotated[
+        int,
+        typer.Option("--preview-lines", help="Lines of tool output to show (0 to disable)"),
+    ] = int(os.getenv("RO_AGENT_PREVIEW_LINES", "6")),
 ) -> None:
     """ro-agent: A read-only research assistant."""
+    # Set preview lines for tool output display
+    global TOOL_PREVIEW_LINES
+    TOOL_PREVIEW_LINES = preview_lines
+
     # Initialize conversation store
     conversation_store = ConversationStore(CONFIG_DIR)
 
