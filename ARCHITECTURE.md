@@ -111,9 +111,9 @@ ToolOutput(content: str, success: bool, metadata: dict)
 
 ## Core File Inspection Tools
 
-### `search` — Pattern Search (`tools/handlers/search.py`)
+### `search` — Content Search (`tools/handlers/search.py`)
 
-**Purpose:** Search file contents with regex patterns using ripgrep. Efficient for large log files—never loads files into memory.
+**Purpose:** Search for patterns *inside* file contents using ripgrep. Use this to find which files contain a specific string or regex. Efficient for large log files—never loads files into memory.
 
 **Parameters:**
 | Param | Type | Required | Description |
@@ -136,6 +136,40 @@ ToolOutput(content: str, success: bool, metadata: dict)
    ```
    /path/to/file.py:42:    def handle_error(self):
    /path/to/file.py:58:        raise CustomError("failed")
+   ```
+
+3. **Auto-skips:** `.git/`, `node_modules/`, `__pycache__/`, `.venv/`
+
+**Requires Approval:** No
+
+---
+
+### `find_files` — File Name Search (`tools/handlers/find_files.py`)
+
+**Purpose:** Find files *by name or path pattern* using ripgrep's `--files` mode. Use this to locate files when you know the filename pattern but not the location.
+
+> **`search` vs `find_files`:** Use `search` to find content *inside* files (e.g., "which files contain `ERROR`?"). Use `find_files` to find files *by name* (e.g., "where are all the `*.log` files?").
+
+**Parameters:**
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `glob` | string | ✓ | Glob pattern for file names (e.g., `*.py`, `config.*`) |
+| `path` | string | ✓ | Directory to search in |
+| `max_results` | int | | Max files returned (default: 100) |
+
+**Key Implementation Details:**
+
+1. **Uses ripgrep (`rg --files`)** via subprocess:
+   - Fast file listing with glob filtering
+   - 30-second timeout protection
+
+2. **Output Format:**
+   ```
+   src/main.py
+   src/utils/helpers.py
+   tests/test_main.py
+
+   [3 files found]
    ```
 
 3. **Auto-skips:** `.git/`, `node_modules/`, `__pycache__/`, `.venv/`
@@ -298,7 +332,8 @@ class ToolRegistry:
 registry = ToolRegistry()
 registry.register(ReadFileHandler())
 registry.register(ListDirHandler())
-registry.register(GrepFilesHandler())
+registry.register(SearchHandler())
+registry.register(FindFilesHandler())
 registry.register(ShellHandler(working_dir))
 registry.register(WriteOutputHandler())
 # + database handlers if env vars present
@@ -413,6 +448,8 @@ Agent(session, registry, client, approval_callback)
 | Shell timeout | 120 seconds | `shell.py:9` |
 | Max search matches | 100 | `search.py:11` |
 | Search timeout | 30 seconds | `search.py:13` |
+| Max find_files results | 100 | `find_files.py:10` |
+| Find files timeout | 30 seconds | `find_files.py:11` |
 | Max dir entries | 200 | `list_dir.py:12` |
 | Max DB rows | 100 | `database.py:29` |
 

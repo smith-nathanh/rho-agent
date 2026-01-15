@@ -783,7 +783,7 @@ def main(
     model: Annotated[
         str,
         typer.Option("--model", "-m", help="Model to use"),
-    ] = os.getenv("OPENAI_MODEL", "gpt-5-nano"),
+    ] = os.getenv("OPENAI_MODEL", "gpt-5.1"),
     base_url: Annotated[
         Optional[str],
         typer.Option("--base-url", help="API base URL for OpenAI-compatible endpoints"),
