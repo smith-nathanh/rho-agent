@@ -1,7 +1,9 @@
 """Base class for read-only database handlers."""
 
+import csv
 import re
 from abc import abstractmethod
+from pathlib import Path
 from typing import Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
@@ -107,7 +109,8 @@ class DatabaseHandler(ToolHandler):
         return (
             f"Query a {self.db_type.title()} database for schema inspection and read-only data access. "
             f"Use 'query' for SQL queries, 'list_tables' to find tables, "
-            f"'describe' for detailed table schema. All operations are read-only."
+            f"'describe' for detailed table schema, 'export_query' to export query results to CSV. "
+            f"All operations are read-only."
         )
 
     @property
@@ -117,7 +120,7 @@ class DatabaseHandler(ToolHandler):
             "properties": {
                 "operation": {
                     "type": "string",
-                    "enum": ["query", "list_tables", "describe"],
+                    "enum": ["query", "list_tables", "describe", "export_query"],
                     "description": "Operation to perform",
                 },
                 "sql": {
@@ -139,6 +142,16 @@ class DatabaseHandler(ToolHandler):
                 "row_limit": {
                     "type": "integer",
                     "description": f"Max rows to return (default: {DEFAULT_ROW_LIMIT})",
+                },
+                "export_path": {
+                    "type": "string",
+                    "description": "Absolute path for export file (required for export_query)",
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["csv"],
+                    "default": "csv",
+                    "description": "Export format (default: csv)",
                 },
             },
             "required": ["operation"],
@@ -210,9 +223,11 @@ class DatabaseHandler(ToolHandler):
                 return await self._handle_list_tables(invocation, row_limit)
             elif operation == "describe":
                 return await self._handle_describe(invocation)
+            elif operation == "export_query":
+                return await self._handle_export_query(invocation)
             else:
                 return ToolOutput(
-                    content=f"Unknown operation: {operation}. Use: query, list_tables, describe",
+                    content=f"Unknown operation: {operation}. Use: query, list_tables, describe, export_query",
                     success=False,
                 )
         except Exception as e:
@@ -306,6 +321,104 @@ class DatabaseHandler(ToolHandler):
                 "column_count": len(rows),
             },
         )
+
+    async def _handle_export_query(self, invocation: ToolInvocation) -> ToolOutput:
+        """Export query results directly to a CSV file (streaming, memory-efficient)."""
+        sql = invocation.arguments.get("sql", "")
+        export_path = invocation.arguments.get("export_path", "")
+        # format param reserved for future expansion (only csv supported now)
+
+        # Validate required parameters
+        if not export_path:
+            return ToolOutput(content="No export_path provided", success=False)
+        if not sql:
+            return ToolOutput(content="No SQL query provided", success=False)
+
+        # Resolve and validate path
+        path = Path(export_path).expanduser().resolve()
+
+        # Safety check: don't write to sensitive locations
+        sensitive_patterns = [
+            ".bashrc", ".zshrc", ".profile", ".bash_profile",
+            ".ssh/", ".gnupg/", ".aws/", ".config/",
+            "/etc/", "/usr/", "/bin/", "/sbin/",
+        ]
+        path_str_lower = str(path).lower()
+        for pattern in sensitive_patterns:
+            if pattern in path_str_lower:
+                return ToolOutput(
+                    content=f"Cannot write to sensitive location: {path}",
+                    success=False,
+                )
+
+        # Fail fast: check if file exists before running query
+        if path.exists():
+            return ToolOutput(
+                content=f"File already exists: {path}. Use a different path or delete the existing file first.",
+                success=False,
+            )
+
+        # Validate SQL is read-only
+        is_safe, reason = is_read_only_sql(sql)
+        if not is_safe:
+            return ToolOutput(content=f"Query blocked: {reason}", success=False)
+
+        try:
+            # Create parent directories if needed
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Get connection and execute query
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(sql)
+
+            # Get column names from cursor description
+            if not cursor.description:
+                cursor.close()
+                return ToolOutput(
+                    content="Query executed but returned no result set",
+                    success=False,
+                )
+
+            columns = [col[0] for col in cursor.description]
+
+            # Stream results directly to file
+            row_count = 0
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(columns)
+
+                for row in cursor:
+                    writer.writerow(row)
+                    row_count += 1
+
+            cursor.close()
+
+            # Get final file size
+            file_size = path.stat().st_size
+
+            return ToolOutput(
+                content=f"Exported {row_count} rows ({len(columns)} columns) to {path} ({file_size} bytes)",
+                success=True,
+                metadata={
+                    "path": str(path),
+                    "row_count": row_count,
+                    "column_count": len(columns),
+                    "columns": columns,
+                    "size_bytes": file_size,
+                },
+            )
+
+        except PermissionError:
+            return ToolOutput(content=f"Permission denied: {path}", success=False)
+        except Exception as e:
+            # Clean up partial file on error
+            if path.exists():
+                path.unlink()
+            return ToolOutput(
+                content=f"{self.db_type.title()} export error: {e}",
+                success=False,
+            )
 
     def _get_table_extra_info(
         self, table_name: str, schema: str | None
