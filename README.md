@@ -1,6 +1,6 @@
 # ro-agent
 
-A read-only research agent for inspecting logs, files, and databases—without modifying anything.
+A read-only agent for inspecting logs, files, and databases—without modifying anything.
 
 ## Installation
 
@@ -87,6 +87,7 @@ The agent has read-only tools for research:
 | `list_dir` | Explore directories (flat or recursive tree) |
 | `find_files` | Find files by glob pattern |
 | `shell` | Run shell commands (allowlisted, requires approval) |
+| `read_excel` | Read Excel files (list sheets, read data, get info) |
 | `write_output` | Export findings to a new file |
 
 ### Database Tools
@@ -99,7 +100,7 @@ Available when configured via environment variables:
 | `sqlite` | `SQLITE_DB` |
 | `vertica` | `VERTICA_HOST`, `VERTICA_PORT`, `VERTICA_DATABASE`, `VERTICA_USER`, `VERTICA_PASSWORD` |
 
-Each supports `list_tables`, `describe`, and `query` operations. All queries are read-only enforced.
+Each supports `list_tables`, `describe`, `query`, and `export_query` (export results to CSV). All queries are read-only enforced.
 
 ## Configuration
 
@@ -131,6 +132,57 @@ In interactive mode:
 | `/help` | Show help |
 | `/clear` | Clear screen |
 | `exit` | Quit |
+
+## Example Session
+
+```bash
+$ SQLITE_DB=test_data.db uv run ro-agent
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ ro-agent - Read-only research assistant                                      │
+│ Model: gpt-5.1                                                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+> what tables are in the database?
+
+sqlite(operation='list_tables')
+  → 3 rows
+    table_name | type
+    -----------+------
+    job_logs   | table
+    jobs       | table
+    users      | table
+
+The database contains these tables: `job_logs`, `jobs`, `users`
+
+> show me the failed jobs
+
+sqlite(operation='query', sql='SELECT * FROM jobs WHERE status = 'failed'')
+  → 2 rows
+    id | name            | status | user_id | started_at          | exit_code
+    ---+-----------------+--------+---------+---------------------+----------
+    2  | ml_training_run | failed | 2       | 2024-01-15 09:00:00 | 1
+    6  | etl_nightly     | failed | 2       | 2024-01-14 23:00:00 | 137
+
+Here are the failed jobs:
+
+1) id: 2 - `ml_training_run` - exit_code: 1
+2) id: 6 - `etl_nightly` - exit_code: 137
+
+> why did ml_training_run fail?
+
+sqlite(operation='query', sql='SELECT * FROM job_logs WHERE job_id = 2')
+  → 3 rows
+    id | job_id | level | message
+    ---+--------+-------+------------------------------------------------
+    4  | 2      | INFO  | Training started with lr=0.001
+    5  | 2      | WARN  | GPU memory usage at 95%
+    6  | 2      | ERROR | CUDA out of memory. Tried to allocate 2.00 GiB
+
+The `ml_training_run` job failed due to a GPU out-of-memory error.
+Immediate cause: **CUDA out of memory when trying to allocate 2 GiB.**
+
+> exit
+```
 
 ## CLI Reference
 
