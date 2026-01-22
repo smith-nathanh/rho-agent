@@ -49,22 +49,34 @@ class OSEvaluator:
         effective_scripts_dir = Path(scripts_dir) if scripts_dir else self._scripts_dir
 
         if eval_config.eval_type == "match":
-            return self._evaluate_match(answer, eval_config.match_answer)
+            return self._evaluate_match(answer, eval_config)
         elif eval_config.eval_type == "check":
             return await self._evaluate_check(answer, eval_config, container, effective_scripts_dir)
         else:
             return False
 
-    def _evaluate_match(self, answer: str, expected: str | None) -> bool:
-        """Evaluate using direct string match."""
-        if expected is None:
-            return False
+    def _evaluate_match(
+        self, answer: str, eval_config: "EvaluationConfig"
+    ) -> bool:
+        """Evaluate using match criteria (exact or regex)."""
+        import re
 
-        # Normalize newlines and whitespace
-        answer_norm = self._normalize_string(answer)
-        expected_norm = self._normalize_string(expected)
+        # Apply strip if configured
+        if eval_config.match_strip:
+            answer = answer.strip()
 
-        return answer_norm == expected_norm
+        # Regex match
+        if eval_config.match_regex:
+            return re.search(eval_config.match_regex, answer) is not None
+
+        # Exact match
+        if eval_config.match_answer is not None:
+            expected = eval_config.match_answer
+            if eval_config.match_strip:
+                expected = expected.strip()
+            return answer == expected
+
+        return False
 
     def _normalize_string(self, s: str) -> str:
         """Normalize a string for comparison."""
@@ -80,32 +92,47 @@ class OSEvaluator:
         container=None,
         scripts_dir: Path | None = None,
     ) -> bool:
-        """Evaluate using check scripts."""
+        """Evaluate using check scripts.
+
+        Follows AgentBench's chaining logic:
+        - params starts as [answer]
+        - For each check script:
+          - If script is None (empty file), run example_script instead
+          - Execute script with *params as arguments
+          - Append stdout to params for next script
+        - All scripts must exit 0 to pass
+        """
         if not eval_config.check_scripts:
             return False
 
-        # If there's an example script, run it first to get expected value
-        expected_value = None
-        if eval_config.example_script and container:
-            expected_value = await self._run_example_script(
-                eval_config.example_script, container
-            )
+        # Params accumulate: [answer, output1, output2, ...]
+        params = [str(answer)]
 
-        # Run each check script
         for check_script in eval_config.check_scripts:
+            # If check_script.file is empty, use example_script (AgentBench's null behavior)
             if not check_script.file:
+                if eval_config.example_script and container:
+                    stdout = await self._run_example_script(
+                        eval_config.example_script, container
+                    )
+                    if stdout is None:
+                        return False
+                    params.append(stdout)
                 continue
 
-            result = await self._run_check_script(
-                answer,
-                expected_value or "",
+            # Run the check script with accumulated params
+            success, stdout = await self._run_check_script_chained(
+                params,
                 check_script.file,
                 container,
                 scripts_dir,
             )
 
-            if not result:
+            if not success:
                 return False
+
+            # Append output for next script
+            params.append(stdout)
 
         return True
 
@@ -142,44 +169,108 @@ class OSEvaluator:
 
         return None
 
-    async def _run_check_script(
+    async def _run_check_script_chained(
         self,
-        answer: str,
-        expected: str,
+        params: list[str],
         script_path: str,
         container=None,
         scripts_dir: Path | None = None,
-    ) -> bool:
-        """Run a single check script.
+    ) -> tuple[bool, str]:
+        """Run a single check script with chained params.
 
-        Check scripts take two arguments: answer and expected
-        Exit code 0 = pass, non-zero = fail
+        Args:
+            params: List of arguments [answer, output1, output2, ...]
+            script_path: Path to check script
+            container: Container to run in
+            scripts_dir: Directory containing scripts
+
+        Returns:
+            Tuple of (success, stdout) for chaining
         """
-        # Determine the check script type from filename
         script_name = Path(script_path).name
 
-        # Try to run inline if we have the check scripts locally
+        # Try to run in container if we have the scripts locally
         if scripts_dir:
             local_script = scripts_dir / script_path
             if local_script.exists():
-                return await self._run_local_check(answer, expected, local_script)
+                return await self._run_check_in_container_chained(
+                    params, local_script, container
+                )
 
-        # Run built-in checks based on script name
-        return self._run_builtin_check(answer, expected, script_name)
+        # Fallback to builtin checks (for common scripts)
+        # These expect (answer, expected) format
+        if len(params) >= 2:
+            answer, expected = params[0], params[1]
+        else:
+            answer, expected = params[0], ""
 
-    async def _run_local_check(
-        self, answer: str, expected: str, script_path: Path
-    ) -> bool:
-        """Run a local check script."""
+        success = self._run_builtin_check(answer, expected, script_name)
+        return success, ""
+
+    async def _run_check_in_container_chained(
+        self, params: list[str], script_path: Path, container
+    ) -> tuple[bool, str]:
+        """Run a check script inside the container with chained params.
+
+        Copies the script to the container and executes it with all params as arguments.
+        Returns (success, stdout) for chaining to next script.
+        """
+        import shlex
+        import base64
+
+        if not container:
+            # Fallback to local execution
+            return self._run_local_check_chained(params, script_path)
+
+        script_ext = script_path.suffix.lower()
+        script_content = script_path.read_text()
+
+        # Escape all params for shell
+        params_escaped = " ".join(shlex.quote(p) for p in params)
+
+        # Encode script content to avoid escaping issues
+        script_b64 = base64.b64encode(script_content.encode()).decode()
+
+        if script_ext == ".sh":
+            # Some shell scripts don't take args (like checking/0.sh that tests commands)
+            if "$1" in script_content or "$2" in script_content:
+                cmd = f"echo {script_b64} | base64 -d > /tmp/check.sh && chmod +x /tmp/check.sh && /tmp/check.sh {params_escaped}"
+            else:
+                cmd = f"echo {script_b64} | base64 -d > /tmp/check.sh && chmod +x /tmp/check.sh && /tmp/check.sh"
+        elif script_ext == ".py":
+            cmd = f"echo {script_b64} | base64 -d > /tmp/check.py && python3 /tmp/check.py {params_escaped}"
+        else:
+            return False, ""
+
+        exit_code, stdout, stderr = await container.execute(cmd, timeout=60)
+        return exit_code == 0, stdout.strip() if stdout else ""
+
+    def _run_local_check_chained(
+        self, params: list[str], script_path: Path
+    ) -> tuple[bool, str]:
+        """Fallback: run check script locally with params."""
         try:
-            result = subprocess.run(
-                ["python3", str(script_path), answer, expected],
-                capture_output=True,
-                timeout=30,
-            )
-            return result.returncode == 0
+            script_ext = script_path.suffix.lower()
+
+            if script_ext == ".py":
+                result = subprocess.run(
+                    ["python3", str(script_path)] + params,
+                    capture_output=True,
+                    timeout=30,
+                )
+                return result.returncode == 0, result.stdout.decode().strip()
+
+            if script_ext == ".sh":
+                result = subprocess.run(
+                    ["bash", str(script_path)] + params,
+                    capture_output=True,
+                    timeout=30,
+                )
+                return result.returncode == 0, result.stdout.decode().strip()
+
+            return False, ""
         except Exception:
-            return False
+            return False, ""
 
     def _run_builtin_check(self, answer: str, expected: str, script_name: str) -> bool:
         """Run built-in check implementations."""

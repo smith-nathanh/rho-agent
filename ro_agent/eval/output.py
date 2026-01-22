@@ -1,10 +1,106 @@
 """Output formatting for evaluation results."""
 
 import json
+import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .config import EvalMetrics, TaskResult
+
+
+def create_run_dir(base_dir: Path | str) -> Path:
+    """Create a timestamped run directory.
+
+    Args:
+        base_dir: Base output directory (e.g., results/gpt-5-mini-dbbench)
+
+    Returns:
+        Path to the new run directory
+    """
+    base_dir = Path(base_dir)
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_dir = base_dir / f"run-{timestamp}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    # Update 'latest' symlink
+    latest_link = base_dir / "latest"
+    if latest_link.is_symlink():
+        latest_link.unlink()
+    elif latest_link.exists():
+        latest_link.unlink()
+    os.symlink(run_dir.name, latest_link)
+
+    return run_dir
+
+
+def append_result(result: TaskResult, output_dir: Path | str) -> None:
+    """Append a single result to runs.jsonl.
+
+    Args:
+        result: The task result to append
+        output_dir: Run directory containing runs.jsonl
+    """
+    runs_path = Path(output_dir) / "runs.jsonl"
+    with open(runs_path, "a", encoding="utf-8") as f:
+        line = json.dumps(result.to_dict(), ensure_ascii=False)
+        f.write(line + "\n")
+
+
+def update_overall(metrics: EvalMetrics, output_dir: Path | str) -> None:
+    """Update overall.json with current metrics.
+
+    Args:
+        metrics: Current aggregate metrics
+        output_dir: Run directory containing overall.json
+    """
+    output_dir = Path(output_dir)
+    overall_path = output_dir / "overall.json"
+    summary_path = output_dir / "summary.txt"
+
+    with open(overall_path, "w", encoding="utf-8") as f:
+        json.dump(metrics.to_dict(), f, indent=2, ensure_ascii=False)
+
+    with open(summary_path, "w", encoding="utf-8") as f:
+        f.write(print_summary(metrics))
+        f.write("\n")
+
+
+def get_completed_indices(output_dir: Path | str) -> set[int]:
+    """Load completed task indices from existing runs.jsonl.
+
+    Args:
+        output_dir: Run directory containing runs.jsonl
+
+    Returns:
+        Set of completed task indices
+    """
+    runs_path = Path(output_dir) / "runs.jsonl"
+    if not runs_path.exists():
+        return set()
+
+    indices = set()
+    with open(runs_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                data = json.loads(line)
+                indices.add(data["index"])
+    return indices
+
+
+def save_run_config(config: dict[str, Any], output_dir: Path | str) -> None:
+    """Save run configuration for reproducibility.
+
+    Args:
+        config: Configuration dictionary
+        output_dir: Run directory
+    """
+    config_path = Path(output_dir) / "config.json"
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
 
 
 def write_results(

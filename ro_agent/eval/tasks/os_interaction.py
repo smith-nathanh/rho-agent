@@ -21,7 +21,9 @@ class EvaluationConfig:
     """Evaluation configuration for an OS task."""
 
     eval_type: str  # "match" or "check"
-    match_answer: str | None = None  # For eval_type="match"
+    match_answer: str | None = None  # For eval_type="match" (exact match)
+    match_regex: str | None = None  # For eval_type="match" (regex match)
+    match_strip: bool = True  # Whether to strip whitespace before matching
     check_scripts: list[CheckScript] = field(default_factory=list)
     example_script: dict[str, Any] | None = None  # For getting expected value
 
@@ -197,9 +199,20 @@ def parse_evaluation_config(eval_data: dict[str, Any]) -> EvaluationConfig:
 
     # Check for match-based evaluation
     if "match" in eval_data:
+        match_data = eval_data["match"]
+        # AgentBench: if string, converts to {"answer": str, "strip": True}
+        if isinstance(match_data, str):
+            return EvaluationConfig(
+                eval_type="match",
+                match_answer=match_data,
+                match_strip=True,
+            )
+        # Dict format with answer, regex, strip options
         return EvaluationConfig(
             eval_type="match",
-            match_answer=str(eval_data["match"]),
+            match_answer=match_data.get("answer"),
+            match_regex=match_data.get("regex"),
+            match_strip=match_data.get("strip", True),
         )
 
     # Check for check-based evaluation
@@ -231,12 +244,19 @@ def parse_evaluation_config(eval_data: dict[str, Any]) -> EvaluationConfig:
                     check_scripts.append(CheckScript(file=item))
 
         # Parse example script if present
+        # Can be a dict {"code": "..."} or a string (direct shell command)
         example = eval_data.get("example")
+        example_script = None
+        if isinstance(example, dict):
+            example_script = example
+        elif isinstance(example, str):
+            # Convert string format to dict format
+            example_script = {"code": example}
 
         return EvaluationConfig(
             eval_type="check",
             check_scripts=check_scripts,
-            example_script=example if isinstance(example, dict) else None,
+            example_script=example_script,
         )
 
     return EvaluationConfig(eval_type="match")

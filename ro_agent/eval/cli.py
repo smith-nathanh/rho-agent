@@ -22,7 +22,12 @@ from rich.console import Console  # noqa: E402
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn  # noqa: E402
 
 from .config import EvalConfig  # noqa: E402
-from .output import print_summary, write_results  # noqa: E402
+from .output import (  # noqa: E402
+    create_run_dir,
+    get_completed_indices,
+    print_summary,
+    save_run_config,
+)
 from .runner import EvalRunner  # noqa: E402
 from .tasks.dbbench import load_dbbench_tasks  # noqa: E402
 from .tasks.os_interaction import load_os_tasks, load_os_benchmark  # noqa: E402
@@ -62,6 +67,10 @@ def dbbench(
         Optional[str],
         typer.Option("--output", "-o", help="Output directory (default: results/<model>)"),
     ] = None,
+    resume: Annotated[
+        Optional[str],
+        typer.Option("--resume", "-r", help="Resume a previous run (path to run directory)"),
+    ] = None,
     system_prompt: Annotated[
         Optional[str],
         typer.Option("--system-prompt", help="Path to custom system prompt file"),
@@ -74,6 +83,10 @@ def dbbench(
         int,
         typer.Option("--offset", help="Skip first N tasks"),
     ] = 0,
+    select_only: Annotated[
+        bool,
+        typer.Option("--select-only", help="Only run SELECT queries (no Docker/MySQL needed)"),
+    ] = False,
     verbose: Annotated[
         bool,
         typer.Option("--verbose", "-v", help="Verbose output"),
@@ -85,23 +98,40 @@ def dbbench(
     tasks = load_dbbench_tasks(data_file)
     console.print(f"Loaded {len(tasks)} tasks")
 
+    # Filter to SELECT-only if requested
+    if select_only:
+        original_count = len(tasks)
+        tasks = [t for t in tasks if t.query_type == "SELECT"]
+        console.print(f"Filtered to {len(tasks)} SELECT queries (skipped {original_count - len(tasks)} mutation tasks)")
+
     # Apply offset and limit
     if offset > 0:
         tasks = tasks[offset:]
     if limit is not None:
         tasks = tasks[:limit]
 
-    console.print(f"Running {len(tasks)} tasks (offset={offset}, limit={limit})")
-
-    # Set default output directory if not specified
-    if output is None:
-        output_path = _default_output_dir(model, "dbbench")
+    # Determine output directory
+    if resume:
+        # Resume mode - use existing run directory
+        run_dir = Path(resume)
+        if not run_dir.exists():
+            console.print(f"[red]Error: Run directory not found: {resume}[/red]")
+            raise typer.Exit(1)
+        completed = get_completed_indices(run_dir)
+        original_count = len(tasks)
+        tasks = [t for t in tasks if t.index not in completed]
+        console.print(f"Resuming run: {run_dir}")
+        console.print(f"Already completed: {len(completed)} tasks, {len(tasks)} remaining")
     else:
-        output_path = Path(output)
+        # New run - create timestamped subdirectory
+        if output is None:
+            base_path = _default_output_dir(model, "dbbench")
+        else:
+            base_path = Path(output)
+        run_dir = create_run_dir(base_path)
+        console.print(f"Results will be saved to: {run_dir}")
 
-    # Create output directory
-    output_path.mkdir(parents=True, exist_ok=True)
-    console.print(f"Results will be saved to: {output_path}")
+    console.print(f"Running {len(tasks)} tasks")
 
     # Create config
     config = EvalConfig(
@@ -109,10 +139,24 @@ def dbbench(
         base_url=base_url,
         max_turns=max_turns,
         parallel=parallel,
-        output_dir=str(output_path),
+        output_dir=str(run_dir),
         system_prompt_file=system_prompt,
         verbose=verbose,
     )
+
+    # Save run config (only for new runs)
+    if not resume:
+        save_run_config({
+            "model": model,
+            "base_url": base_url,
+            "max_turns": max_turns,
+            "parallel": parallel,
+            "data_file": data_file,
+            "system_prompt": system_prompt,
+            "select_only": select_only,
+            "offset": offset,
+            "limit": limit,
+        }, run_dir)
 
     # Create runner
     runner = EvalRunner(config)
@@ -131,21 +175,15 @@ def dbbench(
         def update_progress(completed: int, total: int) -> None:
             progress.update(task_id, completed=completed)
 
-        # Run evaluation
+        # Run evaluation (results saved incrementally)
         results, metrics = asyncio.run(
-            runner.run_dbbench_tasks(tasks, progress_callback=update_progress)
+            runner.run_dbbench_tasks(tasks, output_dir=run_dir, progress_callback=update_progress)
         )
 
     # Print summary
     console.print()
     console.print(print_summary(metrics))
-
-    # Write results
-    runs_path, overall_path, summary_path = write_results(results, metrics, str(output_path))
-    console.print("\nResults written to:")
-    console.print(f"  {runs_path}")
-    console.print(f"  {overall_path}")
-    console.print(f"  {summary_path}")
+    console.print(f"\nResults saved to: {run_dir}")
 
 
 @app.command()
@@ -178,6 +216,10 @@ def os_interaction(
         Optional[str],
         typer.Option("--output", "-o", help="Output directory (default: results/<model>)"),
     ] = None,
+    resume: Annotated[
+        Optional[str],
+        typer.Option("--resume", "-r", help="Resume a previous run (path to run directory)"),
+    ] = None,
     system_prompt: Annotated[
         Optional[str],
         typer.Option("--system-prompt", help="Path to custom system prompt file"),
@@ -205,6 +247,9 @@ def os_interaction(
 
         # Full benchmark (156 tasks)
         ro-eval os-interaction ~/proj/AgentBench/data/os_interaction
+
+        # Resume an interrupted run
+        ro-eval os-interaction ~/proj/AgentBench/data/os_interaction --resume results/gpt-5-mini-os/run-20260121-173000
     """
     # Load tasks - detect if path is a directory or file
     input_path = Path(data_path)
@@ -226,17 +271,28 @@ def os_interaction(
     if limit is not None:
         tasks = tasks[:limit]
 
-    console.print(f"Running {len(tasks)} tasks (offset={offset}, limit={limit})")
-
-    # Set default output directory if not specified
-    if output is None:
-        output_path = _default_output_dir(model, "os")
+    # Determine output directory
+    if resume:
+        # Resume mode - use existing run directory
+        run_dir = Path(resume)
+        if not run_dir.exists():
+            console.print(f"[red]Error: Run directory not found: {resume}[/red]")
+            raise typer.Exit(1)
+        completed = get_completed_indices(run_dir)
+        original_count = len(tasks)
+        tasks = [t for t in tasks if t.index not in completed]
+        console.print(f"Resuming run: {run_dir}")
+        console.print(f"Already completed: {len(completed)} tasks, {len(tasks)} remaining")
     else:
-        output_path = Path(output)
+        # New run - create timestamped subdirectory
+        if output is None:
+            base_path = _default_output_dir(model, "os")
+        else:
+            base_path = Path(output)
+        run_dir = create_run_dir(base_path)
+        console.print(f"Results will be saved to: {run_dir}")
 
-    # Create output directory
-    output_path.mkdir(parents=True, exist_ok=True)
-    console.print(f"Results will be saved to: {output_path}")
+    console.print(f"Running {len(tasks)} tasks")
 
     # Create config
     config = EvalConfig(
@@ -244,10 +300,24 @@ def os_interaction(
         base_url=base_url,
         max_turns=max_turns,
         parallel=parallel,
-        output_dir=str(output_path),
+        output_dir=str(run_dir),
         system_prompt_file=system_prompt,
         verbose=verbose,
     )
+
+    # Save run config (only for new runs)
+    if not resume:
+        save_run_config({
+            "model": model,
+            "base_url": base_url,
+            "max_turns": max_turns,
+            "parallel": parallel,
+            "data_path": data_path,
+            "scripts": scripts,
+            "system_prompt": system_prompt,
+            "offset": offset,
+            "limit": limit,
+        }, run_dir)
 
     # Create runner
     runner = EvalRunner(config, scripts_dir=scripts)
@@ -266,21 +336,15 @@ def os_interaction(
         def update_progress(completed: int, total: int) -> None:
             progress.update(task_id, completed=completed)
 
-        # Run evaluation
+        # Run evaluation (results saved incrementally)
         results, metrics = asyncio.run(
-            runner.run_os_tasks(tasks, progress_callback=update_progress)
+            runner.run_os_tasks(tasks, output_dir=run_dir, progress_callback=update_progress)
         )
 
     # Print summary
     console.print()
     console.print(print_summary(metrics))
-
-    # Write results
-    runs_path, overall_path, summary_path = write_results(results, metrics, str(output_path))
-    console.print("\nResults written to:")
-    console.print(f"  {runs_path}")
-    console.print(f"  {overall_path}")
-    console.print(f"  {summary_path}")
+    console.print(f"\nResults saved to: {run_dir}")
 
 
 if __name__ == "__main__":

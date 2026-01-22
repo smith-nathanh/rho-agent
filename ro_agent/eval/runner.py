@@ -1,4 +1,35 @@
-"""Evaluation runner for AgentBench tasks."""
+"""Evaluation runner for AgentBench tasks.
+
+Original AgentBench System Prompts (for reference)
+==================================================
+
+DBBench (from AgentBench/src/server/tasks/dbbench/task.py):
+-----------------------------------------------------------
+I will ask you a question, then you should help me operate a MySQL database with SQL to answer the question.
+You have to explain the problem and your solution to me and write down your thoughts.
+After thinking and explaining thoroughly, every round you can choose to operate or to answer with the two specific tools provided.
+If you should execute a SQL query, use the `execute_sql` function, Your SQL should be in one line.
+Every time you can only execute one SQL statement. I will only execute the statement in the first SQL code block. Every time you write a SQL, I will execute it for you and give you the output.
+If you are done operating, and you want to commit your final answer, then use the `commit_final_answer` function.
+DO NOT use this tool unless you are sure about your answer. I expect an accurate and correct answer.
+Your answer should be accurate. Your answer must be exactly the same as the correct answer.
+If the question is about modifying the database, then after done operation, your answer field can be anything.
+If your response cannot match any pattern I mentioned earlier, you will be judged as FAIL immediately.
+You should always use the tools provided to submit your answer. Be careful not to write it in the content field.
+Your input will be raw MySQL response, you have to deal with it by yourself.
+
+OS-Interaction (from AgentBench/src/server/tasks/os_interaction/task.py):
+-------------------------------------------------------------------------
+You are an assistant that will act like a person. I will play the role of a Linux (Ubuntu) operating system.
+Your goal is to implement the operations required by me or answer the questions proposed by me.
+For each of your turns, you should first think about what you should do, and then call exactly one of the provided tools according to the situation.
+If you think the output is too long, I will truncate it. The truncated output is not complete. You have to deal with the truncating problem by yourself.
+Attention, your bash code should not contain any input operation. Once again, you should use one tool in each turn, and should not respond without function calling.
+Note that if you think the task has been finished, or there is some message missing to completely complete the task, you should respond with calling the function "finish_action", as no additional information will be provided.
+Also, note that if you have gotten the answer to the question, you should call the "answer_action" tool instead of simply writing your answer in your response.
+Your answers should be exact and precise (for example, a single number), do not answer with full sentences or phrases.
+Always use a tool provided instead of simply responding with content.
+"""
 
 import asyncio
 import uuid
@@ -22,6 +53,7 @@ from .docker.container import EvalContainer
 from .docker.mysql_container import MySQLContainer
 from .evaluators.db_evaluator import DBBenchEvaluator
 from .evaluators.os_evaluator import OSEvaluator
+from .output import append_result, update_overall
 from .tasks.dbbench import DBBenchTask, create_sqlite_from_tableinfo
 from .tasks.os_interaction import OSTask
 from .tools.docker_shell import DockerShellHandler
@@ -31,39 +63,30 @@ from .tools.unrestricted_sqlite import UnrestrictedSqliteHandler
 
 
 # System prompts for different task types
-DBBENCH_SYSTEM_PROMPT = """I will ask you a question, then you should help me operate a database with SQL to answer the question.
-You have to explain the problem and your solution to me and write down your thoughts.
-After thinking and explaining thoroughly, every round you can choose to operate or to answer.
+DBBENCH_SYSTEM_PROMPT = """You will answer questions by querying a database with SQL.
 
-If you need to execute a SQL query, use the `execute_sql` tool. Your SQL should be in one line.
-Every time you can only execute one SQL statement. I will execute it for you and give you the output.
-If you are done operating, and you want to commit your final answer, use the `commit_final_answer` tool.
+Tools:
+- `execute_sql`: Run a SQL query (one statement at a time)
+- `commit_final_answer`: Submit your final answer
 
-IMPORTANT RULES:
-- Your answer should be accurate. Your answer must be EXACTLY the same as the correct answer.
-- DO NOT add extra words, units, or explanations to your answer unless they are part of the expected value.
-- If the answer is a number, just return the number. If it includes units in the data, include those exact units.
-- If there is no matching result, answer "none" (just that word, nothing else).
-- For modification queries (INSERT, UPDATE, DELETE), just submit "done" after completing the operation.
-- DO NOT use commit_final_answer unless you are sure about your answer.
-- Your final answer goes in the commit_final_answer tool, not in the text content.
+Answer format:
+- Return the value exactly as it appears in the query result
+- No results: submit "none"
+- Modifications (INSERT/UPDATE/DELETE): submit "done" after completing
+"""
 
-Think step by step and explain your reasoning as you work."""
+OS_SYSTEM_PROMPT = """You will complete tasks in a Linux environment by executing shell commands.
 
-OS_SYSTEM_PROMPT = """You are a Linux system assistant. You will be given a task or question about a Linux system and must solve it by executing shell commands.
+Tools:
+- `bash_action`: Execute a shell command (no interactive input)
+- `answer_action`: Submit your answer
+- `finish_action`: Signal task completion (when no answer is needed)
 
-Available tools:
-- bash_action: Execute a shell command in the Linux environment
-- answer_action: Submit your answer when you have found it
-- finish_action: Indicate the task is complete (for tasks without a specific answer)
-
-Guidelines:
-- Execute commands one at a time to investigate and solve the problem
-- Your answers should be exact and precise (e.g., a number, a filename, a single word)
-- Always use answer_action or finish_action to submit - don't just write the answer in text
-- If output is truncated, adapt your approach to work with partial output
-
-Think step by step about what information you need and how to obtain it."""
+Answer format:
+- Be exact and precise: a number, filename, or single value
+- Do not answer with full sentences
+- Output may be truncated; adjust your approach if needed
+"""
 
 
 class EvalRunner:
@@ -416,7 +439,11 @@ class EvalRunner:
             if task.init_code:
                 await container.run_init(task.init_code)
             if task.init_file:
-                await container.run_init_file(task.init_file)
+                # Resolve init_file relative to scripts_dir
+                init_path = task.init_file
+                if task.scripts_dir:
+                    init_path = str(Path(task.scripts_dir) / task.init_file)
+                await container.run_init_file(init_path)
 
             # Run background start script
             if task.start_script:
@@ -548,12 +575,14 @@ class EvalRunner:
     async def run_dbbench_tasks(
         self,
         tasks: list[DBBenchTask],
+        output_dir: Path | str,
         progress_callback: Any = None,
     ) -> tuple[list[TaskResult], EvalMetrics]:
         """Run multiple DBBench tasks with optional parallelism.
 
         Args:
             tasks: List of tasks to run
+            output_dir: Directory for incremental result saving
             progress_callback: Optional callback(completed, total) for progress
 
         Returns:
@@ -561,6 +590,7 @@ class EvalRunner:
         """
         metrics = EvalMetrics()
         results: list[TaskResult] = []
+        output_dir = Path(output_dir)
 
         # Create semaphore for parallelism
         semaphore = asyncio.Semaphore(self.config.parallel)
@@ -578,6 +608,9 @@ class EvalRunner:
                     result = await coro
                     results.append(result)
 
+                    # Save incrementally
+                    append_result(result, output_dir)
+
                     # Update metrics
                     is_correct = (
                         result.result.is_correct
@@ -585,6 +618,7 @@ class EvalRunner:
                         else False
                     )
                     metrics.add_result(result, is_correct)
+                    update_overall(metrics, output_dir)
 
                     if progress_callback:
                         progress_callback(len(results), len(tasks))
@@ -594,12 +628,16 @@ class EvalRunner:
                     result = await self.run_dbbench_task(task)
                     results.append(result)
 
+                    # Save incrementally
+                    append_result(result, output_dir)
+
                     is_correct = (
                         result.result.is_correct
                         if isinstance(result.result, DBBenchResult)
                         else False
                     )
                     metrics.add_result(result, is_correct)
+                    update_overall(metrics, output_dir)
 
                     if progress_callback:
                         progress_callback(len(results), len(tasks))
@@ -616,12 +654,14 @@ class EvalRunner:
     async def run_os_tasks(
         self,
         tasks: list[OSTask],
+        output_dir: Path | str,
         progress_callback: Any = None,
     ) -> tuple[list[TaskResult], EvalMetrics]:
         """Run multiple OS tasks with optional parallelism.
 
         Args:
             tasks: List of tasks to run
+            output_dir: Directory for incremental result saving
             progress_callback: Optional callback(completed, total) for progress
 
         Returns:
@@ -629,6 +669,7 @@ class EvalRunner:
         """
         metrics = EvalMetrics()
         results: list[TaskResult] = []
+        output_dir = Path(output_dir)
 
         semaphore = asyncio.Semaphore(self.config.parallel)
 
@@ -642,12 +683,16 @@ class EvalRunner:
                 result = await coro
                 results.append(result)
 
+                # Save incrementally
+                append_result(result, output_dir)
+
                 is_correct = (
                     result.result.result
                     if isinstance(result.result, OSResult)
                     else False
                 )
                 metrics.add_result(result, is_correct)
+                update_overall(metrics, output_dir)
 
                 if progress_callback:
                     progress_callback(len(results), len(tasks))
@@ -656,12 +701,16 @@ class EvalRunner:
                 result = await self.run_os_task(task)
                 results.append(result)
 
+                # Save incrementally
+                append_result(result, output_dir)
+
                 is_correct = (
                     result.result.result
                     if isinstance(result.result, OSResult)
                     else False
                 )
                 metrics.add_result(result, is_correct)
+                update_overall(metrics, output_dir)
 
                 if progress_callback:
                     progress_callback(len(results), len(tasks))

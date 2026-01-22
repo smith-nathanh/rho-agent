@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 
 DEFAULT_TIMEOUT = 120  # seconds
+MAX_OUTPUT_LENGTH = 800  # AgentBench truncates at 800 chars
 
 
 class DockerShellHandler(ToolHandler):
@@ -81,6 +82,10 @@ class DockerShellHandler(ToolHandler):
                 output_parts.append(f"[stderr]\n{stderr}")
 
             content = "\n".join(output_parts) if output_parts else "(no output)"
+
+            # Truncate long output (matches AgentBench behavior)
+            if len(content) > MAX_OUTPUT_LENGTH:
+                content = content[:MAX_OUTPUT_LENGTH - 50] + "\n[truncated because the output is too long]"
 
             return ToolOutput(
                 content=content,

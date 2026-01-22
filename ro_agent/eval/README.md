@@ -37,6 +37,7 @@ Options:
   -o, --output TEXT      Output directory for results
   -n, --limit INTEGER    Only run first N tasks
   --offset INTEGER       Skip first N tasks
+  --select-only          Only run SELECT queries (no Docker/MySQL needed)
   --system-prompt TEXT   Path to custom system prompt file
 ```
 
@@ -65,7 +66,16 @@ Options:
 
 ### DBBench Setup
 
-No setup required. DBBench creates temporary SQLite databases automatically.
+**For SELECT queries (most tasks):** No setup required. DBBench creates temporary SQLite databases automatically.
+
+**For mutation queries (INSERT/UPDATE/DELETE):** Requires Docker with MySQL 8. A MySQL container is started automatically when needed.
+
+```bash
+# Pull the MySQL image (done automatically, but you can pre-pull)
+docker pull mysql:8
+```
+
+The MySQL container uses tmpfs for fast ephemeral storage and is cleaned up after the evaluation completes.
 
 ### OS Interaction Setup
 
@@ -105,7 +115,7 @@ local-os/ubuntu     latest    ...
 ### DBBench Flow
 
 1. **Task Loading**: Parses `standard.jsonl` to extract questions, table schemas, and expected answers
-2. **Database Setup**: Creates a temporary SQLite database from the task's table info
+2. **Database Setup**: Creates a temporary SQLite database (SELECT queries) or MySQL database in Docker (mutation queries)
 3. **Agent Execution**: Runs the agent with two tools:
    - `execute_sql`: Run any SQL query (SELECT, INSERT, UPDATE, DELETE)
    - `commit_final_answer`: Submit the final answer
@@ -249,6 +259,13 @@ ro-eval dbbench data/dbbench/standard.jsonl -n 10 -o smoke_test/
 ro-eval os-interaction data/os_interaction/data/dev.json -n 5 -o smoke_test/
 ```
 
+### Run without Docker (SELECT queries only)
+
+```bash
+# Skip mutation tasks - no MySQL/Docker needed
+ro-eval dbbench data/dbbench/standard.jsonl --select-only
+```
+
 ### Run with a different model
 
 ```bash
@@ -312,9 +329,73 @@ ro_agent/eval/
 
 | Feature | AgentBench | ro-agent eval |
 |---------|------------|---------------|
-| Database backend | MySQL | SQLite (in-memory) |
+| Database backend | MySQL | SQLite (SELECT) / MySQL Docker (mutations) |
 | Container runtime | Docker | Docker |
 | Agent framework | Custom | ro-agent core |
 | Parallelism | Multi-process | asyncio + semaphore |
 | Output format | Compatible | Compatible |
 | Check scripts | Python scripts | Built-in + script support |
+
+## Tool Design: Eval vs ro-agent Tools
+
+The eval module uses **separate tool implementations** rather than the main ro-agent tools. This is intentional—the tools serve different purposes and have different interfaces.
+
+### What's Shared
+
+Both eval and ro-agent tools share:
+
+- **Core infrastructure**: `Agent`, `Session`, `ModelClient`, `ToolRegistry` from ro-agent core
+- **Base classes**: `ToolHandler`, `ToolInvocation`, `ToolOutput` from `ro_agent.tools.base`
+- **Utility functions**: `format_rows()`, `DEFAULT_ROW_LIMIT` from `ro_agent.tools.handlers.database`
+
+### Key Divergences
+
+| Aspect | ro-agent Tools | Eval Tools | Why |
+|--------|---------------|------------|-----|
+| **Tool name** | `sqlite`, `mysql` (db_type) | `execute_sql` | AgentBench expects this specific name |
+| **Interface** | Multi-operation: `query`, `list_tables`, `describe`, `export_query` | Single operation: direct SQL execution | Benchmark tasks use direct SQL only |
+| **Inheritance** | Extends `DatabaseHandler` base class | Standalone implementation | Simpler, benchmark-specific |
+| **Read-only** | Enforced via URI mode + SQL pattern checking | Allows INSERT/UPDATE/DELETE | Mutation benchmark tasks require writes |
+| **Approval** | `requires_approval = True` | `requires_approval = False` | No human in eval loop |
+
+### Why the Divergence Exists
+
+**1. AgentBench prescribes a specific tool interface**
+
+The benchmark was designed with a single `execute_sql` tool that takes `{"sql": "..."}` and returns results. The agent interaction looks like:
+
+```
+execute_sql(sql="SELECT Notes FROM ...") → formatted results
+commit_final_answer(answer="Women +60kg Bronze") → submitted
+```
+
+The main ro-agent handlers use a different interface: tool name `sqlite` with `{"operation": "query", "sql": "..."}`. Changing this would break benchmark compatibility with AgentBench's expected format.
+
+**2. Different use cases, different security models**
+
+ro-agent's main database handlers are designed for **human researchers** doing exploratory work:
+- Read-only guarantees protect production databases
+- Multi-operation interface (`describe`, `list_tables`) supports schema exploration
+- Approval required for queries against sensitive data
+
+Eval handlers are designed for **automated benchmarking**:
+- No human in the loop, so no approval workflow
+- Mutation queries are valid benchmark tasks
+- Simpler interface matches benchmark expectations
+
+**3. Shell tools have the same pattern**
+
+| ro-agent | Eval |
+|----------|------|
+| `ShellHandler` with allowlist (~40 safe commands) | `UnrestrictedShellHandler` (any command) |
+| Blocks dangerous patterns (`>`, `rm`, etc.) | `DockerShellHandler` (sandboxed by container) |
+| For safe inspection on real systems | For benchmark tasks in isolated environments |
+
+### Adding New Evals
+
+When adding new evaluation benchmarks:
+
+1. **Check the expected tool interface** — most benchmarks have specific tool names and parameter formats
+2. **Create eval-specific handlers** if the interface differs from ro-agent tools
+3. **Reuse utilities** like `format_rows()` where the logic is genuinely shared
+4. **Keep using ro-agent core** (`Agent`, `Session`, `ToolRegistry`) — the harness and model integration are the same
