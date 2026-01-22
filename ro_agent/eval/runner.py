@@ -71,6 +71,9 @@ Tools:
 
 Answer format:
 - Return the value exactly as it appears in the query result
+- Submit only the specific value(s) requested, not entire rows
+- If the question asks for a single item, return one answer
+- Preserve any units or formatting present in the data
 - No results: submit "none"
 - Modifications (INSERT/UPDATE/DELETE): submit "done" after completing
 """

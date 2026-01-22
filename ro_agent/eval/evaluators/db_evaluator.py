@@ -3,6 +3,7 @@
 Ported from AgentBench's result_processor.py with adaptations for our use case.
 """
 
+import ast
 from typing import Any
 
 
@@ -102,7 +103,7 @@ class DBBenchEvaluator:
             if answer.startswith("[") and answer.endswith("]"):
                 try:
                     # Try eval for Python literal
-                    parsed = eval(answer)
+                    parsed = ast.literal_eval(answer)
                     if isinstance(parsed, list):
                         result = []
                         for item in parsed:
@@ -173,7 +174,7 @@ class DBBenchEvaluator:
             and result.endswith("]")
         ):
             try:
-                parsed = eval(result)
+                parsed = ast.literal_eval(result)
                 if isinstance(parsed, list) and all(
                     isinstance(item, tuple) for item in parsed
                 ):
@@ -277,7 +278,7 @@ class DBBenchEvaluator:
         # Handle "[('hash',)]" format
         if cleaned.startswith("[") and cleaned.endswith(")]"):
             try:
-                parsed = eval(cleaned)
+                parsed = ast.literal_eval(cleaned)
                 if isinstance(parsed, list) and len(parsed) == 1:
                     if isinstance(parsed[0], tuple) and len(parsed[0]) == 1:
                         cleaned = str(parsed[0][0])

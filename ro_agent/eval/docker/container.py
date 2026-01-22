@@ -142,32 +142,24 @@ class EvalContainer:
     async def run_init_file(self, file_path: str) -> None:
         """Run an initialization script file in the container.
 
+        Reads the script content from host and runs it in the container
+        via docker exec (matching AgentBench's approach).
+
         Args:
-            file_path: Path to script file (copied to container)
+            file_path: Path to script file on host
         """
         if not file_path:
             return
 
-        # Copy file to container
-        copy_cmd = [
-            "docker",
-            "cp",
-            file_path,
-            f"{self._container_id}:/tmp/init_script.sh",
-        ]
+        # Read script content from host
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                script_content = f.read()
+        except FileNotFoundError:
+            raise RuntimeError(f"Init script file not found: {file_path}")
 
-        proc = await asyncio.create_subprocess_exec(
-            *copy_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await proc.communicate()
-
-        if proc.returncode != 0:
-            raise RuntimeError("Failed to copy init script to container")
-
-        # Run the script
-        await self.execute("chmod +x /tmp/init_script.sh && /tmp/init_script.sh")
+        # Run script content in container via docker exec
+        await self.run_init(script_content)
 
     async def run_background(self, script: str) -> None:
         """Run a script as a background process.

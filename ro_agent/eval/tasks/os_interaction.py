@@ -230,8 +230,11 @@ def parse_evaluation_config(eval_data: dict[str, Any]) -> EvaluationConfig:
             )
         elif isinstance(check_data, list):
             # Multiple check scripts or [null, script] format
+            # null means "run example script to get expected value"
             for item in check_data:
                 if item is None:
+                    # Create empty CheckScript to trigger example script in evaluator
+                    check_scripts.append(CheckScript(file=""))
                     continue
                 if isinstance(item, dict):
                     check_scripts.append(

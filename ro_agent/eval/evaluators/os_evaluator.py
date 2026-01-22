@@ -1,6 +1,5 @@
 """OS Interaction evaluation logic."""
 
-import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -219,8 +218,7 @@ class OSEvaluator:
         import base64
 
         if not container:
-            # Fallback to local execution
-            return self._run_local_check_chained(params, script_path)
+            raise RuntimeError("Container required to run check scripts - refusing to run on host")
 
         script_ext = script_path.suffix.lower()
         script_content = script_path.read_text()
@@ -244,33 +242,6 @@ class OSEvaluator:
 
         exit_code, stdout, stderr = await container.execute(cmd, timeout=60)
         return exit_code == 0, stdout.strip() if stdout else ""
-
-    def _run_local_check_chained(
-        self, params: list[str], script_path: Path
-    ) -> tuple[bool, str]:
-        """Fallback: run check script locally with params."""
-        try:
-            script_ext = script_path.suffix.lower()
-
-            if script_ext == ".py":
-                result = subprocess.run(
-                    ["python3", str(script_path)] + params,
-                    capture_output=True,
-                    timeout=30,
-                )
-                return result.returncode == 0, result.stdout.decode().strip()
-
-            if script_ext == ".sh":
-                result = subprocess.run(
-                    ["bash", str(script_path)] + params,
-                    capture_output=True,
-                    timeout=30,
-                )
-                return result.returncode == 0, result.stdout.decode().strip()
-
-            return False, ""
-        except Exception:
-            return False, ""
 
     def _run_builtin_check(self, answer: str, expected: str, script_name: str) -> bool:
         """Run built-in check implementations."""

@@ -314,7 +314,6 @@ ro_agent/eval/
 ├── tools/
 │   ├── submit_answer.py   # commit_final_answer, answer_action, finish_action
 │   ├── unrestricted_sqlite.py  # SQL execution without read-only limits
-│   ├── unrestricted_shell.py   # Shell without command allowlist
 │   └── docker_shell.py    # Shell execution in Docker container
 │
 ├── evaluators/
@@ -387,8 +386,8 @@ Eval handlers are designed for **automated benchmarking**:
 
 | ro-agent | Eval |
 |----------|------|
-| `ShellHandler` with allowlist (~40 safe commands) | `UnrestrictedShellHandler` (any command) |
-| Blocks dangerous patterns (`>`, `rm`, etc.) | `DockerShellHandler` (sandboxed by container) |
+| `ShellHandler` with allowlist (~40 safe commands) | `DockerShellHandler` (sandboxed by container) |
+| Blocks dangerous patterns (`>`, `rm`, etc.) | Any command allowed inside container |
 | For safe inspection on real systems | For benchmark tasks in isolated environments |
 
 ### Adding New Evals
