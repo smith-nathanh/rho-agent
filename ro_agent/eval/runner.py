@@ -43,6 +43,7 @@ from ro_agent.tools.registry import ToolRegistry
 
 from .config import (
     DBBenchResult,
+    EvalAbortedError,
     EvalConfig,
     EvalMetrics,
     OSResult,
@@ -281,13 +282,10 @@ class EvalRunner:
             await mysql.create_database(db_name)
 
             # Create tool registry with MySQL handler
-            conn_info = mysql.get_connection_info()
             handler = UnrestrictedMySQLHandler(
-                host=conn_info["host"],
-                port=conn_info["port"],
-                user=conn_info["user"],
-                password=conn_info["password"],
+                container_id=mysql.container_id,
                 database=db_name,
+                password=mysql.PASSWORD,
             )
 
             # Initialize table with data
@@ -353,7 +351,7 @@ class EvalRunner:
                 status = TaskStatus.TASK_LIMIT_REACHED
 
             # For mutations, calculate table hash and compare to answer_md5
-            table_hash = handler.calculate_table_hash(
+            table_hash = await handler.calculate_table_hash(
                 task.table_info.to_dict(),
                 task.table_name,
             )
@@ -411,16 +409,36 @@ class EvalRunner:
             arguments={"sql": create_sql},
         ))
 
-        # Insert rows
+        # Insert rows in batches via docker exec
         if task.table_info.rows:
             col_names = ", ".join(f"`{col['name']}`" for col in task.table_info.columns)
-            placeholders = ", ".join("%s" for _ in task.table_info.columns)
-            insert_sql = f"INSERT INTO `{task.table_name}` ({col_names}) VALUES ({placeholders})"
 
-            conn = handler._get_connection()
-            cursor = conn.cursor()
-            cursor.executemany(insert_sql, task.table_info.rows)
-            conn.commit()
+            # Build INSERT with multiple VALUES for efficiency
+            # Process in batches to avoid command line length limits
+            batch_size = 100
+            for i in range(0, len(task.table_info.rows), batch_size):
+                batch = task.table_info.rows[i : i + batch_size]
+                values_list = []
+                for row in batch:
+                    escaped_values = []
+                    for val in row:
+                        if val is None:
+                            escaped_values.append("NULL")
+                        elif isinstance(val, (int, float)):
+                            escaped_values.append(str(val))
+                        else:
+                            # Escape single quotes for SQL
+                            escaped = str(val).replace("\\", "\\\\").replace("'", "\\'")
+                            escaped_values.append(f"'{escaped}'")
+                    values_list.append(f"({', '.join(escaped_values)})")
+
+                insert_sql = f"INSERT INTO `{task.table_name}` ({col_names}) VALUES {', '.join(values_list)}"
+
+                await handler.handle(ToolInvocation(
+                    call_id=f"init_insert_{i}",
+                    tool_name="execute_sql",
+                    arguments={"sql": insert_sql},
+                ))
 
     async def run_os_task(self, task: OSTask) -> TaskResult:
         """Run a single OS Interaction task.
@@ -590,10 +608,15 @@ class EvalRunner:
 
         Returns:
             Tuple of (results list, aggregate metrics)
+
+        Raises:
+            EvalAbortedError: If max_consecutive_errors task errors occur in a row
         """
         metrics = EvalMetrics()
         results: list[TaskResult] = []
         output_dir = Path(output_dir)
+        consecutive_errors = 0
+        last_error: str | None = None
 
         # Create semaphore for parallelism
         semaphore = asyncio.Semaphore(self.config.parallel)
@@ -601,6 +624,22 @@ class EvalRunner:
         async def run_with_semaphore(task: DBBenchTask) -> TaskResult:
             async with semaphore:
                 return await self.run_dbbench_task(task)
+
+        def check_consecutive_errors(result: TaskResult) -> None:
+            """Check for consecutive errors and raise if threshold exceeded."""
+            nonlocal consecutive_errors, last_error
+
+            if result.status == TaskStatus.TASK_ERROR:
+                consecutive_errors += 1
+                last_error = result.error
+                if consecutive_errors >= self.config.max_consecutive_errors:
+                    raise EvalAbortedError(
+                        f"Aborting: {consecutive_errors} consecutive task errors. "
+                        f"Last error: {last_error}",
+                        consecutive_errors,
+                    )
+            else:
+                consecutive_errors = 0
 
         try:
             # Run tasks
@@ -623,6 +662,9 @@ class EvalRunner:
                     metrics.add_result(result, is_correct)
                     update_overall(metrics, output_dir)
 
+                    # Check for consecutive errors (less reliable in parallel mode)
+                    check_consecutive_errors(result)
+
                     if progress_callback:
                         progress_callback(len(results), len(tasks))
             else:
@@ -641,6 +683,9 @@ class EvalRunner:
                     )
                     metrics.add_result(result, is_correct)
                     update_overall(metrics, output_dir)
+
+                    # Check for consecutive errors
+                    check_consecutive_errors(result)
 
                     if progress_callback:
                         progress_callback(len(results), len(tasks))
@@ -669,16 +714,37 @@ class EvalRunner:
 
         Returns:
             Tuple of (results list, aggregate metrics)
+
+        Raises:
+            EvalAbortedError: If max_consecutive_errors task errors occur in a row
         """
         metrics = EvalMetrics()
         results: list[TaskResult] = []
         output_dir = Path(output_dir)
+        consecutive_errors = 0
+        last_error: str | None = None
 
         semaphore = asyncio.Semaphore(self.config.parallel)
 
         async def run_with_semaphore(task: OSTask) -> TaskResult:
             async with semaphore:
                 return await self.run_os_task(task)
+
+        def check_consecutive_errors(result: TaskResult) -> None:
+            """Check for consecutive errors and raise if threshold exceeded."""
+            nonlocal consecutive_errors, last_error
+
+            if result.status == TaskStatus.TASK_ERROR:
+                consecutive_errors += 1
+                last_error = result.error
+                if consecutive_errors >= self.config.max_consecutive_errors:
+                    raise EvalAbortedError(
+                        f"Aborting: {consecutive_errors} consecutive task errors. "
+                        f"Last error: {last_error}",
+                        consecutive_errors,
+                    )
+            else:
+                consecutive_errors = 0
 
         if self.config.parallel > 1:
             pending = [run_with_semaphore(task) for task in tasks]
@@ -697,6 +763,9 @@ class EvalRunner:
                 metrics.add_result(result, is_correct)
                 update_overall(metrics, output_dir)
 
+                # Check for consecutive errors (less reliable in parallel mode)
+                check_consecutive_errors(result)
+
                 if progress_callback:
                     progress_callback(len(results), len(tasks))
         else:
@@ -714,6 +783,9 @@ class EvalRunner:
                 )
                 metrics.add_result(result, is_correct)
                 update_overall(metrics, output_dir)
+
+                # Check for consecutive errors
+                check_consecutive_errors(result)
 
                 if progress_callback:
                     progress_callback(len(results), len(tasks))

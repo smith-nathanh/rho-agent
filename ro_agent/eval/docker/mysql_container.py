@@ -26,6 +26,11 @@ class MySQLContainer:
         """Check if the container is running."""
         return self._container_id is not None
 
+    @property
+    def container_id(self) -> str | None:
+        """Get the container ID."""
+        return self._container_id
+
     async def start(self) -> None:
         """Start the MySQL container and wait for it to be healthy."""
         if self._container_id:

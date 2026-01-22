@@ -21,7 +21,7 @@ import typer  # noqa: E402
 from rich.console import Console  # noqa: E402
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn  # noqa: E402
 
-from .config import EvalConfig  # noqa: E402
+from .config import EvalAbortedError, EvalConfig  # noqa: E402
 from .output import (  # noqa: E402
     create_run_dir,
     get_completed_indices,
@@ -176,9 +176,15 @@ def dbbench(
             progress.update(task_id, completed=completed)
 
         # Run evaluation (results saved incrementally)
-        results, metrics = asyncio.run(
-            runner.run_dbbench_tasks(tasks, output_dir=run_dir, progress_callback=update_progress)
-        )
+        try:
+            results, metrics = asyncio.run(
+                runner.run_dbbench_tasks(tasks, output_dir=run_dir, progress_callback=update_progress)
+            )
+        except EvalAbortedError as e:
+            console.print()
+            console.print(f"[red bold]Evaluation aborted:[/red bold] {e}")
+            console.print(f"\nPartial results saved to: {run_dir}")
+            raise typer.Exit(1)
 
     # Print summary
     console.print()
@@ -337,9 +343,15 @@ def os_interaction(
             progress.update(task_id, completed=completed)
 
         # Run evaluation (results saved incrementally)
-        results, metrics = asyncio.run(
-            runner.run_os_tasks(tasks, output_dir=run_dir, progress_callback=update_progress)
-        )
+        try:
+            results, metrics = asyncio.run(
+                runner.run_os_tasks(tasks, output_dir=run_dir, progress_callback=update_progress)
+            )
+        except EvalAbortedError as e:
+            console.print()
+            console.print(f"[red bold]Evaluation aborted:[/red bold] {e}")
+            console.print(f"\nPartial results saved to: {run_dir}")
+            raise typer.Exit(1)
 
     # Print summary
     console.print()

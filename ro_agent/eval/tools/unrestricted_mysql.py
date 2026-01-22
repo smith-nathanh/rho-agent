@@ -2,50 +2,45 @@
 
 Used for DBBench evaluation where the agent needs to execute mutations
 and we need to calculate table hashes for evaluation.
+
+All SQL execution happens via `docker exec` - no ports are exposed and
+everything runs inside the container for full isolation.
 """
 
+import asyncio
+import re
 from typing import Any
 
-import mysql.connector
-from mysql.connector import Error as MySQLError
-
 from ro_agent.tools.base import ToolHandler, ToolInvocation, ToolOutput
-from ro_agent.tools.handlers.database import format_rows, DEFAULT_ROW_LIMIT
+from ro_agent.tools.handlers.database import DEFAULT_ROW_LIMIT
 
 
 class UnrestrictedMySQLHandler(ToolHandler):
     """MySQL handler for DBBench evaluation.
 
-    Allows all SQL operations and provides hash calculation for
-    mutation query verification.
+    Executes all SQL via `docker exec` for full container isolation.
+    No ports are exposed to the host.
     """
 
     def __init__(
         self,
-        host: str,
-        port: int,
-        user: str,
-        password: str,
+        container_id: str,
         database: str,
+        password: str = "evalpass",
         row_limit: int = DEFAULT_ROW_LIMIT,
     ) -> None:
         """Initialize the MySQL handler.
 
         Args:
-            host: MySQL server host
-            port: MySQL server port
-            user: MySQL username
-            password: MySQL password
+            container_id: Docker container ID running MySQL
             database: Database name to use
+            password: MySQL root password
             row_limit: Maximum number of rows to return in query results
         """
-        self._host = host
-        self._port = port
-        self._user = user
-        self._password = password
+        self._container_id = container_id
         self._database = database
+        self._password = password
         self._row_limit = row_limit
-        self._connection = None
 
     @property
     def name(self) -> str:
@@ -76,48 +71,120 @@ class UnrestrictedMySQLHandler(ToolHandler):
     def requires_approval(self) -> bool:
         return False
 
-    def _get_connection(self):
-        """Get or create database connection."""
-        if self._connection is None or not self._connection.is_connected():
-            self._connection = mysql.connector.connect(
-                host=self._host,
-                port=self._port,
-                user=self._user,
-                password=self._password,
-                database=self._database,
-            )
-        return self._connection
-
     def close(self) -> None:
-        """Close the database connection."""
-        if self._connection is not None:
-            try:
-                self._connection.close()
-            except Exception:
-                pass
-            self._connection = None
+        """No-op for docker exec based handler."""
+        pass
+
+    async def _exec_sql(self, sql: str, database: str | None = None) -> tuple[int, str, str]:
+        """Execute SQL via docker exec.
+
+        Args:
+            sql: SQL query to execute
+            database: Database to use (defaults to self._database)
+
+        Returns:
+            Tuple of (return_code, stdout, stderr)
+        """
+        db = database or self._database
+        cmd = [
+            "docker",
+            "exec",
+            self._container_id,
+            "mysql",
+            "-u",
+            "root",
+            f"-p{self._password}",
+            "-D",
+            db,
+            "-e",
+            sql,
+        ]
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        stdout, stderr = await proc.communicate()
+        return (
+            proc.returncode or 0,
+            stdout.decode("utf-8", errors="replace"),
+            stderr.decode("utf-8", errors="replace"),
+        )
+
+    def _parse_mysql_output(self, output: str) -> tuple[list[str], list[list[str]]]:
+        """Parse MySQL tabular output into columns and rows.
+
+        Args:
+            output: Raw MySQL output (tab-separated with header row)
+
+        Returns:
+            Tuple of (column_names, rows)
+        """
+        lines = output.strip().split("\n")
+        if not lines:
+            return [], []
+
+        # First line is headers (tab-separated)
+        columns = lines[0].split("\t")
+
+        # Remaining lines are data rows
+        rows = []
+        for line in lines[1:]:
+            if line.strip():
+                rows.append(line.split("\t"))
+
+        return columns, rows
+
+    def _format_rows(self, columns: list[str], rows: list[list[str]]) -> str:
+        """Format rows for display."""
+        if not rows:
+            return "No results returned."
+
+        # Truncate if needed
+        truncated = len(rows) > self._row_limit
+        display_rows = rows[: self._row_limit]
+
+        # Build output
+        lines = []
+        lines.append(" | ".join(columns))
+        lines.append("-" * len(lines[0]))
+        for row in display_rows:
+            lines.append(" | ".join(str(v) for v in row))
+
+        if truncated:
+            lines.append(f"... ({len(rows) - self._row_limit} more rows)")
+
+        return "\n".join(lines)
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
-        """Execute the SQL query."""
+        """Execute the SQL query via docker exec."""
         sql = invocation.arguments.get("sql", "").strip()
 
         if not sql:
             return ToolOutput(content="No SQL query provided", success=False)
 
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(sql)
+        returncode, stdout, stderr = await self._exec_sql(sql)
 
-            # Check if this is a SELECT query (has results)
-            if cursor.description is not None:
-                columns = [col[0] for col in cursor.description]
-                rows = cursor.fetchall()
+        # Filter out password warning from stderr
+        stderr_filtered = "\n".join(
+            line for line in stderr.split("\n")
+            if "Using a password on the command line" not in line
+        ).strip()
 
-                # Limit rows
-                rows = rows[: self._row_limit + 1]
-                content = format_rows(columns, rows, self._row_limit)
+        if returncode != 0:
+            error_msg = stderr_filtered or stdout or "Unknown error"
+            return ToolOutput(
+                content=f"SQL error: {error_msg}",
+                success=False,
+            )
 
+        # Check if this looks like a SELECT result (has output with columns)
+        if stdout.strip():
+            columns, rows = self._parse_mysql_output(stdout)
+            if columns:
+                content = self._format_rows(columns, rows)
                 return ToolOutput(
                     content=content,
                     success=True,
@@ -127,29 +194,20 @@ class UnrestrictedMySQLHandler(ToolHandler):
                         "truncated": len(rows) > self._row_limit,
                     },
                 )
-            else:
-                # Non-SELECT query (INSERT, UPDATE, DELETE)
-                conn.commit()
-                rows_affected = cursor.rowcount
 
-                return ToolOutput(
-                    content=f"Query executed successfully. Rows affected: {rows_affected}",
-                    success=True,
-                    metadata={"rows_affected": rows_affected},
-                )
+        # Non-SELECT query (INSERT, UPDATE, DELETE) or empty result
+        # Try to extract rows affected from output
+        rows_affected = 0
+        if match := re.search(r"(\d+) rows? affected", stdout + stderr):
+            rows_affected = int(match.group(1))
 
-        except MySQLError as e:
-            return ToolOutput(
-                content=f"SQL error: {e}",
-                success=False,
-            )
-        except Exception as e:
-            return ToolOutput(
-                content=f"Error executing query: {e}",
-                success=False,
-            )
+        return ToolOutput(
+            content=f"Query executed successfully. Rows affected: {rows_affected}",
+            success=True,
+            metadata={"rows_affected": rows_affected},
+        )
 
-    def calculate_table_hash(self, table_info: dict, table_name: str) -> str | None:
+    async def calculate_table_hash(self, table_info: dict, table_name: str) -> str | None:
         """Calculate MD5 hash of table state for mutation verification.
 
         Uses the same algorithm as AgentBench to compute a hash of all rows
@@ -163,19 +221,11 @@ class UnrestrictedMySQLHandler(ToolHandler):
             MD5 hash string, or None if calculation fails
         """
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-
             # Build column list for CONCAT_WS
             columns = [f"`{col['name']}`" for col in table_info["columns"]]
             columns_str = ", ".join(columns)
 
-            # AgentBench hash query:
-            # SELECT MD5(GROUP_CONCAT(rowhash ORDER BY rowhash)) AS hash
-            # FROM (
-            #     SELECT SUBSTRING(MD5(CONCAT_WS(',', col1, col2, ...)), 1, 5) AS rowhash
-            #     FROM `table_name`
-            # ) AS sub
+            # AgentBench hash query
             query = (
                 f"SELECT MD5(GROUP_CONCAT(rowhash ORDER BY rowhash)) AS hash "
                 f"FROM ("
@@ -184,11 +234,16 @@ class UnrestrictedMySQLHandler(ToolHandler):
                 f") AS sub"
             )
 
-            cursor.execute(query)
-            result = cursor.fetchone()
+            returncode, stdout, stderr = await self._exec_sql(query)
 
-            if result and result[0]:
-                return result[0]
+            if returncode != 0:
+                return None
+
+            # Parse the result - should be "hash\n<value>"
+            columns, rows = self._parse_mysql_output(stdout)
+            if rows and rows[0]:
+                return rows[0][0]
+
             return None
 
         except Exception:

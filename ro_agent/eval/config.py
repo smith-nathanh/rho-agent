@@ -18,6 +18,14 @@ class TaskStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
+class EvalAbortedError(Exception):
+    """Raised when evaluation is aborted due to consecutive errors."""
+
+    def __init__(self, message: str, consecutive_errors: int):
+        super().__init__(message)
+        self.consecutive_errors = consecutive_errors
+
+
 @dataclass
 class EvalConfig:
     """Configuration for running evaluations."""
@@ -29,6 +37,7 @@ class EvalConfig:
     output_dir: str | None = None
     system_prompt_file: str | None = None
     verbose: bool = False
+    max_consecutive_errors: int = 5  # Abort after this many consecutive task errors
 
 
 @dataclass
