@@ -19,24 +19,20 @@ import sys
 
 from dotenv import load_dotenv
 
-# Load .env file from current directory or parent directories
-load_dotenv()
-
 from ro_agent.client.model import ModelClient
 from ro_agent.core.agent import Agent
 from ro_agent.core.session import Session
-from ro_agent.tools.registry import ToolRegistry
-
-# Import Harbor tools (unrestricted, for sandboxed containers)
 from ro_agent.harbor.tools import BashHandler, EditFileHandler, WriteFileHandler
-
-# Import read-only tools (unchanged)
 from ro_agent.tools.handlers import (
     FindFilesHandler,
     ListDirHandler,
     ReadFileHandler,
     SearchHandler,
 )
+from ro_agent.tools.registry import ToolRegistry
+
+# Load .env file from current directory or parent directories
+load_dotenv()
 
 SYSTEM_PROMPT = """\
 You are an AI agent that completes tasks in a Linux environment.
