@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from openai import AsyncOpenAI, APITimeoutError, APIConnectionError
+from openai import AsyncOpenAI
 
 
 @dataclass
