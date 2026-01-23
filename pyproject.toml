@@ -27,6 +27,11 @@ ro-eval = "ro_agent.eval.cli:app"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[project.optional-dependencies]
+# Harbor integration for TerminalBench evaluation
+# Install harbor from: https://github.com/laude-institute/harbor
+harbor = []  # Harbor is installed separately via pip install -e ~/proj/harbor
+
 [dependency-groups]
 dev = [
     "ruff>=0.14.10",

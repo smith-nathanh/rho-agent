@@ -598,6 +598,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.21.0" },
     { name = "vertica-python", specifier = ">=1.4.0" },
 ]
+provides-extras = ["harbor"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "ruff", specifier = ">=0.14.10" }]
