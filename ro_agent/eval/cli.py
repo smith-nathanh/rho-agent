@@ -52,7 +52,7 @@ def dbbench(
     model: Annotated[
         str,
         typer.Option("--model", "-m", help="Model to use"),
-    ] = os.getenv("OPENAI_MODEL", "gpt-4o"),
+    ] = os.getenv("OPENAI_MODEL", "gpt-5-mini"),
     base_url: Annotated[
         Optional[str],
         typer.Option("--base-url", help="API base URL for OpenAI-compatible endpoints"),
@@ -218,7 +218,7 @@ def os_interaction(
     model: Annotated[
         str,
         typer.Option("--model", "-m", help="Model to use"),
-    ] = os.getenv("OPENAI_MODEL", "gpt-4o"),
+    ] = os.getenv("OPENAI_MODEL", "gpt-5-mini"),
     base_url: Annotated[
         Optional[str],
         typer.Option("--base-url", help="API base URL for OpenAI-compatible endpoints"),

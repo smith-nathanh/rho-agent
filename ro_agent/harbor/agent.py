@@ -72,28 +72,41 @@ class RoAgent(BaseAgent):
         """
         self.logger.info("Setting up ro-agent in container...")
 
-        # Install ro-agent from the mounted source directory
-        # The Harbor job config should mount the ro-agent source at /ro-agent
-        result = await environment.exec(
-            "pip install -e /ro-agent",
-            timeout_sec=120,
+        # Find ro-agent source directory (go up from this file)
+        ro_agent_root = Path(__file__).parent.parent.parent
+        self.logger.info(f"Uploading ro-agent from {ro_agent_root}")
+
+        # Upload ro-agent source to container
+        await environment.upload_dir(ro_agent_root, "/ro-agent")
+
+        # Verify upload
+        result = await environment.exec("ls -la /ro-agent", timeout_sec=10)
+        self.logger.info(f"Upload check: {result.stdout}")
+
+        # Install curl if needed (for uv installer)
+        await environment.exec(
+            "command -v curl || (apt-get update && apt-get install -y curl)",
+            timeout_sec=60,
         )
 
-        if result.returncode != 0:
-            self.logger.warning(
-                f"Failed to install from /ro-agent: {result.stderr}. "
-                "Trying current directory..."
-            )
-            # Fallback: try installing from current directory
-            result = await environment.exec(
-                "pip install -e .",
-                timeout_sec=120,
+        # Install uv if not available
+        result = await environment.exec("command -v uv", timeout_sec=10)
+        if result.return_code != 0:
+            self.logger.info("Installing uv...")
+            await environment.exec(
+                "curl -LsSf https://astral.sh/uv/install.sh | sh",
+                timeout_sec=60,
             )
 
-        if result.returncode == 0:
-            self.logger.info("ro-agent installed successfully")
-        else:
-            self.logger.error(f"Failed to install ro-agent: {result.stderr}")
+        # Sync ro-agent dependencies using uv (handles Python + deps automatically)
+        self.logger.info("Syncing ro-agent dependencies...")
+        result = await environment.exec(
+            'export PATH="$HOME/.local/bin:$PATH" && cd /ro-agent && uv sync',
+            timeout_sec=180,
+        )
+        self.logger.info(f"uv sync: rc={result.return_code}")
+        if result.return_code != 0:
+            self.logger.error(f"uv sync failed: {result.stdout}")
 
     async def run(
         self,
@@ -112,9 +125,14 @@ class RoAgent(BaseAgent):
         escaped = shlex.quote(instruction)
 
         # Build environment variables
+        # Strip provider prefix from model name (e.g., "openai/gpt-5-mini" -> "gpt-5-mini")
+        model = self.model_name or os.environ.get("RO_AGENT_MODEL", "gpt-5-mini")
+        if "/" in model:
+            model = model.split("/", 1)[1]
+
         env = {
             "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", ""),
-            "RO_AGENT_MODEL": self.model_name or os.environ.get("RO_AGENT_MODEL", "gpt-5-mini"),
+            "RO_AGENT_MODEL": model,
             "RO_AGENT_MAX_TURNS": os.environ.get("RO_AGENT_MAX_TURNS", "50"),
         }
 
@@ -125,10 +143,10 @@ class RoAgent(BaseAgent):
 
         self.logger.info(f"Running ro-agent with model: {env['RO_AGENT_MODEL']}")
 
-        # Run ro-agent in the container
+        # Run ro-agent in the container using uv run
+        # Source the .env file to get OPENAI_API_KEY, then cd to /app for task execution
         result = await environment.exec(
-            f"python -m ro_agent.harbor.runner {escaped}",
-            cwd="/app",
+            f'set -a && source /ro-agent/.env && set +a && export PATH="$HOME/.local/bin:$PATH" && cd /app && /ro-agent/.venv/bin/python -m ro_agent.harbor.runner {escaped} /app',
             timeout_sec=self._agent_timeout_sec,
             env=env,
         )

@@ -108,7 +108,7 @@ Each supports `list_tables`, `describe`, `query`, and `export_query` (export res
 # .env
 OPENAI_API_KEY=your-key
 OPENAI_BASE_URL=http://localhost:8000/v1  # optional
-OPENAI_MODEL=gpt-4o                        # optional
+OPENAI_MODEL=gpt-5-mini                        # optional
 ```
 
 ### Conversations

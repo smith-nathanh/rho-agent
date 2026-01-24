@@ -16,6 +16,7 @@ Environment variables:
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -31,8 +32,15 @@ from ro_agent.tools.handlers import (
 )
 from ro_agent.tools.registry import ToolRegistry
 
-# Load .env file from current directory or parent directories
-load_dotenv()
+# Load .env file - try multiple locations
+# 1. Current directory
+# 2. ro-agent package root (where this file lives, up 3 levels)
+# 3. /ro-agent (Harbor container mount point)
+_pkg_root = Path(__file__).parent.parent.parent
+for env_path in [Path.cwd() / ".env", _pkg_root / ".env", Path("/ro-agent/.env")]:
+    if env_path.exists():
+        load_dotenv(env_path)
+        break
 
 SYSTEM_PROMPT = """\
 You are an AI agent that completes tasks in a Linux environment.

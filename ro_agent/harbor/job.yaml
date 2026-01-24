@@ -1,8 +1,12 @@
 # Harbor job configuration for ro-agent on TerminalBench
 #
+# Setup (one-time):
+#   cd ~/proj/harbor
+#   uv pip install -e ~/proj/ro-agent
+#
 # Run with:
 #   cd ~/proj/harbor
-#   harbor run --config ~/proj/ro-agent/ro_agent/harbor/job.yaml --task hello-world
+#   uv run harbor run --config ~/proj/ro-agent/ro_agent/harbor/job.yaml --path examples/tasks --task-name hello-world
 
 jobs_dir: jobs
 n_attempts: 1
@@ -17,6 +21,7 @@ environment:
   type: docker
   force_build: false
   delete: true
+  override_gpus: 0  # We use API, no local GPU needed
   # Mount ro-agent source into container for installation
   mounts:
     - source: /Users/nate/proj/ro-agent
@@ -26,7 +31,7 @@ environment:
 agents:
   - import_path: ro_agent.harbor.agent:RoAgent
     # Optional: specify model via model_name parameter
-    # model_name: openai/gpt-5-mini
+    model_name: openai/gpt-5-mini
 
 datasets:
   # Use Harbor's example tasks for testing

@@ -30,7 +30,7 @@ class EvalAbortedError(Exception):
 class EvalConfig:
     """Configuration for running evaluations."""
 
-    model: str = "gpt-4o"
+    model: str = "gpt-5-mini"
     base_url: str | None = None
     max_turns: int = 20
     parallel: int = 1

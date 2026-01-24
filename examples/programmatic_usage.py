@@ -132,7 +132,7 @@ Here is context to work with:
     registry = ToolRegistry()  # No tools registered
 
     client = ModelClient(
-        model=os.environ.get("OPENAI_MODEL", "gpt-4o"),
+        model=os.environ.get("OPENAI_MODEL", "gpt-5-mini"),
         base_url=os.environ.get("OPENAI_BASE_URL"),
     )
 
