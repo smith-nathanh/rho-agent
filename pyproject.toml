@@ -36,5 +36,7 @@ harbor = []  # Harbor is installed separately via pip install -e ~/proj/harbor
 
 [dependency-groups]
 dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
     "ruff>=0.14.10",
 ]

@@ -1,10 +1,16 @@
-"""Unrestricted MySQL handler for evaluation tasks.
+"""MySQL handler for AgentBench evaluation tasks.
 
-Used for DBBench evaluation where the agent needs to execute mutations
-and we need to calculate table hashes for evaluation.
+This handler executes all SQL via `docker exec` for full container isolation -
+no MySQL ports are exposed to the host. This is more secure than the standard
+MysqlHandler which connects via network.
 
-All SQL execution happens via `docker exec` - no ports are exposed and
-everything runs inside the container for full isolation.
+Key differences from standard MysqlHandler:
+1. Tool name: 'execute_sql' (AgentBench) vs 'mysql' (standard)
+2. Execution: docker exec (isolated) vs network connection
+3. Has calculate_table_hash() for mutation verification (eval-specific)
+4. No approval required (sandboxed environment)
+
+See runner.py for why eval uses custom handlers.
 """
 
 import asyncio
@@ -15,11 +21,12 @@ from ro_agent.tools.base import ToolHandler, ToolInvocation, ToolOutput
 from ro_agent.tools.handlers.database import DEFAULT_ROW_LIMIT
 
 
-class UnrestrictedMySQLHandler(ToolHandler):
-    """MySQL handler for DBBench evaluation.
+class EvalMySQLHandler(ToolHandler):
+    """MySQL handler for DBBench evaluation tasks.
 
     Executes all SQL via `docker exec` for full container isolation.
-    No ports are exposed to the host.
+    No ports are exposed to the host, making this more secure than
+    network-based connections.
     """
 
     def __init__(
@@ -69,7 +76,7 @@ class UnrestrictedMySQLHandler(ToolHandler):
 
     @property
     def requires_approval(self) -> bool:
-        return False
+        return False  # No approval needed for sandboxed eval tasks
 
     def close(self) -> None:
         """No-op for docker exec based handler."""
@@ -100,18 +107,23 @@ class UnrestrictedMySQLHandler(ToolHandler):
             sql,
         ]
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
 
-        stdout, stderr = await proc.communicate()
-        return (
-            proc.returncode or 0,
-            stdout.decode("utf-8", errors="replace"),
-            stderr.decode("utf-8", errors="replace"),
-        )
+            stdout, stderr = await proc.communicate()
+            return (
+                proc.returncode or 0,
+                stdout.decode("utf-8", errors="replace"),
+                stderr.decode("utf-8", errors="replace"),
+            )
+        except FileNotFoundError:
+            return (1, "", "Docker command not found. Is Docker installed?")
+        except Exception as e:
+            return (1, "", f"Error executing docker command: {e}")
 
     def _parse_mysql_output(self, output: str) -> tuple[list[str], list[list[str]]]:
         """Parse MySQL tabular output into columns and rows.
@@ -146,12 +158,22 @@ class UnrestrictedMySQLHandler(ToolHandler):
         truncated = len(rows) > self._row_limit
         display_rows = rows[: self._row_limit]
 
+        # Calculate column widths (cap at 50 for readability)
+        widths = [min(len(col), 50) for col in columns]
+        for row in display_rows:
+            for i, val in enumerate(row):
+                if i < len(widths):
+                    widths[i] = min(max(widths[i], len(str(val))), 50)
+
         # Build output
         lines = []
-        lines.append(" | ".join(columns))
-        lines.append("-" * len(lines[0]))
+        lines.append(" | ".join(col.ljust(widths[i])[:widths[i]] for i, col in enumerate(columns)))
+        lines.append("-+-".join("-" * w for w in widths))
         for row in display_rows:
-            lines.append(" | ".join(str(v) for v in row))
+            lines.append(" | ".join(
+                str(v).ljust(widths[i])[:widths[i]] if i < len(widths) else str(v)
+                for i, v in enumerate(row)
+            ))
 
         if truncated:
             lines.append(f"... ({len(rows) - self._row_limit} more rows)")
@@ -213,6 +235,8 @@ class UnrestrictedMySQLHandler(ToolHandler):
         Uses the same algorithm as AgentBench to compute a hash of all rows
         in the table, which can be compared against the pre-computed answer_md5.
 
+        This is an eval-specific feature not available in the standard MysqlHandler.
+
         Args:
             table_info: Dict with 'columns' list containing column info
             table_name: Name of the table to hash
@@ -248,3 +272,7 @@ class UnrestrictedMySQLHandler(ToolHandler):
 
         except Exception:
             return None
+
+
+# Backwards compatibility alias
+UnrestrictedMySQLHandler = EvalMySQLHandler

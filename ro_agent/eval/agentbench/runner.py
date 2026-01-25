@@ -1,5 +1,27 @@
 """Evaluation runner for AgentBench tasks.
 
+Why Eval Uses Custom Handlers (not standard ro_agent.tools.handlers)
+====================================================================
+
+AgentBench requires specific tool interfaces that differ from our standard handlers:
+
+1. Tool Names: AgentBench expects 'execute_sql', 'bash_action', 'commit_final_answer',
+   'answer_action', 'finish_action' - not our standard 'sqlite', 'bash', etc.
+
+2. Parameter Schemas: AgentBench uses simple {sql: string} for database queries,
+   not our operation-based interface {operation: 'query', sql: string}.
+
+3. Execution Context: Commands run inside Docker containers (EvalContainer, MySQLContainer)
+   for isolation, not on the host system.
+
+4. Eval-Specific Features: Output truncation (800 chars), table hash calculation for
+   mutation verification, answer capture via callbacks.
+
+The eval handlers share code with standard handlers where possible (format_rows,
+is_read_only_sql from database.py) while maintaining AgentBench compatibility.
+
+See ro_agent/capabilities for the CapabilityProfile system that configures standard handlers.
+
 Original AgentBench System Prompts (for reference)
 ==================================================
 
@@ -37,10 +59,16 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ro_agent.capabilities import CapabilityProfile
 from ro_agent.client.model import ModelClient
 from ro_agent.core.agent import Agent
 from ro_agent.core.session import Session
 from ro_agent.tools.registry import ToolRegistry
+
+# Document the capability profile that eval tasks conceptually use.
+# We don't use ToolFactory because eval requires custom handlers with specific
+# tool names and interfaces, but this documents the intended configuration.
+EVAL_PROFILE = CapabilityProfile.eval()
 
 from .cerebras_client import CerebrasClient
 from .config import (

@@ -312,16 +312,20 @@ ro_agent/eval/agentbench/
 │   └── os_interaction.py  # OS task loader
 │
 ├── tools/
-│   ├── submit_answer.py   # commit_final_answer, answer_action, finish_action
-│   ├── unrestricted_sqlite.py  # SQL execution without read-only limits
-│   └── docker_shell.py    # Shell execution in Docker container
+│   ├── __init__.py        # Exports + factory functions (create_dbbench_registry, etc.)
+│   ├── container_bash.py  # ContainerBashHandler base class
+│   ├── docker_shell.py    # DockerShellHandler (extends ContainerBashHandler)
+│   ├── submit_answer.py   # SubmitAnswerHandler, FinishActionHandler
+│   ├── unrestricted_mysql.py  # EvalMySQLHandler (docker exec-based)
+│   └── unrestricted_sqlite.py # EvalSqliteHandler (mutation-enabled)
 │
 ├── evaluators/
 │   ├── db_evaluator.py    # DBBench answer comparison (ported from AgentBench)
 │   └── os_evaluator.py    # Check script execution
 │
 └── docker/
-    └── container.py       # Docker container lifecycle
+    ├── container.py       # EvalContainer for OS tasks
+    └── mysql_container.py # MySQLContainer for mutation queries
 ```
 
 ## Comparison with AgentBench
@@ -339,6 +343,23 @@ ro_agent/eval/agentbench/
 
 The eval module uses **separate tool implementations** rather than the main ro-agent tools. This is intentional—the tools serve different purposes and have different interfaces.
 
+### Integration with Capability System
+
+While eval uses custom handlers, it integrates with ro-agent's capability system for documentation and consistency:
+
+```python
+from ro_agent.capabilities import CapabilityProfile
+
+# Document the intended configuration (eval profile)
+# - shell: UNRESTRICTED (container provides sandbox)
+# - file_write: FULL
+# - database: MUTATIONS (benchmark tasks require writes)
+# - approval: NONE (no human in eval loop)
+EVAL_PROFILE = CapabilityProfile.eval()
+```
+
+The eval handlers conceptually follow the eval profile settings, even though they use custom implementations for interface compatibility with AgentBench.
+
 ### What's Shared
 
 Both eval and ro-agent tools share:
@@ -346,6 +367,7 @@ Both eval and ro-agent tools share:
 - **Core infrastructure**: `Agent`, `Session`, `ModelClient`, `ToolRegistry` from ro-agent core
 - **Base classes**: `ToolHandler`, `ToolInvocation`, `ToolOutput` from `ro_agent.tools.base`
 - **Utility functions**: `format_rows()`, `DEFAULT_ROW_LIMIT` from `ro_agent.tools.handlers.database`
+- **Patterns**: Handler architecture, context manager support, async execution
 
 ### Key Divergences
 
@@ -353,9 +375,19 @@ Both eval and ro-agent tools share:
 |--------|---------------|------------|-----|
 | **Tool name** | `sqlite`, `mysql` (db_type) | `execute_sql` | AgentBench expects this specific name |
 | **Interface** | Multi-operation: `query`, `list_tables`, `describe`, `export_query` | Single operation: direct SQL execution | Benchmark tasks use direct SQL only |
-| **Inheritance** | Extends `DatabaseHandler` base class | Standalone implementation | Simpler, benchmark-specific |
-| **Read-only** | Enforced via URI mode + SQL pattern checking | Allows INSERT/UPDATE/DELETE | Mutation benchmark tasks require writes |
-| **Approval** | `requires_approval = True` | `requires_approval = False` | No human in eval loop |
+| **Read-only** | Configurable via `readonly=True/False` | Always `readonly=False` | Mutation benchmark tasks require writes |
+| **Approval** | Configurable via `CapabilityProfile` | Always `requires_approval=False` | No human in eval loop |
+| **Execution** | Network connection (host) | Docker exec (isolated) | Security via container sandbox |
+
+### Handler Classes
+
+| Eval Handler | Standard Handler | Key Differences |
+|-------------|------------------|-----------------|
+| `EvalSqliteHandler` | `SqliteHandler(readonly=False)` | Tool name `execute_sql`, simple {sql} interface |
+| `EvalMySQLHandler` | `MysqlHandler(readonly=False)` | Uses `docker exec` (no exposed ports), has `calculate_table_hash()` |
+| `DockerShellHandler` | `BashHandler(restricted=False)` | Executes in `EvalContainer`, 800 char truncation |
+| `SubmitAnswerHandler` | N/A | Eval-specific answer capture |
+| `FinishActionHandler` | N/A | Eval-specific task completion |
 
 ### Why the Divergence Exists
 
@@ -384,11 +416,13 @@ Eval handlers are designed for **automated benchmarking**:
 
 **3. Shell tools have the same pattern**
 
-| ro-agent | Eval |
-|----------|------|
-| `ShellHandler` with allowlist (~40 safe commands) | `DockerShellHandler` (sandboxed by container) |
-| Blocks dangerous patterns (`>`, `rm`, etc.) | Any command allowed inside container |
-| For safe inspection on real systems | For benchmark tasks in isolated environments |
+| Aspect | ro-agent `BashHandler` | Eval `DockerShellHandler` |
+|--------|----------------------|---------------------------|
+| **Tool name** | `bash` | `bash_action` |
+| **Execution** | Host system | Docker container |
+| **Restrictions** | Configurable via `restricted=True/False` | None (container is sandbox) |
+| **Base class** | `ToolHandler` | `ContainerBashHandler` |
+| **Output** | Full output | 800 char truncation (AgentBench spec) |
 
 ### Adding New Evals
 

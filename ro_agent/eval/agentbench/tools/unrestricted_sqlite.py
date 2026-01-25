@@ -1,8 +1,15 @@
-"""Unrestricted SQLite handler for evaluation tasks.
+"""SQLite handler for AgentBench evaluation tasks.
 
-Unlike the read-only SqliteHandler, this handler allows:
-- INSERT, UPDATE, DELETE operations
-- Database modification for evaluation purposes
+This is an adapter that provides the AgentBench-compatible 'execute_sql' interface
+while leveraging the core SqliteHandler implementation. The key differences from
+the standard SqliteHandler are:
+
+1. Tool name: 'execute_sql' (AgentBench) vs 'sqlite' (standard)
+2. Parameters: Simple {sql: string} vs operation-based {operation, sql, ...}
+3. No approval required (sandboxed environment)
+4. Mutations allowed (readonly=False)
+
+See runner.py for why eval uses custom handlers.
 """
 
 import sqlite3
@@ -13,11 +20,11 @@ from ro_agent.tools.base import ToolHandler, ToolInvocation, ToolOutput
 from ro_agent.tools.handlers.database import format_rows, DEFAULT_ROW_LIMIT
 
 
-class UnrestrictedSqliteHandler(ToolHandler):
-    """SQLite handler without read-only restrictions.
+class EvalSqliteHandler(ToolHandler):
+    """SQLite handler with AgentBench-compatible interface.
 
-    Used for DBBench evaluation where the agent may need to execute
-    INSERT, UPDATE, or DELETE queries.
+    Wraps SQLite database access with the 'execute_sql' tool interface
+    expected by AgentBench evaluation tasks.
     """
 
     def __init__(
@@ -25,7 +32,7 @@ class UnrestrictedSqliteHandler(ToolHandler):
         db_path: str | Path,
         row_limit: int = DEFAULT_ROW_LIMIT,
     ) -> None:
-        """Initialize the unrestricted SQLite handler.
+        """Initialize the eval SQLite handler.
 
         Args:
             db_path: Path to the SQLite database file
@@ -62,12 +69,11 @@ class UnrestrictedSqliteHandler(ToolHandler):
 
     @property
     def requires_approval(self) -> bool:
-        return False  # No approval needed for eval tasks
+        return False  # No approval needed for sandboxed eval tasks
 
     def _get_connection(self) -> sqlite3.Connection:
-        """Get or create database connection."""
+        """Get or create database connection (read-write mode)."""
         if self._connection is None:
-            # Open in read-write mode (no URI mode restriction)
             self._connection = sqlite3.connect(
                 str(self._db_path),
                 check_same_thread=False,
@@ -97,9 +103,9 @@ class UnrestrictedSqliteHandler(ToolHandler):
                 columns = [col[0] for col in cursor.description]
                 rows = cursor.fetchall()
 
-                # Limit rows
-                rows = rows[: self._row_limit + 1]
-                content = format_rows(columns, rows, self._row_limit)
+                # Limit rows and format using shared utility
+                display_rows = rows[: self._row_limit + 1]
+                content = format_rows(columns, display_rows, self._row_limit)
 
                 return ToolOutput(
                     content=content,
@@ -131,3 +137,7 @@ class UnrestrictedSqliteHandler(ToolHandler):
                 content=f"Error executing query: {e}",
                 success=False,
             )
+
+
+# Backwards compatibility alias
+UnrestrictedSqliteHandler = EvalSqliteHandler
