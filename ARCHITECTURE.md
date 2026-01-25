@@ -1,21 +1,21 @@
-# ro-agent Architecture Map
+# ro-agent Architecture
 
 ## Overview
 
-`ro-agent` is a **read-only research agent** for compute clusters. It assists developers by inspecting logs, probing databases, and finding documentation—without the ability to modify existing files.
+`ro-agent` is a Python-based research agent with **configurable capability profiles**. The core agent harness orchestrates a conversation loop between an LLM and a set of tools, with streaming responses and approval workflows.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                              CLI (cli.py)                          │
-│  - Entry point, REPL, argument parsing, approval prompts           │
+│                              CLI (cli.py)                           │
+│  - Entry point, REPL, argument parsing, approval prompts            │
 └───────────────────────────────┬─────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          Agent (core/agent.py)                      │
+│                         Agent (core/agent.py)                       │
 │  - Orchestrates conversation loop                                   │
-│  - Manages tool execution and streaming                            │
-│  - Handles auto-compaction                                          │
+│  - Streams AgentEvents to caller                                    │
+│  - Handles tool execution and auto-compaction                       │
 └─────────┬─────────────────────┬─────────────────────┬───────────────┘
           │                     │                     │
           ▼                     ▼                     ▼
@@ -25,70 +25,183 @@
 │                 │  │                  │  │                          │
 │ - History       │  │ - OpenAI API     │  │ - Stores handlers        │
 │ - Token counts  │  │ - Streaming      │  │ - Dispatches invocations │
+│ - Compaction    │  │ - StreamEvents   │  │ - Type coercion          │
 └─────────────────┘  └──────────────────┘  └───────────┬──────────────┘
                                                        │
                                                        ▼
                                      ┌─────────────────────────────────┐
                                      │       Tool Handlers             │
                                      │    (tools/handlers/*)           │
+                                     │                                 │
+                                     │  bash, read, grep, glob, list,  │
+                                     │  write, edit, sqlite, postgres, │
+                                     │  mysql, oracle, vertica, ...    │
                                      └─────────────────────────────────┘
 ```
 
 ---
 
-## Execution Flow
+## Capability Profiles (`capabilities/__init__.py`)
 
-### User Input → Model → Tools → Response
+Profiles control what the agent can do. Three built-in profiles plus YAML custom profiles:
 
+| Profile | Shell | File Write | Database | Approval | Use Case |
+|---------|-------|------------|----------|----------|----------|
+| `readonly` | RESTRICTED | OFF | READONLY | DANGEROUS | Safe research on production systems |
+| `developer` | UNRESTRICTED | FULL | READONLY | GRANULAR | Local development with file editing |
+| `eval` | UNRESTRICTED | FULL | MUTATIONS | NONE | Sandboxed benchmark execution |
+
+### Capability Modes
+
+**ShellMode:**
+- `RESTRICTED`: Only allowlisted commands (grep, cat, find, etc.), dangerous patterns blocked
+- `UNRESTRICTED`: Any command allowed (rely on container/sandbox)
+
+**FileWriteMode:**
+- `OFF`: No file writing
+- `CREATE_ONLY`: Can create new files, cannot overwrite
+- `FULL`: Full write/edit capabilities
+
+**DatabaseMode:**
+- `READONLY`: SELECT only, mutations blocked
+- `MUTATIONS`: Full access including INSERT/UPDATE/DELETE
+
+**ApprovalMode:**
+- `ALL`: All tools require approval
+- `DANGEROUS`: Only bash, write, edit, database tools require approval
+- `GRANULAR`: Per-tool configuration via `approval_required_tools`
+- `NONE`: No approval (for sandboxed environments)
+
+### Tool Factory (`capabilities/factory.py`)
+
+Creates a `ToolRegistry` from a `CapabilityProfile`:
+
+```python
+profile = CapabilityProfile.developer()
+factory = ToolFactory(profile)
+registry = factory.create_registry(working_dir="/path/to/project")
 ```
-User types message
-        │
-        ▼
-Session.add_user_message()
-        │
-        ▼
-Auto-compact check (80% of 100k tokens?)
-        │
-        ▼
-Build Prompt (system + history + tool_specs)
-        │
-        ▼
-ModelClient.stream() → OpenAI-compatible API
-        │
-        ├─── text event ────────► yield to CLI for display
-        │
-        └─── tool_call event ───► ToolRegistry.dispatch()
-                                        │
-                                        ▼
-                                  Handler.handle()
-                                        │
-                                        ▼
-                                  ToolOutput (content, success, metadata)
-                                        │
-                                        ▼
-                                  Add result to Session.history
-                                        │
-                                        ▼
-                        Loop back to model if tools were called
-                                        │
-                                        ▼
-                              turn_complete (no more tool calls)
-```
+
+The factory:
+1. Registers core tools (read, grep, glob, list, read_excel)
+2. Registers bash with restricted/unrestricted mode per profile
+3. Registers write/edit tools if `file_write != OFF`
+4. Registers database tools if environment variables are set
 
 ---
 
-## Tool Handler Architecture
+## Agent Loop (`core/agent.py`)
 
-All handlers inherit from `ToolHandler` (`tools/base.py:26`):
+The `Agent` class orchestrates the conversation:
+
+```python
+agent = Agent(
+    session=session,
+    registry=registry,
+    client=client,
+    approval_callback=approval_handler.check_approval,
+)
+
+async for event in agent.run_turn(user_input):
+    handle_event(event)
+```
+
+### Execution Flow
+
+```
+User Input
+    │
+    ▼
+Auto-compact check (80% of 100k tokens?)
+    │ yes
+    ├──────► compact() → yield compact_start/compact_end
+    │
+    ▼
+Session.add_user_message()
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│              AGENT LOOP                 │
+│                                         │
+│  Build Prompt (system + history + tools)│
+│              │                          │
+│              ▼                          │
+│  ModelClient.stream() ──► StreamEvents  │
+│              │                          │
+│         ┌────┴────┐                     │
+│         │         │                     │
+│    text event   tool_call event         │
+│         │         │                     │
+│         ▼         ▼                     │
+│  yield AgentEvent  Check approval       │
+│  (type="text")     │                    │
+│                    ├─ rejected ──► yield tool_blocked, break
+│                    │                    │
+│                    ▼                    │
+│              ToolRegistry.dispatch()    │
+│                    │                    │
+│                    ▼                    │
+│              yield tool_end             │
+│                    │                    │
+│                    ▼                    │
+│         Add results to Session          │
+│                    │                    │
+│         Loop if tools were called ──────┤
+│                                         │
+└─────────────────────────────────────────┘
+    │
+    ▼
+yield turn_complete (no more tool calls)
+```
+
+### AgentEvent Types
+
+Events yielded by `agent.run_turn()`:
+
+| Type | Fields | Description |
+|------|--------|-------------|
+| `text` | `content` | Streamed text from model |
+| `tool_start` | `tool_name`, `tool_args` | Tool invocation beginning |
+| `tool_end` | `tool_name`, `tool_result`, `tool_metadata` | Tool completed |
+| `tool_blocked` | `tool_name`, `tool_args` | User rejected tool |
+| `compact_start` | `content` ("auto" or "manual") | Compaction beginning |
+| `compact_end` | `content` (token summary) | Compaction finished |
+| `turn_complete` | `usage` | Turn finished, includes token counts |
+| `cancelled` | `content` | Turn was cancelled |
+| `error` | `content` | Error occurred |
+
+### Cancellation
+
+The agent supports mid-turn cancellation:
+
+```python
+agent.request_cancel()  # Called from signal handler
+```
+
+Cancellation is checked:
+- Before each model call
+- During streaming
+- Before each tool execution
+
+---
+
+## Tool System
+
+### ToolHandler (`tools/base.py`)
+
+Abstract base class for all tools:
 
 ```python
 class ToolHandler(ABC):
     @property
-    def name(self) -> str: ...           # Unique identifier
+    def name(self) -> str: ...           # "bash", "read", "grep", etc.
+
     @property
     def description(self) -> str: ...    # LLM-friendly description
+
     @property
-    def parameters(self) -> dict: ...    # JSON Schema for args
+    def parameters(self) -> dict: ...    # JSON Schema for arguments
+
     @property
     def requires_approval(self) -> bool: # Default: False
         return False
@@ -107,352 +220,129 @@ ToolInvocation(call_id, tool_name, arguments)
 ToolOutput(content: str, success: bool, metadata: dict)
 ```
 
----
+### ToolRegistry (`tools/registry.py`)
 
-## Core File Inspection Tools
+Stores handlers and dispatches invocations:
 
-### `search` — Content Search (`tools/handlers/search.py`)
-
-**Purpose:** Search for patterns *inside* file contents using ripgrep. Use this to find which files contain a specific string or regex. Efficient for large log files—never loads files into memory.
-
-**Parameters:**
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `pattern` | string | ✓ | Regex pattern |
-| `path` | string | ✓ | Directory or file to search |
-| `glob` | string | | Filter files (e.g., `*.py`, `*.log`) |
-| `ignore_case` | bool | | Case-insensitive search |
-| `context_lines` | int | | Lines before/after match (default: 0) |
-| `max_matches` | int | | Max results (default: 100) |
-
-**Key Implementation Details:**
-
-1. **Uses ripgrep (`rg`)** via subprocess:
-   - Streams through files without loading into memory
-   - Handles multi-GB log files efficiently
-   - 30-second timeout protection
-
-2. **Output Format:**
-   ```
-   /path/to/file.py:42:    def handle_error(self):
-   /path/to/file.py:58:        raise CustomError("failed")
-   ```
-
-3. **Auto-skips:** `.git/`, `node_modules/`, `__pycache__/`, `.venv/`
-
-**Requires Approval:** No
-
----
-
-### `find_files` — File Name Search (`tools/handlers/find_files.py`)
-
-**Purpose:** Find files *by name or path pattern* using ripgrep's `--files` mode. Use this to locate files when you know the filename pattern but not the location.
-
-> **`search` vs `find_files`:** Use `search` to find content *inside* files (e.g., "which files contain `ERROR`?"). Use `find_files` to find files *by name* (e.g., "where are all the `*.log` files?").
-
-**Parameters:**
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `glob` | string | ✓ | Glob pattern for file names (e.g., `*.py`, `config.*`) |
-| `path` | string | ✓ | Directory to search in |
-| `max_results` | int | | Max files returned (default: 100) |
-
-**Key Implementation Details:**
-
-1. **Uses ripgrep (`rg --files`)** via subprocess:
-   - Fast file listing with glob filtering
-   - 30-second timeout protection
-
-2. **Output Format:**
-   ```
-   src/main.py
-   src/utils/helpers.py
-   tests/test_main.py
-
-   [3 files found]
-   ```
-
-3. **Auto-skips:** `.git/`, `node_modules/`, `__pycache__/`, `.venv/`
-
-**Requires Approval:** No
-
----
-
-### `list_dir` — Directory Exploration (`tools/handlers/list_dir.py`)
-
-**Purpose:** List directory contents with metadata. Two modes: flat (ls-like) or recursive (tree view).
-
-**Parameters:**
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `path` | string | ✓ | Directory to list |
-| `show_hidden` | bool | | Include dotfiles |
-| `recursive` | bool | | Tree view mode |
-| `max_depth` | int | | Depth limit for recursive (default: 3) |
-
-**Key Implementation Details:**
-
-1. **Flat Mode** (`_list_flat` line 88):
-   ```
-   -rw-r--r--    1.2KB  2024-01-05 10:30  file.txt
-   drwxr-xr-x        -  2024-01-05 09:00  subdir/
-   ```
-   - Permissions, size, mtime, name
-   - Directories sorted first, then files
-   - Shows symlink targets
-
-2. **Recursive Mode** (`_list_recursive` line 134):
-   ```
-   ├── src/
-   │   ├── main.py (2.3KB)
-   │   └── utils.py (1.1KB)
-   └── README.md (512B)
-   ```
-   - Tree connectors (`├──`, `└──`, `│`)
-   - Depth-limited traversal
-
-3. **Limits:** Max 200 entries per listing
-
-**Requires Approval:** No
-
----
-
-### `read_file` — File Reading
-
-**Purpose:** Read text files with optional line range support.
-
-**Key Features:**
-- Line range support (`start_line`, `end_line`)
-- Binary file detection blocks images, PDFs, compiled files
-- Max 500 lines default
-- Output includes line numbers
-
-**Requires Approval:** No
-
----
-
-### `shell` — Command Execution (`tools/handlers/shell.py`)
-
-**Purpose:** Execute shell commands for text-based inspection. **Read-only by design.**
-
-**Parameters:**
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-| `command` | string | ✓ | Shell command to execute |
-| `working_dir` | string | | Override working directory |
-
-**Safety Architecture:**
-
-1. **Allowlist** (lines 12-100): ~50 safe read-only commands
-   ```python
-   ALLOWED_COMMANDS = {
-       # File inspection
-       "cat", "head", "tail", "less", "more",
-       # Search
-       "grep", "rg", "ag", "find", "locate",
-       # Text processing
-       "awk", "sed", "cut", "sort", "uniq", "jq", "yq",
-       # Git (read-only)
-       "git",
-       # System info
-       "ps", "top", "df", "du",
-       ...
-   }
-   ```
-
-2. **Dangerous Pattern Blocking** (lines 103-146):
-   ```python
-   DANGEROUS_PATTERNS = [
-       ">", ">>",           # Redirects
-       "rm ", "mv ", "cp ", # File ops
-       "chmod", "chown",    # Permissions
-       "sudo", "su ",       # Privilege escalation
-       "pip ", "npm ",      # Package managers
-       ...
-   ]
-   ```
-
-3. **Command Extraction** (`extract_base_command` line 149):
-   - Handles pipes: `cat foo | grep bar` → checks `cat`
-   - Handles chaining: `cmd1 && cmd2` → checks `cmd1`
-   - Strips env vars: `VAR=x cmd` → checks `cmd`
-
-**Execution Flow:**
-```
-is_command_allowed(command)
-        │
-        ├── Check DANGEROUS_PATTERNS → block if found
-        │
-        └── Extract base command → check ALLOWED_COMMANDS
-                │
-                ▼
-asyncio.create_subprocess_shell()
-        │
-        ▼
-Timeout after 120 seconds
-        │
-        ▼
-Return stdout + stderr (labeled)
-```
-
-**Requires Approval:** Yes
-
----
-
-### `write_output` — Export Findings
-
-**Purpose:** Create new output files (reports, summaries, scripts).
-
-**Safety:**
-- Blocks overwriting existing files
-- Blocks sensitive paths (`.bashrc`, `.ssh/`, `/etc/`)
-- Creates parent directories automatically
-
-**Requires Approval:** Yes
-
----
-
-## ToolRegistry — Dispatch System (`tools/registry.py`)
-
-Simple registry pattern for tool management:
-
-```python
-class ToolRegistry:
-    _handlers: dict[str, ToolHandler]
-
-    def register(handler):        # Store handler by name
-    def get(name) -> Handler:     # Lookup by name
-    def get_specs() -> list:      # OpenAI function calling format
-    def requires_approval(name):  # Check approval flag
-    def dispatch(invocation):     # Route to handler
-```
-
-**Registration** happens in `cli.py` (`create_registry` function):
 ```python
 registry = ToolRegistry()
-registry.register(ReadFileHandler())
-registry.register(ListDirHandler())
-registry.register(SearchHandler())
-registry.register(FindFilesHandler())
-registry.register(ShellHandler(working_dir))
-registry.register(WriteOutputHandler())
-# + database handlers if env vars present
+registry.register(BashHandler(restricted=True))
+registry.register(ReadHandler())
+
+# Get specs for LLM
+specs = registry.get_specs()  # OpenAI function calling format
+
+# Dispatch invocation
+output = await registry.dispatch(invocation)
 ```
+
+The registry handles:
+- Type coercion (LLMs sometimes pass strings for booleans/integers)
+- Error handling (returns error as `ToolOutput`, doesn't crash)
+- Cancellation propagation
+
+### Available Tool Handlers
+
+| Handler | Name | Description |
+|---------|------|-------------|
+| `BashHandler` | `bash` | Shell execution (restricted or unrestricted) |
+| `ReadHandler` | `read` | Read file contents with line ranges |
+| `GrepHandler` | `grep` | Search file contents with ripgrep |
+| `GlobHandler` | `glob` | Find files by pattern |
+| `ListHandler` | `list` | List directory contents |
+| `WriteHandler` | `write` | Create/overwrite files |
+| `EditHandler` | `edit` | Edit files with search/replace |
+| `ReadExcelHandler` | `read_excel` | Read Excel/CSV files |
+| `SqliteHandler` | `sqlite` | SQLite queries |
+| `PostgresHandler` | `postgres` | PostgreSQL queries |
+| `MysqlHandler` | `mysql` | MySQL queries |
+| `OracleHandler` | `oracle` | Oracle queries |
+| `VerticaHandler` | `vertica` | Vertica queries |
 
 ---
 
-## Database Handlers (High-Level)
-
-All database handlers inherit from `DatabaseHandler` (`tools/handlers/database.py:81`):
-
-```
-┌────────────────────────────────────────────────────────────┐
-│                    DatabaseHandler (ABC)                   │
-│                                                            │
-│  Operations:                                               │
-│    - query: Execute read-only SQL                          │
-│    - list_tables: Find tables by pattern                   │
-│    - describe: Get table schema details                    │
-│                                                            │
-│  Safety: MUTATION_PATTERNS blocks INSERT/UPDATE/DELETE/etc │
-└──────────────────────┬─────────────────────────────────────┘
-                       │
-       ┌───────────────┼───────────────┐
-       ▼               ▼               ▼
-┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-│   Oracle    │ │   SQLite    │ │   Vertica   │
-│   Handler   │ │   Handler   │ │   Handler   │
-└─────────────┘ └─────────────┘ └─────────────┘
-```
-
-**Shared Features:**
-- SQL mutation detection via regex (blocks `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, etc.)
-- ASCII table formatting for results
-- Row limit support (default: 100)
-- All require approval
-
-**Abstract Methods Each Implements:**
-- `_get_connection()` — Database-specific connection
-- `_execute_query()` — Run SQL, return (columns, rows)
-- `_get_list_tables_sql()` — Catalog query for table listing
-- `_get_describe_sql()` — Catalog query for column info
-
-**Environment Variables:**
-- Oracle: `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`
-- SQLite: `SQLITE_DB`
-- Vertica: `VERTICA_HOST`, `VERTICA_PORT`, `VERTICA_DATABASE`, `VERTICA_USER`, `VERTICA_PASSWORD`
-
----
-
-## Session & Context Management (`core/session.py`)
+## Session Management (`core/session.py`)
 
 Stores conversation state in OpenAI message format:
 
 ```python
-Session:
+@dataclass
+class Session:
     system_prompt: str
-    history: list[dict]  # OpenAI message format
+    history: list[dict]        # OpenAI message format
     total_input_tokens: int
     total_output_tokens: int
 ```
 
-**Methods:**
+**Key Methods:**
 - `add_user_message()` / `add_assistant_message()`
 - `add_assistant_tool_calls()` / `add_tool_results()`
 - `replace_with_summary()` — For compaction
-- `estimate_tokens()` — Rough count for auto-compact
+- `estimate_tokens()` — Rough count (4 chars ≈ 1 token)
 
----
+### Context Compaction
 
-## Agent Loop (`core/agent.py`)
+When context exceeds 80% of limit, the agent auto-compacts:
 
-The `Agent` class orchestrates everything:
+1. Formats history as text
+2. Asks model to summarize progress and next steps
+3. Replaces history with summary + recent user messages
+4. Preserves last 2-3 user messages for continuity
 
 ```python
-Agent(session, registry, client, approval_callback)
-    │
-    └── run_turn(user_input) → AsyncIterator[AgentEvent]
-            │
-            ├── Check auto-compact (80% threshold)
-            │
-            ├── Build Prompt with history + tools
-            │
-            ├── Stream response from model
-            │
-            ├── For each tool_call:
-            │       - Check approval if required
-            │       - Dispatch to registry
-            │       - Truncate output (max 20k chars)
-            │       - Record in history
-            │
-            └── Loop until no more tool calls
+result = await agent.compact(custom_instructions="Focus on the database schema")
+# CompactResult(summary, tokens_before, tokens_after, trigger)
 ```
 
-**Event Types:**
-- `text` — Streamed text content
-- `tool_start` — Tool invocation beginning
-- `tool_end` — Tool result with metadata
-- `tool_blocked` — User rejected command
-- `turn_complete` — Turn finished with usage stats
-- `compact_start`/`compact_end` — Compaction events
+---
+
+## Model Client (`client/model.py`)
+
+Streaming client for OpenAI-compatible APIs:
+
+```python
+client = ModelClient(
+    model="gpt-5-mini",
+    base_url="https://api.openai.com/v1",  # or vLLM, etc.
+    service_tier="flex",  # Optional: 50% cost savings
+)
+```
+
+### StreamEvent Types
+
+Events from `client.stream()`:
+
+| Type | Fields | Description |
+|------|--------|-------------|
+| `text` | `content` | Text delta |
+| `tool_call` | `tool_call` (ToolCall) | Complete tool call |
+| `done` | `usage` | Stream finished |
+| `error` | `content` | Error message |
+
+The client handles:
+- Streaming with `stream_options={"include_usage": True}`
+- Tool call assembly from deltas
+- Non-streaming fallback for providers that don't support streaming tools (e.g., Cerebras)
 
 ---
 
-## Key Constants & Limits
+## Key Constants
 
-| Limit | Value | Location |
-|-------|-------|----------|
-| Tool output truncation | 20,000 chars | `agent.py:13` |
-| Context limit | 100,000 tokens | `agent.py:16` |
-| Auto-compact threshold | 80% | `agent.py:17` |
-| Shell timeout | 120 seconds | `shell.py:9` |
-| Max search matches | 100 | `search.py:11` |
-| Search timeout | 30 seconds | `search.py:13` |
-| Max find_files results | 100 | `find_files.py:10` |
-| Find files timeout | 30 seconds | `find_files.py:11` |
-| Max dir entries | 200 | `list_dir.py:12` |
-| Max DB rows | 100 | `database.py:29` |
+| Constant | Value | Location |
+|----------|-------|----------|
+| Tool output truncation | 20,000 chars | `agent.py:14` |
+| Context limit | 100,000 tokens | `agent.py:17` |
+| Auto-compact threshold | 80% | `agent.py:18` |
+| Bash timeout (restricted) | 120 seconds | `bash.py:14` |
+| Bash timeout (unrestricted) | 300 seconds | `bash.py:15` |
 
 ---
 
-This architecture follows the **Codex CLI pattern** with a clean separation between the agent loop, tool dispatch, and individual handlers. The read-only constraint is enforced at multiple levels: allowlisted commands in shell, SQL mutation detection in databases, and the explicit absence of file write tools (except `write_output` for exports).
+## Architecture Principles
+
+1. **Configurable capabilities**: Profiles control what tools are available and how they behave
+2. **Event-driven streaming**: Agent yields events for real-time UI updates
+3. **Approval workflow**: Dangerous operations require explicit user approval
+4. **Graceful degradation**: Tool errors return results to agent for self-correction
+5. **Cancellation support**: Mid-turn cancellation at multiple checkpoints
+6. **Context management**: Auto-compaction prevents context overflow
