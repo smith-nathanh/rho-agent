@@ -26,6 +26,7 @@ from ro_agent.capabilities.factory import ToolFactory
 from ro_agent.client.model import ModelClient
 from ro_agent.core.agent import Agent
 from ro_agent.core.session import Session
+from ro_agent.prompts import load_prompt, prepare_prompt
 
 # Load .env file - try multiple locations
 # 1. Current directory
@@ -37,27 +38,7 @@ for env_path in [Path.cwd() / ".env", _pkg_root / ".env", Path("/ro-agent/.env")
         load_dotenv(env_path)
         break
 
-SYSTEM_PROMPT = """\
-You are an AI agent that completes tasks in a Linux environment.
-
-Available tools:
-- bash: Execute any shell command
-- write: Create or overwrite a file
-- edit: Make surgical edits to existing files
-- read: Read file contents
-- grep: Search for patterns in files (using ripgrep)
-- glob: Find files by name/pattern
-- list: List directory contents
-
-Guidelines:
-- Execute commands to investigate and solve problems
-- Use edit for surgical changes to existing files
-- Use write to create new files or fully replace content
-- Read files before editing them to understand the current state
-- Be precise and efficient
-- If a task requires installing packages, use pip/apt as needed
-- For build tasks, use appropriate build tools (make, cmake, cargo, etc.)
-"""
+_EVAL_PROMPT = Path(__file__).parent.parent.parent / "prompts" / "eval.md"
 
 
 async def auto_approve(tool_name: str, tool_args: dict) -> bool:
@@ -72,7 +53,14 @@ async def run_task(instruction: str, working_dir: str = "/app") -> None:
         instruction: The task description/instruction.
         working_dir: Working directory for shell commands (default: /app).
     """
-    session = Session(system_prompt=SYSTEM_PROMPT)
+    # Load and render eval prompt template
+    prompt = load_prompt(_EVAL_PROMPT)
+    system_prompt, _ = prepare_prompt(prompt, {
+        "platform": "Linux",
+        "home_dir": str(Path.home()),
+        "working_dir": working_dir,
+    })
+    session = Session(system_prompt=system_prompt)
 
     # Use eval profile - unrestricted, no approval required
     profile = CapabilityProfile.eval(working_dir=working_dir)

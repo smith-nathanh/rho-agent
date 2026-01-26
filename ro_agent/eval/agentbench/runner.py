@@ -63,6 +63,7 @@ from ro_agent.capabilities import CapabilityProfile
 from ro_agent.client.model import ModelClient
 from ro_agent.core.agent import Agent
 from ro_agent.core.session import Session
+from ro_agent.prompts import load_prompt
 from ro_agent.tools.registry import ToolRegistry
 
 # Document the capability profile that eval tasks conceptually use.
@@ -93,39 +94,10 @@ from .tools.unrestricted_mysql import UnrestrictedMySQLHandler
 from .tools.unrestricted_sqlite import UnrestrictedSqliteHandler
 
 
-# System prompts for different task types
-DBBENCH_SYSTEM_PROMPT = """You will answer questions by querying a database with SQL.
-
-Tools:
-- `execute_sql`: Run a SQL query (one statement at a time)
-- `commit_final_answer`: Submit your final answer
-
-IMPORTANT: Never call `commit_final_answer` in the same turn as `execute_sql`. You must see the query results before committing your answer. You may call `execute_sql` multiple times to explore the data, but only call `commit_final_answer` alone after you have the answer.
-
-Answer format:
-- Return the value exactly as it appears in the query result
-- Submit only the specific value(s) requested, not entire rows
-- If the question asks for a single item, return one answer
-- Preserve any units or formatting present in the data
-- No results: submit "none"
-- Modifications (INSERT/UPDATE/DELETE): submit "done" after completing
-"""
-
-OS_SYSTEM_PROMPT = """You will complete tasks in a Linux environment by executing shell commands.
-
-Tools:
-- `bash_action`: Execute a shell command (no interactive input)
-- `answer_action`: Submit your answer
-- `finish_action`: Signal task completion (when no answer is needed)
-
-IMPORTANT: Never call `answer_action` in the same turn as `bash_action`. You must see the command output before submitting your answer. Run commands first, observe the results, then call `answer_action` alone in a separate turn.
-
-Answer format:
-- Be exact and precise: a number, filename, or single value
-- Do not answer with full sentences
-- Your answer must be an actual value, not a variable name or placeholder like "$output"
-- Output may be truncated; adjust your approach if needed
-"""
+# Prompt file paths (relative to this package's prompts directory)
+_PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
+_DBBENCH_PROMPT = _PROMPTS_DIR / "eval_dbbench.md"
+_OS_PROMPT = _PROMPTS_DIR / "eval_os.md"
 
 
 class EvalRunner:
@@ -709,20 +681,23 @@ class EvalRunner:
     def _get_system_prompt(self, task_type: str) -> str:
         """Get the system prompt for a task type.
 
-        If a custom prompt file is configured, load it. Otherwise use defaults.
+        If a custom prompt file is configured, load it. Otherwise load
+        from the built-in prompt templates.
         """
         if self.config.system_prompt_file:
             try:
-                return Path(self.config.system_prompt_file).read_text()
+                prompt = load_prompt(self.config.system_prompt_file)
+                return prompt.system_prompt
             except Exception:
                 pass  # Fall back to default
 
-        if task_type == "dbbench":
-            return DBBENCH_SYSTEM_PROMPT
-        elif task_type == "os":
-            return OS_SYSTEM_PROMPT
+        if task_type == "os":
+            prompt_path = _OS_PROMPT
         else:
-            return DBBENCH_SYSTEM_PROMPT
+            prompt_path = _DBBENCH_PROMPT
+
+        prompt = load_prompt(prompt_path)
+        return prompt.system_prompt
 
     async def run_dbbench_tasks(
         self,
