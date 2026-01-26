@@ -8,10 +8,11 @@ Usage:
     python -m ro_agent.eval.harbor.runner "<instruction>" [working_dir]
 
 Environment variables:
-    RO_AGENT_MODEL      - Model to use (default: gpt-5-mini)
-    RO_AGENT_BASE_URL   - API base URL (default: OpenAI)
-    RO_AGENT_MAX_TURNS  - Max conversation turns (default: 50)
-    OPENAI_API_KEY      - API key (required)
+    RO_AGENT_MODEL        - Model to use (default: gpt-5-mini)
+    RO_AGENT_BASE_URL     - API base URL (default: OpenAI)
+    RO_AGENT_MAX_TURNS    - Max conversation turns (default: 50)
+    RO_AGENT_SERVICE_TIER - OpenAI service tier: "flex" for lower cost (default: None)
+    OPENAI_API_KEY        - API key (required)
 """
 
 import asyncio
@@ -71,11 +72,13 @@ async def run_task(instruction: str, working_dir: str = "/app") -> None:
     model = os.environ.get("RO_AGENT_MODEL", "gpt-5-mini")
     base_url = os.environ.get("RO_AGENT_BASE_URL")
     api_key = os.environ.get("OPENAI_API_KEY")
+    service_tier = os.environ.get("RO_AGENT_SERVICE_TIER")
 
     client = ModelClient(
         model=model,
         base_url=base_url,
         api_key=api_key,
+        service_tier=service_tier,
     )
 
     # Create agent with auto-approval (container is sandbox)

@@ -141,13 +141,23 @@ class RoAgent(BaseAgent):
         if base_url:
             env["RO_AGENT_BASE_URL"] = base_url
 
+        # Add service tier if configured (e.g., "flex" for lower cost)
+        service_tier = os.environ.get("RO_AGENT_SERVICE_TIER")
+        if service_tier:
+            env["RO_AGENT_SERVICE_TIER"] = service_tier
+
         self.logger.info(f"Running ro-agent with model: {env['RO_AGENT_MODEL']}")
+
+        # Use longer timeout for flex tier (slower but cheaper)
+        timeout = self._agent_timeout_sec
+        if service_tier == "flex":
+            timeout = max(timeout, 1800)  # at least 30 min for flex
 
         # Run ro-agent in the container using uv run
         # Source the .env file to get OPENAI_API_KEY, then cd to /app for task execution
         result = await environment.exec(
             f'set -a && source /ro-agent/.env && set +a && export PATH="$HOME/.local/bin:$PATH" && cd /app && /ro-agent/.venv/bin/python -m ro_agent.eval.harbor.runner {escaped} /app',
-            timeout_sec=self._agent_timeout_sec,
+            timeout_sec=timeout,
             env=env,
         )
 
