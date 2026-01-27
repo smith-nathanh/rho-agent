@@ -191,9 +191,10 @@ class BirdRunner:
         tasks: list[BirdTask],
         output_dir: Path | str,
         progress_callback: Any = None,
+        initial_metrics: BirdMetrics | None = None,
     ) -> tuple[list[TaskResult], BirdMetrics]:
         """Run multiple BIRD-Bench tasks with optional parallelism."""
-        metrics = BirdMetrics()
+        metrics = initial_metrics or BirdMetrics()
         results: list[TaskResult] = []
         output_dir = Path(output_dir)
         consecutive_errors = 0

@@ -5,13 +5,18 @@ Two tools are provided to the agent:
 - submit_sql: Submit the final SQL query for evaluation
 """
 
+import asyncio
 import sqlite3
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from ro_agent.tools.base import ToolHandler, ToolInvocation, ToolOutput
 from ro_agent.tools.handlers.database import format_rows, DEFAULT_ROW_LIMIT
+
+# Per-query timeout for agent exploration queries (seconds).
+_QUERY_TIMEOUT = 30
 
 
 class BirdSqliteHandler(ToolHandler):
@@ -73,14 +78,24 @@ class BirdSqliteHandler(ToolHandler):
             self._connection.close()
             self._connection = None
 
-    async def handle(self, invocation: ToolInvocation) -> ToolOutput:
-        sql = invocation.arguments.get("sql", "").strip()
+    def _execute_sync(self, sql: str) -> ToolOutput:
+        """Execute SQL synchronously with a per-query timeout.
 
-        if not sql:
-            return ToolOutput(content="No SQL query provided", success=False)
+        Uses sqlite3 progress_handler to abort queries that exceed the timeout.
+        Called from a worker thread via asyncio.to_thread().
+        """
+        conn = self._get_connection()
+
+        start = time.monotonic()
+
+        def _check_timeout() -> int:
+            if time.monotonic() - start > _QUERY_TIMEOUT:
+                return 1  # non-zero aborts the query
+            return 0
+
+        conn.set_progress_handler(_check_timeout, 1000)
 
         try:
-            conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(sql)
 
@@ -109,10 +124,27 @@ class BirdSqliteHandler(ToolHandler):
                     metadata={"rows_affected": rows_affected},
                 )
 
+        except sqlite3.OperationalError as e:
+            if "interrupted" in str(e).lower():
+                return ToolOutput(
+                    content=f"Query timed out after {_QUERY_TIMEOUT}s",
+                    success=False,
+                )
+            return ToolOutput(content=f"SQL error: {e}", success=False)
         except sqlite3.Error as e:
             return ToolOutput(content=f"SQL error: {e}", success=False)
         except Exception as e:
             return ToolOutput(content=f"Error executing query: {e}", success=False)
+        finally:
+            conn.set_progress_handler(None, 0)
+
+    async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        sql = invocation.arguments.get("sql", "").strip()
+
+        if not sql:
+            return ToolOutput(content="No SQL query provided", success=False)
+
+        return await asyncio.to_thread(self._execute_sync, sql)
 
 
 class SubmitSqlHandler(ToolHandler):

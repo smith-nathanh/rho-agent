@@ -1,13 +1,13 @@
 # ro-agent
 
-A Python-based agent harness with configurable capability profiles.
+A Python-based agent harness with configurable access/capabilitity profiles.
 
 **Use cases:**
-- **Research & inspection**: Investigate failed job logs, probe database schemas, search codebases
-- **Development**: Edit files, run builds, execute tests—with fine-grained controls over shell commands and SQL restrictions
-- **Benchmarking**: Run LLM evaluations (AgentBench, TerminalBench) in sandboxed containers
+- **Research & inspection**: Investigate logs, database schemas, codebases, and configs
+- **Development**: Edit/write code, query databases, run scripts, execute tests - with fine-grained controls over shell commands and SQL restrictions
+- **Benchmarking**: Run LLM evaluations (BIRD, TerminalBench) in sandboxed containers
 
-The `readonly` profile enforces system-level restrictions for safe inspection of production systems. The `developer` profile unlocks file editing and unrestricted shell access with configurable guardrails. The `eval` profile provides unrestricted access for testing the full capabilities of the harness in isolated environments.
+The `readonly` profile enforces system-level restrictions for safe inspection of production systems. The `developer` profile unlocks file editing and shell access with configurable guardrails. The `eval` profile provides unrestricted access for testing the full capabilities of the harness in isolated environments.
 
 ## Installation
 

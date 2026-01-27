@@ -20,7 +20,6 @@ from .output import (
     get_completed_indices,
     rebuild_metrics_from_runs,
     save_run_config,
-    update_overall,
 )
 from .runner import BirdRunner
 from .task import load_bird_tasks
@@ -183,6 +182,10 @@ def bird(
     # Run
     runner = BirdRunner(config)
 
+    # When resuming, seed metrics with previously completed results so
+    # incremental summary.txt updates reflect the full run.
+    initial_metrics = rebuild_metrics_from_runs(run_dir) if resume else None
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -199,7 +202,10 @@ def bird(
         try:
             results, metrics = asyncio.run(
                 runner.run_tasks(
-                    tasks, output_dir=run_dir, progress_callback=update_progress
+                    tasks,
+                    output_dir=run_dir,
+                    progress_callback=update_progress,
+                    initial_metrics=initial_metrics,
                 )
             )
         except EvalAbortedError as e:
@@ -207,11 +213,6 @@ def bird(
             console.print(f"[red bold]Evaluation aborted:[/red bold] {e}")
             console.print(f"\nPartial results saved to: {run_dir}")
             raise typer.Exit(1)
-
-    # Rebuild metrics if resuming
-    if resume:
-        metrics = rebuild_metrics_from_runs(run_dir)
-        update_overall(metrics, run_dir)
 
     # Print summary
     console.print()
