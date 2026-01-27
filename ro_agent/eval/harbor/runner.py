@@ -8,8 +8,10 @@ Usage:
     python -m ro_agent.eval.harbor.runner "<instruction>" [working_dir]
 
 Environment variables:
-    RO_AGENT_MODEL        - Model to use (default: gpt-5-mini)
-    RO_AGENT_BASE_URL     - API base URL (default: OpenAI)
+    OPENAI_MODEL          - Model to use (default: gpt-5-mini)
+    OPENAI_BASE_URL       - API base URL (default: OpenAI)
+    RO_AGENT_MODEL        - Override for OPENAI_MODEL
+    RO_AGENT_BASE_URL     - Override for OPENAI_BASE_URL
     RO_AGENT_SERVICE_TIER - OpenAI service tier: "flex" for lower cost (default: None)
     OPENAI_API_KEY        - API key (required)
 """
@@ -69,8 +71,8 @@ async def run_task(instruction: str, working_dir: str = "/app") -> None:
     registry = factory.create_registry(working_dir=working_dir)
 
     # Create client from environment
-    model = os.environ.get("RO_AGENT_MODEL", "gpt-5-mini")
-    base_url = os.environ.get("RO_AGENT_BASE_URL")
+    model = os.environ.get("RO_AGENT_MODEL") or os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+    base_url = os.environ.get("RO_AGENT_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
     api_key = os.environ.get("OPENAI_API_KEY")
     service_tier = os.environ.get("RO_AGENT_SERVICE_TIER")
 

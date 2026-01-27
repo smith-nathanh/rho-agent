@@ -15,9 +15,17 @@ import os
 import shlex
 from pathlib import Path
 
+from dotenv import load_dotenv
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
+
+# Load .env from ro-agent project root (4 levels up from this file)
+_pkg_root = Path(__file__).parent.parent.parent.parent
+for _env_path in [_pkg_root / ".env", Path("/ro-agent/.env")]:
+    if _env_path.exists():
+        load_dotenv(_env_path)
+        break
 
 
 class RoAgent(BaseAgent):
@@ -70,6 +78,14 @@ class RoAgent(BaseAgent):
 
         Called by Harbor before running the agent on tasks.
         """
+        # Log resolved model config so it's visible at launch
+        model = os.environ.get("RO_AGENT_MODEL") or os.environ.get("OPENAI_MODEL") or self.model_name or "gpt-5-mini"
+        if "/" in model:
+            model = model.split("/", 1)[1]
+        base_url = os.environ.get("RO_AGENT_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+        service_tier = os.environ.get("RO_AGENT_SERVICE_TIER")
+        self.logger.info(f"Model: {model} | Base URL: {base_url}" + (f" | Service tier: {service_tier}" if service_tier else ""))
+
         self.logger.info("Setting up ro-agent in container...")
 
         # Find ro-agent source directory (go up from this file)
@@ -127,7 +143,7 @@ class RoAgent(BaseAgent):
         # Build environment variables
         # Strip provider prefix from model name (e.g., "openai/gpt-5-mini" -> "gpt-5-mini")
         # Env var overrides config so you can switch models without editing YAML
-        model = os.environ.get("RO_AGENT_MODEL") or self.model_name or "gpt-5-mini"
+        model = os.environ.get("RO_AGENT_MODEL") or os.environ.get("OPENAI_MODEL") or self.model_name or "gpt-5-mini"
         if "/" in model:
             model = model.split("/", 1)[1]
 
@@ -139,7 +155,7 @@ class RoAgent(BaseAgent):
         }
 
         # Add base URL if configured
-        base_url = os.environ.get("RO_AGENT_BASE_URL")
+        base_url = os.environ.get("RO_AGENT_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
         if base_url:
             env["RO_AGENT_BASE_URL"] = base_url
 
