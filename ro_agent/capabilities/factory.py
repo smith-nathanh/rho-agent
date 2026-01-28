@@ -60,6 +60,9 @@ class ToolFactory:
         # Register database tools (if configured)
         self._register_database_tools(registry, env)
 
+        # Register external service tools (if configured)
+        self._register_external_services(registry, env)
+
         return registry
 
     def _register_core_tools(self, registry: ToolRegistry) -> None:
@@ -186,6 +189,23 @@ class ToolFactory:
             registry.register(handler)
         except ImportError:
             pass  # psycopg not installed
+
+    def _register_external_services(
+        self, registry: ToolRegistry, env: dict[str, str]
+    ) -> None:
+        """Register external service tools that are configured via environment."""
+        # Azure DevOps - writable by default since agent needs to post findings
+        # Set AZURE_DEVOPS_READONLY=true to disable mutations
+        if env.get("AZURE_DEVOPS_ORG"):
+            readonly = env.get("AZURE_DEVOPS_READONLY", "").lower() == "true"
+            self._register_azure_devops(registry, readonly)
+
+    def _register_azure_devops(self, registry: ToolRegistry, readonly: bool) -> None:
+        """Register Azure DevOps handler."""
+        from ..tools.handlers.azure_devops import AzureDevOpsHandler
+        requires_approval = self.profile.requires_tool_approval("azure_devops")
+        handler = AzureDevOpsHandler(readonly=readonly, requires_approval=requires_approval)
+        registry.register(handler)
 
 
 def create_registry_from_profile(

@@ -250,6 +250,21 @@ Available when configured via environment variables:
 
 Each supports `list_tables`, `describe`, `query`, and `export_query`. Query restrictions depend on the profile—`readonly` and `developer` enforce SELECT-only, while `eval` allows mutations.
 
+### External Service Tools
+
+| Tool | Enable With | Description |
+|------|-------------|-------------|
+| `azure_devops` | `AZURE_DEVOPS_ORG`, `AZURE_DEVOPS_PAT` | Work item search, comments, updates |
+
+**Azure DevOps environment variables:**
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AZURE_DEVOPS_ORG` | Yes | Organization name (e.g., `mycompany`) |
+| `AZURE_DEVOPS_PAT` | Yes | Personal Access Token with work item permissions |
+| `AZURE_DEVOPS_PROJECT` | No | Default project (can also be passed per-call) |
+| `AZURE_DEVOPS_READONLY` | No | Set to `true` to disable mutations (default: writable) |
+
 ## Configuration
 
 ```bash

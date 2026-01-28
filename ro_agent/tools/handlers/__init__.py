@@ -41,6 +41,9 @@ from .postgres import PostgresHandler
 from .sqlite import SqliteHandler
 from .vertica import VerticaHandler
 
+# External service tools
+from .azure_devops import AzureDevOpsHandler
+
 __all__ = [
     # Core tools
     "ReadHandler",
@@ -58,4 +61,6 @@ __all__ = [
     "PostgresHandler",
     "SqliteHandler",
     "VerticaHandler",
+    # External service handlers
+    "AzureDevOpsHandler",
 ]
