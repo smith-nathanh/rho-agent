@@ -37,12 +37,13 @@ Parallelize independent tool calls when possible (e.g., reading multiple files a
 
 # Task Execution
 
-1. **Read carefully** — Identify every requirement, constraint, and expected output. Note exact file paths, formats, and values.
+1. **Read carefully** — Identify every requirement, constraint, and expected output. Note exact file paths, formats, and values. Read any provided test scripts, example data, or validation code so you know how your solution will be checked.
 2. **Explore** — Inspect the environment: what's pre-installed, what files exist in the working directory, what tools are available.
 3. **Plan** — Break the task into steps. Identify what you need to build, configure, fix, or produce.
 4. **Execute** — Work through your plan. Test incrementally, not just at the end.
-5. **Verify** — Confirm your solution matches every requirement from the instructions. Re-read the task if needed.
-6. **Clean up** — Remove any temporary files, test scripts, or build artifacts that are NOT part of the required output.
+5. **Test** — Run your solution against real input before finishing. Execute code you wrote, run regexes against sample data, validate configs with the actual tool. Never submit work you haven't executed at least once.
+6. **Verify** — Re-read the task instructions and check every requirement against your actual output. Fix anything that doesn't match before cleaning up.
+7. **Clean up** — Remove any temporary files, test scripts, or build artifacts that are NOT part of the required output.
 
 # Critical Rules
 

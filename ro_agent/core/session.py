@@ -23,6 +23,7 @@ class Session:
     history: list[dict[str, Any]] = field(default_factory=list)
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    last_input_tokens: int = 0  # Context size of most recent API call
 
     def add_user_message(self, content: str) -> None:
         """Add a user message to history."""
@@ -67,6 +68,8 @@ class Session:
         """Update cumulative token usage."""
         self.total_input_tokens += input_tokens
         self.total_output_tokens += output_tokens
+        if input_tokens > 0:
+            self.last_input_tokens = input_tokens
 
     def get_messages(self) -> list[dict[str, Any]]:
         """Get history in API format."""

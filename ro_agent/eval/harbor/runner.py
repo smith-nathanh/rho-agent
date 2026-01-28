@@ -83,6 +83,15 @@ async def run_task(instruction: str, working_dir: str = "/app") -> None:
         service_tier=service_tier,
     )
 
+    # Determine context window for auto-compaction
+    model_lower = model.lower()
+    if "gpt-5" in model_lower:
+        context_window = 400_000  # GPT-5.x family
+    elif "gpt-oss" in model_lower:
+        context_window = 128_000  # GPT-OSS-120B
+    else:
+        context_window = 128_000  # conservative default
+
     # Create agent with auto-approval (container is sandbox)
     agent = Agent(
         session=session,
@@ -90,6 +99,7 @@ async def run_task(instruction: str, working_dir: str = "/app") -> None:
         client=client,
         approval_callback=auto_approve,
         auto_compact=True,
+        context_window=context_window,
     )
 
     # Set up observability to capture full tool traces to SQLite
@@ -126,6 +136,10 @@ async def run_task(instruction: str, working_dir: str = "/app") -> None:
                         else event.tool_result
                     )
                     print(f"[Result: {result_preview}]", file=sys.stderr)
+            elif event.type == "compact_start":
+                print("\n[Compacting context...]", file=sys.stderr)
+            elif event.type == "compact_end":
+                print(f"[{event.content}]", file=sys.stderr)
             elif event.type == "error":
                 print(f"\nError: {event.content}", file=sys.stderr)
             elif event.type == "turn_complete":

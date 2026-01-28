@@ -13,9 +13,8 @@ from .session import Session, ToolResult
 # Max characters to store in history per tool result (roughly 5-8k tokens)
 MAX_TOOL_OUTPUT_CHARS = 20000
 
-# Default context window threshold for auto-compaction (80% of typical 128k window)
-DEFAULT_CONTEXT_LIMIT = 100_000  # tokens
-AUTO_COMPACT_THRESHOLD = 0.8
+# Auto-compaction triggers at this fraction of the model's context window
+AUTO_COMPACT_THRESHOLD = 0.7
 
 # Compaction prompts (following Codex/Claude Code patterns)
 COMPACTION_SYSTEM_PROMPT = """\
@@ -98,7 +97,7 @@ class Agent:
         registry: ToolRegistry,
         client: ModelClient | None = None,
         approval_callback: ApprovalCallback | None = None,
-        context_limit: int = DEFAULT_CONTEXT_LIMIT,
+        context_window: int | None = None,
         auto_compact: bool = True,
         cancel_check: Callable[[], bool] | None = None,
     ) -> None:
@@ -106,7 +105,7 @@ class Agent:
         self._registry = registry
         self._client = client or ModelClient()
         self._approval_callback = approval_callback
-        self._context_limit = context_limit
+        self._context_window = context_window
         self._auto_compact = auto_compact
         self._cancel_requested = False
         self._cancel_check = cancel_check
@@ -217,11 +216,12 @@ class Agent:
 
     def should_auto_compact(self) -> bool:
         """Check if auto-compaction should be triggered."""
-        if not self._auto_compact:
+        if not self._auto_compact or self._context_window is None:
             return False
-        estimated_tokens = self._session.estimate_tokens()
-        threshold = int(self._context_limit * AUTO_COMPACT_THRESHOLD)
-        return estimated_tokens > threshold
+        # Prefer actual token count from last API call over heuristic estimate
+        token_count = self._session.last_input_tokens or self._session.estimate_tokens()
+        threshold = int(self._context_window * AUTO_COMPACT_THRESHOLD)
+        return token_count > threshold
 
     async def run_turn(self, user_input: str) -> AsyncIterator[AgentEvent]:
         """Run a single conversation turn.
@@ -249,6 +249,16 @@ class Agent:
             if self.is_cancelled():
                 yield AgentEvent(type="cancelled", content="Cancelled before model call")
                 return
+
+            # Check if auto-compaction is needed before next model call
+            if self.should_auto_compact():
+                yield AgentEvent(type="compact_start", content="auto")
+                result = await self.compact(trigger="auto")
+                yield AgentEvent(
+                    type="compact_end",
+                    content=f"Compacted: {result.tokens_before} → {result.tokens_after} tokens",
+                )
+
             # Build prompt
             prompt = Prompt(
                 system=self._session.system_prompt,

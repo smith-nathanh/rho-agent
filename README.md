@@ -12,7 +12,11 @@ The `readonly` profile enforces system-level restrictions for safe inspection of
 ## Installation
 
 ```bash
+# Development (editable, in a virtualenv)
 uv sync
+
+# Global install (adds ro-agent and ro-eval to PATH)
+uv tool install .
 ```
 
 ## Running the Agent
