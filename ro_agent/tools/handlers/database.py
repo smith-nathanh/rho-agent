@@ -1,11 +1,14 @@
 """Base class for database handlers."""
 
+from __future__ import annotations
+
 import csv
 import re
 from abc import abstractmethod
 from pathlib import Path
 from typing import Any
 
+from ...config.databases import DatabaseConfig
 from ..base import ToolHandler, ToolInvocation, ToolOutput
 
 
@@ -88,21 +91,39 @@ class DatabaseHandler(ToolHandler):
 
     By default, the handler operates in readonly mode, blocking mutation queries.
     When readonly=False (for eval/sandbox scenarios), mutations are allowed.
+
+    Multi-database support:
+    - Pass `configs` list to support multiple databases of the same type
+    - Each tool call must include `database` parameter to select which DB
+    - Connections are cached by alias for efficiency
     """
 
     def __init__(
         self,
+        configs: list["DatabaseConfig"],
         row_limit: int = DEFAULT_ROW_LIMIT,
         readonly: bool = True,
         requires_approval: bool = True,
     ) -> None:
+        self._configs: dict[str, DatabaseConfig] = {c.alias: c for c in configs}
+        self._connections: dict[str, Any] = {}  # alias -> connection
         self._row_limit = row_limit
         self._readonly = readonly
         self._requires_approval = requires_approval
 
     def close(self) -> None:
-        """Close the database connection. Override in subclasses."""
-        pass
+        """Close all database connections."""
+        for alias in list(self._connections.keys()):
+            self._close_connection(alias)
+
+    def _close_connection(self, alias: str) -> None:
+        """Close a specific connection by alias. Override in subclasses if needed."""
+        conn = self._connections.pop(alias, None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def __enter__(self) -> "DatabaseHandler":
         """Context manager entry - returns self."""
@@ -136,18 +157,32 @@ class DatabaseHandler(ToolHandler):
     @property
     def description(self) -> str:
         mode_desc = "read-only" if self._readonly else "full"
+        db_list = ", ".join(sorted(self._configs.keys())) if self._configs else "none configured"
         return (
-            f"Query a {self.db_type.title()} database for schema inspection and {mode_desc} data access. "
-            f"Use 'query' for SQL queries, 'list_tables' to find tables, "
-            f"'describe' for detailed table schema, 'export_query' to export query results to CSV."
-            + (" All operations are read-only." if self._readonly else "")
+            f"Query {self.db_type.title()} databases [{db_list}]. "
+            f"Operations: 'list_tables' to see tables, 'describe' for schema, "
+            f"'query' for SQL, 'export_query' to export to CSV. "
+            f"Access: {mode_desc}."
         )
 
     @property
     def parameters(self) -> dict[str, Any]:
+        # Build database field with enum of available aliases
+        aliases = sorted(self._configs.keys()) if self._configs else []
+        database_field: dict[str, Any] = {
+            "type": "string",
+            "description": "Database alias to query",
+        }
+        if aliases:
+            database_field["enum"] = aliases
+
+        # Only require database param if multiple databases configured
+        required = ["operation"] if len(aliases) <= 1 else ["database", "operation"]
+
         return {
             "type": "object",
             "properties": {
+                "database": database_field,
                 "operation": {
                     "type": "string",
                     "enum": ["query", "list_tables", "describe", "export_query"],
@@ -184,19 +219,28 @@ class DatabaseHandler(ToolHandler):
                     "description": "Export format (default: csv)",
                 },
             },
-            "required": ["operation"],
+            "required": required,
         }
 
+    def _get_config(self, alias: str) -> "DatabaseConfig":
+        """Get config for a database alias."""
+        if alias not in self._configs:
+            available = ", ".join(sorted(self._configs.keys())) or "none"
+            raise ValueError(
+                f"Unknown database '{alias}'. Available: {available}"
+            )
+        return self._configs[alias]
+
     @abstractmethod
-    def _get_connection(self) -> Any:
-        """Get or create database connection."""
+    def _get_connection(self, alias: str) -> Any:
+        """Get or create database connection for the given alias."""
         ...
 
     @abstractmethod
     def _execute_query(
-        self, sql: str, params: dict[str, Any] | None = None
+        self, alias: str, sql: str, params: dict[str, Any] | None = None
     ) -> tuple[list[str], list[tuple]]:
-        """Execute SQL and return (columns, rows)."""
+        """Execute SQL on the specified database and return (columns, rows)."""
         ...
 
     @abstractmethod
@@ -241,20 +285,44 @@ class DatabaseHandler(ToolHandler):
 
         return "\n".join(lines)
 
+    def _resolve_alias(self, db_alias: str | None) -> str | None:
+        """Resolve database alias, defaulting to the only config if just one exists."""
+        if db_alias:
+            return db_alias if db_alias in self._configs else None
+        # Auto-select if only one database configured
+        if len(self._configs) == 1:
+            return next(iter(self._configs.keys()))
+        return None
+
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
         """Execute the database operation."""
+        db_alias = self._resolve_alias(invocation.arguments.get("database"))
         operation = invocation.arguments.get("operation", "")
         row_limit = invocation.arguments.get("row_limit", self._row_limit)
 
+        # Validate database alias
+        if not db_alias:
+            available = ", ".join(sorted(self._configs.keys())) or "none configured"
+            provided = invocation.arguments.get("database", "")
+            if provided:
+                return ToolOutput(
+                    content=f"Unknown database '{provided}'. Available: {available}",
+                    success=False,
+                )
+            return ToolOutput(
+                content=f"Missing required 'database' parameter. Available: {available}",
+                success=False,
+            )
+
         try:
             if operation == "query":
-                return await self._handle_query(invocation, row_limit)
+                return await self._handle_query(invocation, db_alias, row_limit)
             elif operation == "list_tables":
-                return await self._handle_list_tables(invocation, row_limit)
+                return await self._handle_list_tables(invocation, db_alias, row_limit)
             elif operation == "describe":
-                return await self._handle_describe(invocation)
+                return await self._handle_describe(invocation, db_alias)
             elif operation == "export_query":
-                return await self._handle_export_query(invocation)
+                return await self._handle_export_query(invocation, db_alias)
             else:
                 return ToolOutput(
                     content=f"Unknown operation: {operation}. Use: query, list_tables, describe, export_query",
@@ -266,7 +334,7 @@ class DatabaseHandler(ToolHandler):
             )
 
     async def _handle_query(
-        self, invocation: ToolInvocation, row_limit: int
+        self, invocation: ToolInvocation, db_alias: str, row_limit: int
     ) -> ToolOutput:
         """Execute a SQL query (readonly mode blocks mutations)."""
         sql = invocation.arguments.get("sql", "")
@@ -279,7 +347,7 @@ class DatabaseHandler(ToolHandler):
             if not is_safe:
                 return ToolOutput(content=f"Query blocked: {reason}", success=False)
 
-        columns, rows = self._execute_query(sql)
+        columns, rows = self._execute_query(db_alias, sql)
 
         if not columns:
             return ToolOutput(content="Query executed (no result set)", success=True)
@@ -299,7 +367,7 @@ class DatabaseHandler(ToolHandler):
         )
 
     async def _handle_list_tables(
-        self, invocation: ToolInvocation, row_limit: int
+        self, invocation: ToolInvocation, db_alias: str, row_limit: int
     ) -> ToolOutput:
         """List tables matching a pattern."""
         pattern = invocation.arguments.get("table_pattern", "%")
@@ -309,7 +377,7 @@ class DatabaseHandler(ToolHandler):
         # Inject pattern into params
         params["pattern"] = pattern
 
-        columns, rows = self._execute_query(sql, params)
+        columns, rows = self._execute_query(db_alias, sql, params)
 
         if not rows:
             return ToolOutput(
@@ -326,7 +394,9 @@ class DatabaseHandler(ToolHandler):
             metadata={"table_count": min(len(rows), row_limit)},
         )
 
-    async def _handle_describe(self, invocation: ToolInvocation) -> ToolOutput:
+    async def _handle_describe(
+        self, invocation: ToolInvocation, db_alias: str
+    ) -> ToolOutput:
         """Get detailed schema for a table."""
         table_name = invocation.arguments.get("table_name", "")
         schema = invocation.arguments.get("schema")
@@ -335,13 +405,13 @@ class DatabaseHandler(ToolHandler):
             return ToolOutput(content="No table_name provided", success=False)
 
         sql, params = self._get_describe_sql(table_name, schema)
-        columns, rows = self._execute_query(sql, params)
+        columns, rows = self._execute_query(db_alias, sql, params)
 
         if not rows:
             return ToolOutput(content=f"Table not found: {table_name}", success=False)
 
         # Get extra info (PK, indexes) if available
-        extra_info = self._get_table_extra_info(table_name, schema)
+        extra_info = self._get_table_extra_info(db_alias, table_name, schema)
 
         content = self._format_describe_output(table_name, rows, extra_info)
 
@@ -354,7 +424,9 @@ class DatabaseHandler(ToolHandler):
             },
         )
 
-    async def _handle_export_query(self, invocation: ToolInvocation) -> ToolOutput:
+    async def _handle_export_query(
+        self, invocation: ToolInvocation, db_alias: str
+    ) -> ToolOutput:
         """Export query results directly to a CSV file (streaming, memory-efficient)."""
         sql = invocation.arguments.get("sql", "")
         export_path = invocation.arguments.get("export_path", "")
@@ -401,7 +473,7 @@ class DatabaseHandler(ToolHandler):
             path.parent.mkdir(parents=True, exist_ok=True)
 
             # Get connection and execute query
-            conn = self._get_connection()
+            conn = self._get_connection(db_alias)
             cursor = conn.cursor()
             cursor.execute(sql)
 
@@ -454,7 +526,7 @@ class DatabaseHandler(ToolHandler):
             )
 
     def _get_table_extra_info(
-        self, table_name: str, schema: str | None
+        self, alias: str, table_name: str, schema: str | None
     ) -> dict[str, Any] | None:
         """Get additional table info (PK, indexes). Override in subclasses."""
         return None

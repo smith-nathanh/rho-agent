@@ -1,8 +1,10 @@
 """Oracle database handler."""
 
-import os
+from __future__ import annotations
+
 from typing import Any
 
+from ...config.databases import DatabaseConfig
 from .database import DatabaseHandler
 
 try:
@@ -14,51 +16,70 @@ except ImportError:
 
 
 class OracleHandler(DatabaseHandler):
-    """Oracle database handler with configurable readonly mode."""
+    """Oracle database handler with configurable readonly mode.
+
+    Supports multiple databases via the configs parameter. Each database
+    is identified by an alias and must specify a `database` parameter
+    in tool calls (unless only one database is configured).
+    """
 
     def __init__(
         self,
-        dsn: str | None = None,
-        user: str | None = None,
-        password: str | None = None,
+        configs: list[DatabaseConfig],
         **kwargs: Any,
     ) -> None:
-        super().__init__(**kwargs)
-        self._dsn = dsn or os.environ.get("ORACLE_DSN", "")
-        self._user = user or os.environ.get("ORACLE_USER", "")
-        self._password = password or os.environ.get("ORACLE_PASSWORD", "")
-        self._connection: Any = None
+        """Initialize Oracle handler.
+
+        Args:
+            configs: List of database configurations.
+            **kwargs: Passed to DatabaseHandler (row_limit, readonly, etc.)
+        """
+        super().__init__(configs=configs, **kwargs)
 
     @property
     def db_type(self) -> str:
         return "oracle"
 
-    @property
-    def description(self) -> str:
-        conn_info = f"{self._user}@{self._dsn}" if self._user else self._dsn
-        mode_desc = "read-only" if self._readonly else "full"
-        return (
-            f"Query the Oracle database at {conn_info}. "
-            f"Use 'list_tables' to see available tables, 'describe' for table schema, "
-            f"'query' for SQL queries ({mode_desc} access)."
-        )
 
-    def _get_connection(self) -> Any:
+    def _get_connection(self, alias: str) -> Any:
+        """Get or create connection for the specified database alias."""
         if not ORACLEDB_AVAILABLE:
             raise RuntimeError("oracledb package not installed. Run: uv add oracledb")
 
-        if self._connection is None:
-            self._connection = oracledb.connect(
-                user=self._user,
-                password=self._password,
-                dsn=self._dsn,
-            )
-        return self._connection
+        # Check if existing connection is still valid
+        if alias in self._connections:
+            conn = self._connections[alias]
+            try:
+                conn.ping()
+                return conn
+            except Exception:
+                # Connection lost, remove from cache
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                del self._connections[alias]
+
+        config = self._get_config(alias)
+        if not config.dsn:
+            raise RuntimeError(f"No DSN configured for Oracle database '{alias}'")
+
+        conn = oracledb.connect(
+            user=config.user or "",
+            password=config.password or "",
+            dsn=config.dsn,
+        )
+        # Note: Oracle's SET TRANSACTION READ ONLY only applies to the current
+        # transaction and doesn't persist across commits. Readonly enforcement
+        # is handled by the base class's mutation pattern checking instead.
+
+        self._connections[alias] = conn
+        return conn
 
     def _execute_query(
-        self, sql: str, params: dict[str, Any] | None = None
+        self, alias: str, sql: str, params: dict[str, Any] | None = None
     ) -> tuple[list[str], list[tuple]]:
-        conn = self._get_connection()
+        conn = self._get_connection(alias)
         with conn.cursor() as cursor:
             cursor.execute(sql, params or {})
             if cursor.description is None:
@@ -128,9 +149,9 @@ class OracleHandler(DatabaseHandler):
         )
 
     def _get_table_extra_info(
-        self, table_name: str, schema: str | None
+        self, alias: str, table_name: str, schema: str | None
     ) -> dict[str, Any] | None:
-        conn = self._get_connection()
+        conn = self._get_connection(alias)
         extra: dict[str, Any] = {}
 
         with conn.cursor() as cursor:
@@ -186,12 +207,3 @@ class OracleHandler(DatabaseHandler):
                 extra["indexes"] = indexes
 
         return extra if extra else None
-
-    def close(self) -> None:
-        """Close the Oracle database connection."""
-        if self._connection is not None:
-            try:
-                self._connection.close()
-            except Exception:
-                pass
-            self._connection = None

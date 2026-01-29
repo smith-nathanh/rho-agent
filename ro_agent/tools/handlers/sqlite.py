@@ -1,61 +1,86 @@
 """SQLite database handler."""
 
-import os
+from __future__ import annotations
+
 import sqlite3
 from typing import Any
 
+from ...config.databases import DatabaseConfig
 from .database import DatabaseHandler
 
 
-class SqliteHandler(DatabaseHandler):
-    """SQLite database handler with configurable readonly mode."""
+def _quote_pragma_arg(name: str) -> str:
+    """Quote a table name for use in SQLite PRAGMA functions.
 
-    def __init__(self, db_path: str | None = None, **kwargs: Any) -> None:
+    PRAGMA functions expect single-quoted string literals for names with
+    special characters. This is safe because PRAGMA doesn't execute SQL -
+    it just looks up metadata for the literal table name.
+    """
+    # Escape single quotes by doubling them, wrap in quotes
+    return f"'{name.replace(chr(39), chr(39) + chr(39))}'"
+
+
+class SqliteHandler(DatabaseHandler):
+    """SQLite database handler with configurable readonly mode.
+
+    Supports multiple databases via the configs parameter. Each database
+    is identified by an alias and must specify a `database` parameter
+    in tool calls (unless only one database is configured).
+    """
+
+    def __init__(
+        self,
+        configs: list[DatabaseConfig],
+        **kwargs: Any,
+    ) -> None:
         """Initialize SQLite handler.
 
-        Connection can be configured via constructor arg or environment variable:
-        - SQLITE_DB: Path to SQLite database file
-
         Args:
-            db_path: Path to SQLite database file.
-            readonly: If True (default), opens database in read-only mode.
+            configs: List of database configurations.
             **kwargs: Passed to DatabaseHandler (row_limit, readonly, etc.)
         """
-        super().__init__(**kwargs)
-        self._db_path = db_path or os.environ.get("SQLITE_DB", "")
-        self._connection: sqlite3.Connection | None = None
+        super().__init__(configs=configs, **kwargs)
 
     @property
     def db_type(self) -> str:
         return "sqlite"
 
-    @property
-    def description(self) -> str:
-        mode_desc = "read-only" if self._readonly else "full"
-        return (
-            f"Query the SQLite database at {self._db_path}. "
-            f"Use 'list_tables' to see available tables, 'describe' for table schema, "
-            f"'query' for SQL queries ({mode_desc} access)."
+
+    def _get_connection(self, alias: str) -> sqlite3.Connection:
+        """Get or create connection for the specified database alias."""
+        # Check if existing connection is still valid
+        if alias in self._connections:
+            conn = self._connections[alias]
+            try:
+                # Test connection with a simple query
+                conn.execute("SELECT 1")
+                return conn
+            except Exception:
+                # Connection lost, remove from cache
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                del self._connections[alias]
+
+        config = self._get_config(alias)
+        if not config.path:
+            raise RuntimeError(f"No path configured for SQLite database '{alias}'")
+
+        # Open in read-only or read-write mode based on readonly flag
+        mode = "ro" if self._readonly else "rw"
+        conn = sqlite3.connect(
+            f"file:{config.path}?mode={mode}",
+            uri=True,
+            check_same_thread=False,
         )
-
-    def _get_connection(self) -> sqlite3.Connection:
-        if not self._db_path:
-            raise RuntimeError("No SQLite database configured. Set SQLITE_DB env var.")
-
-        if self._connection is None:
-            # Open in read-only or read-write mode based on readonly flag
-            mode = "ro" if self._readonly else "rw"
-            self._connection = sqlite3.connect(
-                f"file:{self._db_path}?mode={mode}",
-                uri=True,
-                check_same_thread=False,
-            )
-        return self._connection
+        self._connections[alias] = conn
+        return conn
 
     def _execute_query(
-        self, sql: str, params: dict[str, Any] | None = None
+        self, alias: str, sql: str, params: dict[str, Any] | None = None
     ) -> tuple[list[str], list[tuple]]:
-        conn = self._get_connection()
+        conn = self._get_connection(alias)
         cursor = conn.cursor()
 
         # SQLite uses ? or :name for params
@@ -89,31 +114,30 @@ class SqliteHandler(DatabaseHandler):
         self, table_name: str, schema: str | None
     ) -> tuple[str, dict[str, Any]]:
         # SQLite's PRAGMA doesn't support parameterized table names,
-        # so we validate and use string formatting
-        # Table name is validated by the caller
-        safe_name = table_name.replace("'", "''").replace('"', '""')
+        # so we quote the identifier for safety
+        safe_name = _quote_pragma_arg(table_name)
         return (
             f"""
             SELECT name, type,
                 CASE WHEN "notnull" = 1 THEN 'N' ELSE 'Y' END as nullable
-            FROM pragma_table_info('{safe_name}')
+            FROM pragma_table_info({safe_name})
             ORDER BY cid
             """,
             {},
         )
 
     def _get_table_extra_info(
-        self, table_name: str, schema: str | None
+        self, alias: str, table_name: str, schema: str | None
     ) -> dict[str, Any] | None:
-        conn = self._get_connection()
+        conn = self._get_connection(alias)
         cursor = conn.cursor()
         extra: dict[str, Any] = {}
 
-        safe_name = table_name.replace("'", "''").replace('"', '""')
+        safe_name = _quote_pragma_arg(table_name)
 
         # Primary key columns
         cursor.execute(
-            f"SELECT name FROM pragma_table_info('{safe_name}') WHERE pk > 0 ORDER BY pk"
+            f"SELECT name FROM pragma_table_info({safe_name}) WHERE pk > 0 ORDER BY pk"
         )
         pk_cols = [row[0] for row in cursor.fetchall()]
         if pk_cols:
@@ -121,16 +145,10 @@ class SqliteHandler(DatabaseHandler):
 
         # Indexes
         cursor.execute(
-            f"SELECT name || ' (' || CASE WHEN \"unique\" THEN 'UNIQUE' ELSE 'NONUNIQUE' END || ')' FROM pragma_index_list('{safe_name}')"
+            f"SELECT name || ' (' || CASE WHEN \"unique\" THEN 'UNIQUE' ELSE 'NONUNIQUE' END || ')' FROM pragma_index_list({safe_name})"
         )
         indexes = [row[0] for row in cursor.fetchall()]
         if indexes:
             extra["indexes"] = indexes
 
         return extra if extra else None
-
-    def close(self) -> None:
-        """Close the SQLite connection."""
-        if self._connection is not None:
-            self._connection.close()
-            self._connection = None

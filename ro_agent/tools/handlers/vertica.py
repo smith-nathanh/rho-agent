@@ -1,8 +1,10 @@
 """Vertica database handler."""
 
-import os
+from __future__ import annotations
+
 from typing import Any
 
+from ...config.databases import DatabaseConfig
 from .database import DatabaseHandler
 
 try:
@@ -14,60 +16,75 @@ except ImportError:
 
 
 class VerticaHandler(DatabaseHandler):
-    """Vertica database handler with configurable readonly mode."""
+    """Vertica database handler with configurable readonly mode.
+
+    Supports multiple databases via the configs parameter. Each database
+    is identified by an alias and must specify a `database` parameter
+    in tool calls (unless only one database is configured).
+    """
 
     def __init__(
         self,
-        host: str | None = None,
-        port: int | None = None,
-        database: str | None = None,
-        user: str | None = None,
-        password: str | None = None,
+        configs: list[DatabaseConfig],
         **kwargs: Any,
     ) -> None:
-        super().__init__(**kwargs)
-        self._host = host or os.environ.get("VERTICA_HOST", "localhost")
-        self._port = port or int(os.environ.get("VERTICA_PORT", "5433"))
-        self._database = database or os.environ.get("VERTICA_DATABASE", "")
-        self._user = user or os.environ.get("VERTICA_USER", "")
-        self._password = password or os.environ.get("VERTICA_PASSWORD", "")
-        self._connection: Any = None
+        """Initialize Vertica handler.
+
+        Args:
+            configs: List of database configurations.
+            **kwargs: Passed to DatabaseHandler (row_limit, readonly, etc.)
+        """
+        super().__init__(configs=configs, **kwargs)
 
     @property
     def db_type(self) -> str:
         return "vertica"
 
-    @property
-    def description(self) -> str:
-        conn_info = f"{self._host}:{self._port}/{self._database}"
-        mode_desc = "read-only" if self._readonly else "full"
-        return (
-            f"Query the Vertica database at {conn_info}. "
-            f"Use 'list_tables' to see available tables, 'describe' for table schema, "
-            f"'query' for SQL queries ({mode_desc} access)."
-        )
 
-    def _get_connection(self) -> Any:
+    def _get_connection(self, alias: str) -> Any:
+        """Get or create connection for the specified database alias."""
         if not VERTICA_AVAILABLE:
             raise RuntimeError(
                 "vertica-python package not installed. Run: uv add vertica-python"
             )
 
-        if self._connection is None:
-            self._connection = vertica_python.connect(
-                host=self._host,
-                port=self._port,
-                database=self._database,
-                user=self._user,
-                password=self._password,
-                read_only=self._readonly,  # Honor readonly mode
+        # Check if existing connection is still valid
+        if alias in self._connections:
+            conn = self._connections[alias]
+            try:
+                # Test connection with a simple query
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                return conn
+            except Exception:
+                # Connection lost, remove from cache
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                del self._connections[alias]
+
+        config = self._get_config(alias)
+        if not config.database:
+            raise RuntimeError(
+                f"No database name configured for Vertica '{alias}'"
             )
-        return self._connection
+
+        conn = vertica_python.connect(
+            host=config.host or "localhost",
+            port=config.port or 5433,
+            database=config.database,
+            user=config.user or "",
+            password=config.password or "",
+            read_only=self._readonly,  # Honor readonly mode
+        )
+        self._connections[alias] = conn
+        return conn
 
     def _execute_query(
-        self, sql: str, params: dict[str, Any] | None = None
+        self, alias: str, sql: str, params: dict[str, Any] | None = None
     ) -> tuple[list[str], list[tuple]]:
-        conn = self._get_connection()
+        conn = self._get_connection(alias)
         with conn.cursor() as cursor:
             cursor.execute(sql, params or {})
             if cursor.description is None:
@@ -148,9 +165,9 @@ class VerticaHandler(DatabaseHandler):
         )
 
     def _get_table_extra_info(
-        self, table_name: str, schema: str | None
+        self, alias: str, table_name: str, schema: str | None
     ) -> dict[str, Any] | None:
-        conn = self._get_connection()
+        conn = self._get_connection(alias)
         extra: dict[str, Any] = {}
 
         with conn.cursor() as cursor:
@@ -203,12 +220,3 @@ class VerticaHandler(DatabaseHandler):
                 extra["indexes"] = projections  # Reuse indexes field for projections
 
         return extra if extra else None
-
-    def close(self) -> None:
-        """Close the Vertica database connection."""
-        if self._connection is not None:
-            try:
-                self._connection.close()
-            except Exception:
-                pass
-            self._connection = None

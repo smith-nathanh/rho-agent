@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from ..config.databases import DatabaseConfig, load_database_config
 from ..tools.base import ToolHandler
 from ..tools.registry import ToolRegistry
 from . import (
@@ -120,75 +121,75 @@ class ToolFactory:
     def _register_database_tools(
         self, registry: ToolRegistry, env: dict[str, str]
     ) -> None:
-        """Register database tools that are configured via environment."""
+        """Register database tools from config file."""
         readonly = self.profile.database == DatabaseMode.READONLY
+        db_configs = self._load_database_configs(env)
 
-        # Oracle
-        if env.get("ORACLE_DSN"):
-            self._register_oracle(registry, readonly)
+        for db_type, configs in db_configs.items():
+            self._register_db_handler(registry, db_type, configs, readonly)
 
-        # SQLite
-        if env.get("SQLITE_DB"):
-            self._register_sqlite(registry, readonly)
+    def _load_database_configs(
+        self, env: dict[str, str]
+    ) -> dict[str, list[DatabaseConfig]]:
+        """Load multi-database configuration if available.
 
-        # Vertica
-        if env.get("VERTICA_HOST"):
-            self._register_vertica(registry, readonly)
+        Raises:
+            ValueError: If config file exists but is malformed.
+        """
+        return load_database_config(env=env)
 
-        # MySQL
-        if env.get("MYSQL_HOST"):
-            self._register_mysql(registry, readonly)
+    def _register_db_handler(
+        self,
+        registry: ToolRegistry,
+        db_type: str,
+        configs: list[DatabaseConfig],
+        readonly: bool,
+    ) -> None:
+        """Register a database handler with the given configs."""
+        requires_approval = self.profile.requires_tool_approval(db_type)
 
-        # PostgreSQL
-        if env.get("POSTGRES_HOST"):
-            self._register_postgres(registry, readonly)
-
-    def _register_oracle(self, registry: ToolRegistry, readonly: bool) -> None:
-        """Register Oracle handler if available."""
-        try:
-            from ..tools.handlers.oracle import OracleHandler
-            requires_approval = self.profile.requires_tool_approval("oracle")
-            handler = OracleHandler(readonly=readonly, requires_approval=requires_approval)
+        if db_type == "sqlite":
+            from ..tools.handlers.sqlite import SqliteHandler
+            handler = SqliteHandler(
+                configs=configs, readonly=readonly, requires_approval=requires_approval
+            )
             registry.register(handler)
-        except ImportError:
-            pass  # oracledb not installed
-
-    def _register_sqlite(self, registry: ToolRegistry, readonly: bool) -> None:
-        """Register SQLite handler."""
-        from ..tools.handlers.sqlite import SqliteHandler
-        requires_approval = self.profile.requires_tool_approval("sqlite")
-        handler = SqliteHandler(readonly=readonly, requires_approval=requires_approval)
-        registry.register(handler)
-
-    def _register_vertica(self, registry: ToolRegistry, readonly: bool) -> None:
-        """Register Vertica handler if available."""
-        try:
-            from ..tools.handlers.vertica import VerticaHandler
-            requires_approval = self.profile.requires_tool_approval("vertica")
-            handler = VerticaHandler(readonly=readonly, requires_approval=requires_approval)
-            registry.register(handler)
-        except ImportError:
-            pass  # vertica-python not installed
-
-    def _register_mysql(self, registry: ToolRegistry, readonly: bool) -> None:
-        """Register MySQL handler if available."""
-        try:
-            from ..tools.handlers.mysql import MysqlHandler
-            requires_approval = self.profile.requires_tool_approval("mysql")
-            handler = MysqlHandler(readonly=readonly, requires_approval=requires_approval)
-            registry.register(handler)
-        except ImportError:
-            pass  # mysql-connector-python not installed
-
-    def _register_postgres(self, registry: ToolRegistry, readonly: bool) -> None:
-        """Register PostgreSQL handler if available."""
-        try:
-            from ..tools.handlers.postgres import PostgresHandler
-            requires_approval = self.profile.requires_tool_approval("postgres")
-            handler = PostgresHandler(readonly=readonly, requires_approval=requires_approval)
-            registry.register(handler)
-        except ImportError:
-            pass  # psycopg not installed
+        elif db_type == "postgres":
+            try:
+                from ..tools.handlers.postgres import PostgresHandler
+                handler = PostgresHandler(
+                    configs=configs, readonly=readonly, requires_approval=requires_approval
+                )
+                registry.register(handler)
+            except ImportError:
+                pass
+        elif db_type == "mysql":
+            try:
+                from ..tools.handlers.mysql import MysqlHandler
+                handler = MysqlHandler(
+                    configs=configs, readonly=readonly, requires_approval=requires_approval
+                )
+                registry.register(handler)
+            except ImportError:
+                pass
+        elif db_type == "oracle":
+            try:
+                from ..tools.handlers.oracle import OracleHandler
+                handler = OracleHandler(
+                    configs=configs, readonly=readonly, requires_approval=requires_approval
+                )
+                registry.register(handler)
+            except ImportError:
+                pass
+        elif db_type == "vertica":
+            try:
+                from ..tools.handlers.vertica import VerticaHandler
+                handler = VerticaHandler(
+                    configs=configs, readonly=readonly, requires_approval=requires_approval
+                )
+                registry.register(handler)
+            except ImportError:
+                pass
 
     def _register_external_services(
         self, registry: ToolRegistry, env: dict[str, str]

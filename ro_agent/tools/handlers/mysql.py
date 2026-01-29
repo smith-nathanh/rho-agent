@@ -1,8 +1,10 @@
 """MySQL database handler."""
 
-import os
+from __future__ import annotations
+
 from typing import Any
 
+from ...config.databases import DatabaseConfig
 from .database import DatabaseHandler
 
 # Check for mysql-connector-python availability
@@ -20,80 +22,73 @@ SYSTEM_SCHEMAS = ("mysql", "information_schema", "performance_schema", "sys")
 
 
 class MysqlHandler(DatabaseHandler):
-    """MySQL database handler with configurable readonly mode."""
+    """MySQL database handler with configurable readonly mode.
+
+    Supports multiple databases via the configs parameter. Each database
+    is identified by an alias and must specify a `database` parameter
+    in tool calls (unless only one database is configured).
+    """
 
     def __init__(
         self,
-        host: str | None = None,
-        port: int | None = None,
-        database: str | None = None,
-        user: str | None = None,
-        password: str | None = None,
+        configs: list[DatabaseConfig],
         **kwargs: Any,
     ) -> None:
         """Initialize MySQL handler.
 
-        Connection can be configured via constructor args or environment variables:
-        - MYSQL_HOST: Database host (default: localhost)
-        - MYSQL_PORT: Database port (default: 3306)
-        - MYSQL_DATABASE: Database name
-        - MYSQL_USER: Username
-        - MYSQL_PASSWORD: Password
+        Args:
+            configs: List of database configurations.
+            **kwargs: Passed to DatabaseHandler (row_limit, readonly, etc.)
         """
-        super().__init__(**kwargs)
-        self._host = host or os.environ.get("MYSQL_HOST", "localhost")
-        self._port = port or int(os.environ.get("MYSQL_PORT", "3306"))
-        self._database = database or os.environ.get("MYSQL_DATABASE", "")
-        self._user = user or os.environ.get("MYSQL_USER", "")
-        self._password = password or os.environ.get("MYSQL_PASSWORD", "")
-        self._connection: Any = None
+        super().__init__(configs=configs, **kwargs)
 
     @property
     def db_type(self) -> str:
         return "mysql"
 
-    @property
-    def description(self) -> str:
-        db_info = f"{self._database}@{self._host}" if self._database else "MySQL"
-        mode_desc = "read-only" if self._readonly else "full"
-        return (
-            f"Query the MySQL database ({db_info}). "
-            f"Use 'list_tables' to see available tables, 'describe' for table schema, "
-            f"'query' for SQL queries ({mode_desc} access), 'export_query' to export results to CSV."
-        )
 
-    def _get_connection(self) -> Any:
+    def _get_connection(self, alias: str) -> Any:
+        """Get or create connection for the specified database alias."""
         if not MYSQL_AVAILABLE:
             raise RuntimeError(
                 "MySQL driver not available. Install mysql-connector-python: uv add mysql-connector-python"
             )
 
-        if not self._database:
+        # Check if existing connection is still valid
+        if alias in self._connections:
+            conn = self._connections[alias]
+            if conn.is_connected():
+                return conn
+            # Connection lost, remove from cache
+            del self._connections[alias]
+
+        config = self._get_config(alias)
+        if not config.database:
             raise RuntimeError(
-                "No MySQL database configured. Set MYSQL_DATABASE env var."
+                f"No database name configured for MySQL '{alias}'"
             )
 
-        if self._connection is None or not self._connection.is_connected():
-            self._connection = mysql.connector.connect(
-                host=self._host,
-                port=self._port,
-                database=self._database,
-                user=self._user,
-                password=self._password,
-                autocommit=True,
-            )
-            # Set session to read-only mode when readonly is enabled
-            if self._readonly:
-                cursor = self._connection.cursor()
-                cursor.execute("SET SESSION TRANSACTION READ ONLY")
-                cursor.close()
+        conn = mysql.connector.connect(
+            host=config.host or "localhost",
+            port=config.port or 3306,
+            database=config.database,
+            user=config.user or "",
+            password=config.password or "",
+            autocommit=True,
+        )
+        # Set session to read-only mode when readonly is enabled
+        if self._readonly:
+            cursor = conn.cursor()
+            cursor.execute("SET SESSION TRANSACTION READ ONLY")
+            cursor.close()
 
-        return self._connection
+        self._connections[alias] = conn
+        return conn
 
     def _execute_query(
-        self, sql: str, params: dict[str, Any] | None = None
+        self, alias: str, sql: str, params: dict[str, Any] | None = None
     ) -> tuple[list[str], list[tuple]]:
-        conn = self._get_connection()
+        conn = self._get_connection(alias)
         cursor = conn.cursor()
 
         # MySQL connector uses %(name)s for named params
@@ -187,9 +182,9 @@ class MysqlHandler(DatabaseHandler):
             )
 
     def _get_table_extra_info(
-        self, table_name: str, schema: str | None
+        self, alias: str, table_name: str, schema: str | None
     ) -> dict[str, Any] | None:
-        conn = self._get_connection()
+        conn = self._get_connection(alias)
         cursor = conn.cursor()
         extra: dict[str, Any] = {}
 
@@ -240,12 +235,3 @@ class MysqlHandler(DatabaseHandler):
 
         cursor.close()
         return extra if extra else None
-
-    def close(self) -> None:
-        """Close the database connection."""
-        if self._connection is not None:
-            try:
-                self._connection.close()
-            except Exception:
-                pass
-            self._connection = None
