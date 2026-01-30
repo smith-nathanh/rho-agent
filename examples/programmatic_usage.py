@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Example: Using ro-agent programmatically from Python.
+"""Example: Using rho-agent programmatically from Python.
 
-This demonstrates how to embed ro-agent in a Python script to:
+This demonstrates how to embed rho-agent in a Python script to:
 1. Pass context and get a response (single turn)
 2. Let the agent run autonomously with tools (multi-turn)
 
@@ -13,11 +13,11 @@ import asyncio
 import os
 
 from dotenv import load_dotenv
-from ro_agent.core.agent import Agent
-from ro_agent.core.session import Session
-from ro_agent.client.model import ModelClient
-from ro_agent.tools.registry import ToolRegistry
-from ro_agent.tools.handlers import (
+from rho_agent.core.agent import Agent
+from rho_agent.core.session import Session
+from rho_agent.client.model import ModelClient
+from rho_agent.tools.registry import ToolRegistry
+from rho_agent.tools.handlers import (
     ReadFileHandler,
     SearchHandler,
     FindFilesHandler,

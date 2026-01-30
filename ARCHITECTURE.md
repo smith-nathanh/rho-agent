@@ -1,8 +1,8 @@
-# ro-agent Architecture
+# rho-agent Architecture
 
 ## Overview
 
-`ro-agent` is a Python-based research agent with **configurable capability profiles**. The core agent harness orchestrates a conversation loop between an LLM and a set of tools, with streaming responses and approval workflows.
+`rho-agent` is a Python-based research agent with **configurable capability profiles**. The core agent harness orchestrates a conversation loop between an LLM and a set of tools, with streaming responses and approval workflows.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐

@@ -1,0 +1,46 @@
+# Example database configuration for rho-agent
+# Set RHO_AGENT_DB_CONFIG=/path/to/this/file or place at ~/.config/rho-agent/databases.yaml
+
+databases:
+  # SQLite - local file databases
+  test:
+    type: sqlite
+    path: ./test_data.db
+
+  sample:
+    type: sqlite
+    path: ./demo/sample_data.db
+
+  # PostgreSQL
+  pg_analytics:
+    type: postgres
+    host: ${POSTGRES_HOST}
+    port: 5432
+    database: analytics
+    user: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+
+  # MySQL
+  mysql_app:
+    type: mysql
+    host: ${MYSQL_HOST}
+    port: 3306
+    database: application
+    user: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+
+  # Oracle - uses DSN format (host:port/service)
+  oracle_prod:
+    type: oracle
+    dsn: ${ORACLE_HOST}:1521/ORCL
+    user: ${ORACLE_USER}
+    password: ${ORACLE_PASSWORD}
+
+  # Vertica
+  vertica_warehouse:
+    type: vertica
+    host: ${VERTICA_HOST}
+    port: 5433
+    database: warehouse
+    user: ${VERTICA_USER}
+    password: ${VERTICA_PASSWORD}

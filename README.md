@@ -1,4 +1,4 @@
-# ro-agent
+# rho-agent
 
 A Python-based agent harness with configurable access/capabilitity profiles.
 
@@ -15,7 +15,7 @@ The `readonly` profile enforces system-level restrictions for safe inspection of
 # Development (editable, in a virtualenv)
 uv sync
 
-# Global install (adds ro-agent and ro-eval to PATH)
+# Global install (adds rho-agent and rho-eval to PATH)
 uv tool install .
 ```
 
@@ -26,8 +26,8 @@ uv tool install .
 Start a REPL session for exploratory, multi-turn research:
 
 ```bash
-uv run ro-agent main
-uv run ro-agent main --profile developer --working-dir ~/proj/myapp
+uv run rho-agent main
+uv run rho-agent main --profile developer --working-dir ~/proj/myapp
 ```
 
 The interactive mode supports multi-line input (Esc+Enter), tab completion, session history, and in-session commands (`/approve`, `/compact`, `/help`, `/clear`, `exit`).
@@ -38,11 +38,11 @@ Run a one-off task and exit—useful for scripting or CI:
 
 ```bash
 # Inline prompt
-uv run ro-agent main "what does this project do?"
-uv run ro-agent main --output summary.md "summarize the error handling"
+uv run rho-agent main "what does this project do?"
+uv run rho-agent main --output summary.md "summarize the error handling"
 
 # From a prompt template (with variable substitution)
-uv run ro-agent main --prompt examples/job-failure.md \
+uv run rho-agent main --prompt examples/job-failure.md \
   --var cluster=prod --var log_path=/mnt/logs/12345
 ```
 
@@ -62,9 +62,9 @@ uv run streamlit run demo/app.py  # launch app
 ### Database Research (readonly)
 
 ```bash
-$ SQLITE_DB=test_data.db uv run ro-agent main
+$ SQLITE_DB=test_data.db uv run rho-agent main
 ╭──────────────────────────────────────────────────────────────────────────────╮
-│ ro-agent - Research assistant                                                │
+│ rho-agent - Research assistant                                                │
 │ Profile: readonly | Model: gpt-5-mini                                        │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 
@@ -115,7 +115,7 @@ Immediate cause: **CUDA out of memory when trying to allocate 2 GiB.**
 In `developer` mode the agent can read, write, edit files, and run shell commands—chaining tools together to complete multi-step tasks. Here a single prompt triggers five tool calls across four tools (`read` → `write` → `bash` → `edit` → `bash`):
 
 ```bash
-$ uv run ro-agent main --profile developer --working-dir ~/proj/myapp \
+$ uv run rho-agent main --profile developer --working-dir ~/proj/myapp \
     "read config/settings.yaml and write a script to validate its values, \
      then run it. If any checks fail, fix the config and re-run."
 
@@ -156,7 +156,7 @@ at `validate_config.py`.
 - **Multiple database backends**: SQLite, PostgreSQL, MySQL, Oracle, Vertica—with configurable read-only or mutation access
 - **Prompt templates**: Markdown files with variable substitution for repeatable investigations
 - **Observability**: Session tracking, token usage, tool execution metrics with Streamlit dashboard
-- **Session management**: List and kill running agents from another terminal with `ro-agent ps` and `ro-agent kill`
+- **Session management**: List and kill running agents from another terminal with `rho-agent ps` and `rho-agent kill`
 - **Evaluation integrations**: AgentBench (DBBench, OS Interaction) and Harbor/TerminalBench
 
 ## Capability Profiles
@@ -171,12 +171,12 @@ The agent's capabilities are controlled via profiles:
 
 ```bash
 # Use a specific profile
-uv run ro-agent main --profile readonly
-uv run ro-agent main --profile developer
-uv run ro-agent main --profile eval
+uv run rho-agent main --profile readonly
+uv run rho-agent main --profile developer
+uv run rho-agent main --profile eval
 
 # Custom YAML profile
-uv run ro-agent main --profile ~/.config/ro-agent/profiles/my-profile.yaml
+uv run rho-agent main --profile ~/.config/rho-agent/profiles/my-profile.yaml
 ```
 
 ## Prompt Files
@@ -207,12 +207,12 @@ Log location: {{ log_path }}
 
 1. `--system "..."` — override system prompt entirely
 2. `--prompt file.md` — load markdown file
-3. `~/.config/ro-agent/default-system.md` — custom default (if exists)
+3. `~/.config/rho-agent/default-system.md` — custom default (if exists)
 4. Built-in default
 
 ### Initial Message
 
-1. Positional argument (`ro-agent main --prompt x.md "focus on OOM"`)
+1. Positional argument (`rho-agent main --prompt x.md "focus on OOM"`)
 2. Frontmatter `initial_prompt`
 3. Neither → interactive mode
 
@@ -276,12 +276,12 @@ OPENAI_MODEL=gpt-5-mini                        # optional
 
 ### Conversations
 
-Sessions auto-save to `~/.config/ro-agent/conversations/`:
+Sessions auto-save to `~/.config/rho-agent/conversations/`:
 
 ```bash
-uv run ro-agent main --list           # list saved
-uv run ro-agent main --resume latest  # resume most recent
-uv run ro-agent main -r <id>          # resume by ID
+uv run rho-agent main --list           # list saved
+uv run rho-agent main --resume latest  # resume most recent
+uv run rho-agent main -r <id>          # resume by ID
 ```
 
 ## Commands
@@ -302,23 +302,23 @@ List and kill running agent sessions from a separate terminal. Useful when you h
 
 ```bash
 # List running agents
-uv run ro-agent ps
+uv run rho-agent ps
 #   a1b2c3d4  running  gpt-5-mini      45s  analyze the logs in /var/log/app...
 #   e5f6g7h8  running  gpt-5-mini      32s  find all database schemas in...
 
 # Kill one by session ID prefix
-uv run ro-agent kill a1b2
+uv run rho-agent kill a1b2
 
 # Kill all running agents
-uv run ro-agent kill --all
+uv run rho-agent kill --all
 
 # Clean up stale entries from crashed agents
-uv run ro-agent ps --cleanup
+uv run rho-agent ps --cleanup
 ```
 
 Killed agents exit with `cancelled` status in telemetry, with `cancel_source: "kill_command"` in session metadata to distinguish from Ctrl+C cancellations.
 
-The signal protocol uses files in `~/.config/ro-agent/signals/` (override with `RO_AGENT_SIGNAL_DIR`). Each agent writes a `.running` file on start and removes it on exit. The `kill` command writes a `.cancel` file that the agent detects between tool calls.
+The signal protocol uses files in `~/.config/rho-agent/signals/` (override with `RHO_AGENT_SIGNAL_DIR`). Each agent writes a `.running` file on start and removes it on exit. The `kill` command writes a `.cancel` file that the agent detects between tool calls.
 
 ## Observability
 
@@ -330,12 +330,12 @@ Both `--team-id` and `--project-id` are required to enable telemetry — if eith
 
 ```bash
 # Via CLI flags
-uv run ro-agent main --team-id acme --project-id logs "analyze this error"
+uv run rho-agent main --team-id acme --project-id logs "analyze this error"
 
 # Via environment variables
-export RO_AGENT_TEAM_ID=acme
-export RO_AGENT_PROJECT_ID=logs
-uv run ro-agent main "analyze this error"
+export RHO_AGENT_TEAM_ID=acme
+export RHO_AGENT_PROJECT_ID=logs
+uv run rho-agent main "analyze this error"
 ```
 
 ### Dashboard
@@ -343,8 +343,8 @@ uv run ro-agent main "analyze this error"
 Launch the Streamlit dashboard to view session history and analytics:
 
 ```bash
-uv run ro-agent dashboard
-uv run ro-agent dashboard --port 8502  # custom port
+uv run rho-agent dashboard
+uv run rho-agent dashboard --port 8502  # custom port
 ```
 
 The dashboard shows:
@@ -361,11 +361,11 @@ The dashboard shows:
 | Turns | Per-turn token counts (input/output) |
 | Tool executions | Tool name, arguments, success/failure, duration |
 
-Data is stored in SQLite at `~/.config/ro-agent/telemetry.db` by default.
+Data is stored in SQLite at `~/.config/rho-agent/telemetry.db` by default.
 
 ### Configuration File
 
-For advanced configuration, create `~/.config/ro-agent/observability.yaml`:
+For advanced configuration, create `~/.config/rho-agent/observability.yaml`:
 
 ```yaml
 observability:
@@ -376,7 +376,7 @@ observability:
   backend:
     type: sqlite
     sqlite:
-      path: ~/.config/ro-agent/telemetry.db
+      path: ~/.config/rho-agent/telemetry.db
   capture:
     traces: true
     metrics: true
@@ -387,7 +387,7 @@ observability:
 ## CLI Reference
 
 ```
-uv run ro-agent main [PROMPT] [OPTIONS]
+uv run rho-agent main [PROMPT] [OPTIONS]
 
 Options:
   -p, --prompt FILE      Markdown prompt file
@@ -406,36 +406,36 @@ Options:
   --project-id ID        Project ID for observability
 
 # Launch observability dashboard
-uv run ro-agent dashboard [--port PORT] [--db PATH]
+uv run rho-agent dashboard [--port PORT] [--db PATH]
 
 # List running agent sessions
-uv run ro-agent ps [--cleanup]
+uv run rho-agent ps [--cleanup]
 
 # Kill running agent sessions
-uv run ro-agent kill [PREFIX] [--all]
+uv run rho-agent kill [PREFIX] [--all]
 ```
 
 ## Evaluations
 
-ro-agent includes integrations for running LLM benchmarks:
+rho-agent includes integrations for running LLM benchmarks:
 
 ### AgentBench
 
 ```bash
 # DBBench - database query tasks
-ro-eval dbbench ~/proj/AgentBench/data/dbbench/standard.jsonl
+rho-eval dbbench ~/proj/AgentBench/data/dbbench/standard.jsonl
 
 # OS Interaction - Linux system tasks
-ro-eval os-interaction ~/proj/AgentBench/data/os_interaction
+rho-eval os-interaction ~/proj/AgentBench/data/os_interaction
 ```
 
-See `ro_agent/eval/agentbench/README.md` for setup and options.
+See `rho_agent/eval/agentbench/README.md` for setup and options.
 
 ### Harbor / TerminalBench
 
 ```bash
 cd ~/proj/harbor
-uv run harbor run --config ~/proj/ro-agent/ro_agent/eval/harbor/configs/terminal-bench-sample.yaml
+uv run harbor run --config ~/proj/rho-agent/rho_agent/eval/harbor/configs/terminal-bench-sample.yaml
 ```
 
-See `ro_agent/eval/harbor/README.md` for details.
+See `rho_agent/eval/harbor/README.md` for details.

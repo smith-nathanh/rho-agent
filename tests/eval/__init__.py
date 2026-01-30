@@ -1,1 +1,1 @@
-"""Tests for ro-agent evaluation modules."""
+"""Tests for rho-agent evaluation modules."""

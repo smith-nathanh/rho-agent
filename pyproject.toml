@@ -1,5 +1,5 @@
 [project]
-name = "ro-agent"
+name = "rho-agent"
 version = "0.1.0"
 description = "A read-only agent"
 readme = "README.md"
@@ -23,8 +23,8 @@ dependencies = [
 ]
 
 [project.scripts]
-ro-agent = "ro_agent.cli:app"
-ro-eval = "ro_agent.eval.cli:app"
+rho-agent = "rho_agent.cli:app"
+rho-eval = "rho_agent.eval.cli:app"
 
 [build-system]
 requires = ["hatchling"]

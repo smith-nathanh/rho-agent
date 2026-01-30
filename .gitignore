@@ -16,9 +16,9 @@ wheels/
 *.md
 !README.md
 !ARCHITECTURE.md
-!ro_agent/prompts/*.md
+!rho_agent/prompts/*.md
 
-.ro_agent_history
+.rho_agent_history
 test_data.db
 results/
 demo/*db

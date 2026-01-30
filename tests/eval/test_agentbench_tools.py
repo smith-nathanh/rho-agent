@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from ro_agent.tools.base import ToolInvocation
-from ro_agent.eval.agentbench.tools import (
+from rho_agent.tools.base import ToolInvocation
+from rho_agent.eval.agentbench.tools import (
     EvalSqliteHandler,
     SubmitAnswerHandler,
     FinishActionHandler,
@@ -285,7 +285,7 @@ class TestBackwardsCompatibility:
 
     def test_unrestricted_sqlite_alias(self, tmp_path: Path) -> None:
         """Test that UnrestrictedSqliteHandler is an alias for EvalSqliteHandler."""
-        from ro_agent.eval.agentbench.tools import UnrestrictedSqliteHandler
+        from rho_agent.eval.agentbench.tools import UnrestrictedSqliteHandler
 
         import sqlite3
         db_file = tmp_path / "test.db"
@@ -299,6 +299,6 @@ class TestBackwardsCompatibility:
 
     def test_unrestricted_mysql_alias(self) -> None:
         """Test that UnrestrictedMySQLHandler is an alias for EvalMySQLHandler."""
-        from ro_agent.eval.agentbench.tools import UnrestrictedMySQLHandler, EvalMySQLHandler
+        from rho_agent.eval.agentbench.tools import UnrestrictedMySQLHandler, EvalMySQLHandler
 
         assert UnrestrictedMySQLHandler is EvalMySQLHandler

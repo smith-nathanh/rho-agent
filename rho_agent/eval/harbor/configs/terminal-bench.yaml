@@ -1,0 +1,35 @@
+# Harbor job configuration for rho-agent on full TerminalBench (89 tasks)
+#
+# Run with:
+#   cd ~/proj/harbor
+#   RHO_AGENT_SERVICE_TIER=flex uv run harbor run --config ~/proj/rho-agent/rho_agent/eval/harbor/configs/terminal-bench.yaml
+#   Update .env to point to different url OPENAI_BASE_URL=https://api.cerebras.ai/v1
+#   If you cancel a job then run: docker rm $(docker ps -a -q --filter "name=__") 
+
+jobs_dir: /Users/nate/proj/rho-agent/results/gpt-5.2-terminal-bench
+n_attempts: 1
+timeout_multiplier: 1.0
+
+orchestrator:
+  type: local
+  n_concurrent_trials: 2
+  quiet: false
+
+environment:
+  type: docker
+  force_build: false
+  delete: true
+  override_gpus: 0  # We use API, no local GPU needed
+  mounts:
+    - source: /Users/nate/proj/rho-agent
+      target: /rho-agent
+      read_only: true
+
+agents:
+  - import_path: rho_agent.eval.harbor.agent:RhoAgent
+    model_name: openai/gpt-5.2
+
+datasets:
+  - name: terminal-bench
+    version: "2.0"
+    registry: {}

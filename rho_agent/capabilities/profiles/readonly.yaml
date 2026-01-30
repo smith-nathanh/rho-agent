@@ -1,0 +1,23 @@
+# readonly.yaml - Default read-only research profile
+#
+# This is the default profile for rho-agent. It provides a safe, read-only
+# environment for inspecting logs, files, and databases without risk of
+# modifying anything.
+
+profile: readonly
+description: "Read-only research profile with restricted shell"
+
+shell:
+  mode: restricted  # Only allowlisted commands (cat, grep, find, etc.)
+
+file_write:
+  mode: off  # No file writing capabilities
+
+database:
+  mode: readonly  # SELECT queries only, mutations blocked
+
+approval:
+  mode: dangerous  # Approve dangerous tools (bash, database)
+  # Default dangerous tools that require approval:
+  # - bash (shell execution)
+  # - oracle, mysql, sqlite, vertica, postgres (database access)

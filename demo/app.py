@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Streamlit demo app for ro-agent with SQL exploration.
+"""Streamlit demo app for rho-agent with SQL exploration.
 
 Launch instructions:
     # First, seed the sample database (one-time setup)
@@ -34,11 +34,11 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 import pandas as pd
 import streamlit as st
 
-from ro_agent.client.model import ModelClient
-from ro_agent.core.agent import Agent, AgentEvent
-from ro_agent.core.session import Session
-from ro_agent.tools.handlers.sqlite import SqliteHandler
-from ro_agent.tools.registry import ToolRegistry
+from rho_agent.client.model import ModelClient
+from rho_agent.core.agent import Agent, AgentEvent
+from rho_agent.core.session import Session
+from rho_agent.tools.handlers.sqlite import SqliteHandler
+from rho_agent.tools.registry import ToolRegistry
 
 # Config
 DB_PATH = Path(__file__).parent / "sample_data.db"
@@ -352,7 +352,7 @@ def render_sql_tab() -> None:
 def main() -> None:
     """Main app entry point."""
     st.set_page_config(
-        page_title="ro-agent SQL Demo",
+        page_title="rho-agent SQL Demo",
         page_icon="🔍",
         layout="wide",
     )
@@ -365,7 +365,7 @@ def main() -> None:
 
     init_session_state()
 
-    st.title("ro-agent SQL Demo")
+    st.title("rho-agent SQL Demo")
     st.markdown("Explore a sample database using the AI agent or write your own SQL queries.")
 
     # Tabs instead of columns for better chat UX
@@ -381,7 +381,7 @@ def main() -> None:
     with st.sidebar:
         st.markdown("### About")
         st.markdown("""
-        This demo showcases ro-agent helping users explore a SQLite database.
+        This demo showcases rho-agent helping users explore a SQLite database.
 
         **Agent Chat**: Chat with the agent to explore data
         **SQL Editor**: Write and execute your own SQL

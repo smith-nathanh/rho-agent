@@ -1,0 +1,33 @@
+# Harbor job configuration for rho-agent - hello-world test
+#
+# Run with:
+#   cd ~/proj/harbor
+#   uv run harbor run --config ~/proj/rho-agent/rho_agent/eval/harbor/configs/terminal-bench-prelim.yaml
+
+jobs_dir: /Users/nate/proj/rho-agent/results/gpt-5.2-terminal-bench
+n_attempts: 1
+timeout_multiplier: 1.0
+
+orchestrator:
+  type: local
+  n_concurrent_trials: 1
+  quiet: false
+
+environment:
+  type: docker
+  force_build: false
+  delete: true
+  override_gpus: 0  # We use API, no local GPU needed
+  mounts:
+    - source: /Users/nate/proj/rho-agent
+      target: /rho-agent
+      read_only: true
+
+agents:
+  - import_path: rho_agent.eval.harbor.agent:RhoAgent
+    model_name: openai/gpt-5.2
+
+datasets:
+  - name: hello-world
+    version: "1.0"
+    registry: {}

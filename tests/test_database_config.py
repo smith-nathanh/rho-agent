@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ro_agent.config.databases import (
+from rho_agent.config.databases import (
     DatabaseConfig,
     load_database_config,
     _interpolate_env_vars,
@@ -157,7 +157,7 @@ databases:
             load_database_config(str(config_file))
 
     def test_env_var_for_config_path(self, tmp_path):
-        """RO_AGENT_DB_CONFIG env var specifies config path."""
+        """RHO_AGENT_DB_CONFIG env var specifies config path."""
         # Create actual SQLite file
         test_db = tmp_path / "test.db"
         test_db.touch()
@@ -169,7 +169,7 @@ databases:
     type: sqlite
     path: {test_db}
 """)
-        env = {"RO_AGENT_DB_CONFIG": str(config_file)}
+        env = {"RHO_AGENT_DB_CONFIG": str(config_file)}
         configs = load_database_config(env=env)
 
         assert "sqlite" in configs

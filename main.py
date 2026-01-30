@@ -1,6 +1,6 @@
-"""Entry point for ro-agent."""
+"""Entry point for rho-agent."""
 
-from ro_agent.cli import main
+from rho_agent.cli import main
 
 if __name__ == "__main__":
     main()

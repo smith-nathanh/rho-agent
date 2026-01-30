@@ -1,6 +1,6 @@
 # SQL Explorer Demo
 
-A Streamlit web app demonstrating ro-agent's database exploration capabilities. Chat with an AI agent to explore a SQLite database, then export queries and results.
+A Streamlit web app demonstrating rho-agent's database exploration capabilities. Chat with an AI agent to explore a SQLite database, then export queries and results.
 
 ## Quick Start
 
@@ -68,7 +68,7 @@ OPENAI_MODEL=gpt-5-mini
 
 ## Architecture
 
-The demo uses ro-agent's core components:
+The demo uses rho-agent's core components:
 
 - `Agent` - Orchestrates the conversation loop
 - `Session` - Manages conversation history
