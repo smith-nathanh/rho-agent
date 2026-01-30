@@ -5,25 +5,27 @@ This demonstrates how to embed rho-agent in a Python script to:
 1. Pass context and get a response (single turn)
 2. Let the agent run autonomously with tools (multi-turn)
 
-Example with custom directory and task
-uv run python examples/programmatic_usage.py ~/some/project "Summarize the error handling"
+Example with custom directory and task:
+    uv run python demo/programmatic_usage.py ~/some/project "Summarize the error handling"
 """
 
 import asyncio
 import os
+import sys
 
 from dotenv import load_dotenv
+
+from rho_agent.client.model import ModelClient
 from rho_agent.core.agent import Agent
 from rho_agent.core.session import Session
-from rho_agent.client.model import ModelClient
-from rho_agent.tools.registry import ToolRegistry
 from rho_agent.tools.handlers import (
-    ReadFileHandler,
-    SearchHandler,
-    FindFilesHandler,
-    ListDirHandler,
-    WriteOutputHandler,
+    GlobHandler,
+    GrepHandler,
+    ListHandler,
+    ReadHandler,
+    WriteHandler,
 )
+from rho_agent.tools.registry import ToolRegistry
 
 
 async def run_agent_with_tools(
@@ -53,18 +55,18 @@ async def run_agent_with_tools(
     registry = ToolRegistry()
 
     # Register read-only tools
-    registry.register(ReadFileHandler())
-    registry.register(SearchHandler())
-    registry.register(FindFilesHandler())
-    registry.register(ListDirHandler())
+    registry.register(ReadHandler())
+    registry.register(GrepHandler())
+    registry.register(GlobHandler())
+    registry.register(ListHandler())
 
-    # Optionally register write_output for exporting findings
+    # Optionally register write for exporting findings
     if output_file:
-        registry.register(WriteOutputHandler())
+        registry.register(WriteHandler())
 
     # Create model client (uses OPENAI_API_KEY and OPENAI_BASE_URL from env)
     client = ModelClient(
-        model=os.environ.get("OPENAI_MODEL", "gpt-5-nano"),
+        model=os.environ.get("OPENAI_MODEL", "gpt-5-mini"),
         base_url=os.environ.get("OPENAI_BASE_URL"),
     )
 
@@ -146,24 +148,23 @@ Here is context to work with:
     return response
 
 
-# Example usage
 if __name__ == "__main__":
-    import sys
-
     load_dotenv()  # Load OPENAI_API_KEY from .env
 
-    # Example 1: Let agent explore a directory with tools
-    target_dir = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/proj/safeguarding")
+    # Example: Let agent explore a directory with tools
+    target_dir = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
     task = sys.argv[2] if len(sys.argv) > 2 else "What does this project do? Give me a brief summary."
 
     print(f"=== Running agent on: {target_dir} ===\n")
     print(f"Task: {task}\n")
     print("=" * 60 + "\n")
 
-    result = asyncio.run(run_agent_with_tools(
-        task=task,
-        working_dir=target_dir,
-    ))
+    result = asyncio.run(
+        run_agent_with_tools(
+            task=task,
+            working_dir=target_dir,
+        )
+    )
 
     print("\n" + "=" * 60)
     print("Done!")
