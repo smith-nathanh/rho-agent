@@ -23,6 +23,7 @@ test_data.db
 results/
 demo/*db
 image*.jpg
+SCREENSHOT*.png
 
 # Reference prompts from Codex CLI
 .codex-prompts/

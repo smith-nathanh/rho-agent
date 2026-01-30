@@ -11,15 +11,18 @@ Options:
     --bash-only           Only provide bash tool (no Read, Grep, etc.)
 
 Environment variables:
-    OPENAI_MODEL          - Model to use (default: gpt-5-mini)
-    OPENAI_BASE_URL       - API base URL (default: OpenAI)
-    RHO_AGENT_MODEL        - Override for OPENAI_MODEL
-    RHO_AGENT_BASE_URL     - Override for OPENAI_BASE_URL
-    RHO_AGENT_SERVICE_TIER - OpenAI service tier: "flex" for lower cost (default: None)
-    OPENAI_API_KEY        - API key (required)
+    OPENAI_MODEL              - Model to use (default: gpt-5-mini)
+    OPENAI_BASE_URL           - API base URL (default: OpenAI)
+    RHO_AGENT_MODEL           - Override for OPENAI_MODEL
+    RHO_AGENT_BASE_URL        - Override for OPENAI_BASE_URL
+    RHO_AGENT_SERVICE_TIER    - OpenAI service tier: "flex" for lower cost (default: None)
+    OPENAI_API_KEY            - API key (required)
+    RHO_AGENT_ENABLE_REVIEWER - Set to "1" to enable post-execution review
+    RHO_AGENT_REVIEWER_MAX_ITERATIONS - Max review-revise loops (default: 1)
 """
 
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
@@ -29,7 +32,7 @@ from dotenv import load_dotenv
 from rho_agent.capabilities import CapabilityProfile
 from rho_agent.capabilities.factory import ToolFactory
 from rho_agent.client.model import ModelClient
-from rho_agent.core.agent import Agent
+from rho_agent.core.agent import Agent, AgentEvent
 from rho_agent.core.session import Session
 from rho_agent.observability import ObservabilityConfig, CaptureConfig, TenantConfig, create_processor
 from rho_agent.prompts import load_prompt, prepare_prompt
@@ -45,11 +48,121 @@ for env_path in [Path.cwd() / ".env", _pkg_root / ".env", Path("/rho-agent/.env"
         break
 
 _EVAL_PROMPT = Path(__file__).parent.parent.parent / "prompts" / "eval_terminal.md"
+_REVIEWER_PROMPT = Path(__file__).parent.parent.parent / "prompts" / "eval_reviewer.md"
+
+# Reviewer system prompt (text-only, no tools)
+_REVIEWER_SYSTEM = """\
+You are a code reviewer evaluating whether an AI agent successfully completed a task.
+Be concise and direct. Focus on whether the task requirements were met."""
+
+
+def format_event_trace(events: list[AgentEvent]) -> str:
+    """Format agent events into a readable trace for the reviewer."""
+    lines = []
+    for event in events:
+        if event.type == "text":
+            lines.append(f"[Agent Response]\n{event.content}")
+        elif event.type == "tool_start":
+            args_str = json.dumps(event.tool_args, indent=2) if event.tool_args else "{}"
+            lines.append(f"[Tool Call: {event.tool_name}]\nArguments:\n{args_str}")
+        elif event.type == "tool_end":
+            # Truncate long results
+            result = event.tool_result or ""
+            if len(result) > 2000:
+                result = result[:2000] + "\n... (truncated)"
+            lines.append(f"[Tool Result: {event.tool_name}]\n{result}")
+        elif event.type == "error":
+            lines.append(f"[Error]\n{event.content}")
+    return "\n\n".join(lines)
 
 
 async def auto_approve(tool_name: str, tool_args: dict) -> bool:
     """Auto-approve all tool calls in eval mode."""
     return True
+
+
+async def run_reviewer_phase(
+    instruction: str,
+    event_trace: list[AgentEvent],
+    agent: Agent,
+    client: "ModelClient",
+    max_iterations: int,
+) -> None:
+    """Run post-execution review with optional revision loop.
+
+    Args:
+        instruction: Original task instruction.
+        event_trace: Full event trace from the actor phase.
+        agent: The actor agent (used for revision turns).
+        client: Model client for reviewer calls.
+        max_iterations: Maximum review-revise iterations (0 = review only).
+    """
+    # Load reviewer prompt template
+    reviewer_prompt = load_prompt(_REVIEWER_PROMPT)
+
+    for iteration in range(max_iterations + 1):  # +1 for initial review
+        print(f"\n[Reviewer: iteration {iteration + 1}]", file=sys.stderr)
+
+        # Format event trace for reviewer
+        formatted_trace = format_event_trace(event_trace)
+
+        # Build review prompt from template
+        review_content, _ = prepare_prompt(reviewer_prompt, {
+            "task_instruction": instruction,
+            "agent_trace": formatted_trace,
+        })
+
+        # Create reviewer session (text-only, no tools)
+        reviewer_session = Session(system_prompt=_REVIEWER_SYSTEM)
+        reviewer_session.add_user_message(review_content)
+
+        # Get review using raw completion (no tools)
+        messages = [
+            {"role": "system", "content": _REVIEWER_SYSTEM},
+            {"role": "user", "content": review_content},
+        ]
+        review_text, _ = await client.complete(messages)
+
+        # Log verdict preview
+        preview = review_text[:100] + "..." if len(review_text) > 100 else review_text
+        print(f"[Reviewer verdict: {preview}]", file=sys.stderr)
+
+        # Parse verdict
+        review_stripped = review_text.strip()
+        if review_stripped.startswith("APPROVED"):
+            print("[Reviewer: APPROVED]", file=sys.stderr)
+            return
+
+        if iteration >= max_iterations:
+            print("[Reviewer: max iterations reached]", file=sys.stderr)
+            return
+
+        # Extract revision feedback
+        if "REVISION_NEEDED:" in review_text:
+            feedback = review_text.split("REVISION_NEEDED:", 1)[1].strip()
+        else:
+            feedback = review_text
+
+        # Run revision with actor
+        print(f"[Revision needed: {feedback[:100]}...]", file=sys.stderr)
+        revision_prompt = (
+            f"A reviewer found issues with your work:\n\n{feedback}\n\n"
+            f"Please address these issues."
+        )
+
+        # Run actor revision turn and collect events for next review
+        revision_events: list[AgentEvent] = []
+        async for event in agent.run_turn(revision_prompt):
+            revision_events.append(event)
+            if event.type == "text" and event.content:
+                print(event.content, end="", flush=True)
+            elif event.type == "tool_start":
+                print(f"\n[Tool: {event.tool_name}]", file=sys.stderr)
+
+        # Use new trace for next review iteration
+        event_trace = revision_events
+
+        print()  # Newline after revision output
 
 
 async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool = False) -> None:
@@ -133,7 +246,11 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
         if processor:
             events = processor.wrap_turn(events, instruction)
 
+        # Track events for reviewer (full trace, not just text output)
+        event_trace: list[AgentEvent] = []
+
         async for event in events:
+            event_trace.append(event)
             if event.type == "text" and event.content:
                 print(event.content, end="", flush=True)
             elif event.type == "tool_start":
@@ -159,6 +276,19 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                         f"out={event.usage.get('total_output_tokens', 0)}]",
                         file=sys.stderr,
                     )
+
+        # Reviewer phase (optional)
+        enable_reviewer = os.environ.get("RHO_AGENT_ENABLE_REVIEWER") == "1"
+        max_iterations = int(os.environ.get("RHO_AGENT_REVIEWER_MAX_ITERATIONS", "1"))
+
+        if enable_reviewer:
+            await run_reviewer_phase(
+                instruction=instruction,
+                event_trace=event_trace,
+                agent=agent,
+                client=client,
+                max_iterations=max_iterations,
+            )
     finally:
         if processor:
             await processor.end_session()

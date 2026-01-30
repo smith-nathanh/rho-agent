@@ -50,6 +50,8 @@ class RhoAgent(BaseAgent):
         logger: logging.Logger | None = None,
         agent_timeout_sec: int = 600,
         bash_only: bool = False,
+        enable_reviewer: bool = False,
+        reviewer_max_iterations: int = 1,
         *args,
         **kwargs,
     ) -> None:
@@ -61,10 +63,14 @@ class RhoAgent(BaseAgent):
             logger: Logger instance.
             agent_timeout_sec: Maximum time for agent execution (default: 10 min).
             bash_only: If True, only provide bash tool (no Read, Grep, etc.).
+            enable_reviewer: If True, run post-execution review after actor completes.
+            reviewer_max_iterations: Max review-revise loops (0 = review only, no revision).
         """
         super().__init__(logs_dir, model_name, logger, *args, **kwargs)
         self._agent_timeout_sec = agent_timeout_sec
         self._bash_only = bash_only
+        self._enable_reviewer = enable_reviewer
+        self._reviewer_max_iterations = reviewer_max_iterations
 
     @staticmethod
     def name() -> str:
@@ -163,7 +169,16 @@ class RhoAgent(BaseAgent):
         if service_tier:
             env["RHO_AGENT_SERVICE_TIER"] = service_tier
 
-        self.logger.info(f"Running rho-agent with model: {env['RHO_AGENT_MODEL']}, bash_only: {self._bash_only}")
+        # Add reviewer config if enabled
+        if self._enable_reviewer:
+            env["RHO_AGENT_ENABLE_REVIEWER"] = "1"
+            env["RHO_AGENT_REVIEWER_MAX_ITERATIONS"] = str(self._reviewer_max_iterations)
+
+        self.logger.info(
+            f"Running rho-agent with model: {env['RHO_AGENT_MODEL']}, "
+            f"bash_only: {self._bash_only}, "
+            f"reviewer: {self._enable_reviewer}"
+        )
 
         # Use longer timeout for flex tier (slower but cheaper)
         timeout = self._agent_timeout_sec
