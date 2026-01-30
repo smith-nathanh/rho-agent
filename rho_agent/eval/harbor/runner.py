@@ -5,7 +5,10 @@ capability profile system. The container provides sandboxing, so tool-level
 restrictions are unnecessary.
 
 Usage:
-    python -m rho_agent.eval.harbor.runner "<instruction>" [working_dir]
+    python -m rho_agent.eval.harbor.runner "<instruction>" [working_dir] [--bash-only]
+
+Options:
+    --bash-only           Only provide bash tool (no Read, Grep, etc.)
 
 Environment variables:
     OPENAI_MODEL          - Model to use (default: gpt-5-mini)
@@ -49,12 +52,13 @@ async def auto_approve(tool_name: str, tool_args: dict) -> bool:
     return True
 
 
-async def run_task(instruction: str, working_dir: str = "/app") -> None:
+async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool = False) -> None:
     """Run rho-agent on a TerminalBench task.
 
     Args:
         instruction: The task description/instruction.
         working_dir: Working directory for shell commands (default: /app).
+        bash_only: If True, only provide bash tool (no Read, Grep, etc.).
     """
     # Load and render eval prompt template
     prompt = load_prompt(_EVAL_PROMPT)
@@ -67,8 +71,13 @@ async def run_task(instruction: str, working_dir: str = "/app") -> None:
 
     # Use eval profile - unrestricted, no approval required
     profile = CapabilityProfile.eval(working_dir=working_dir)
+    profile.bash_only = bash_only
     factory = ToolFactory(profile)
     registry = factory.create_registry(working_dir=working_dir)
+
+    # Log available tools for debugging
+    tool_names = [h.name for h in registry._handlers.values()]
+    print(f"[rho-agent] Tools: {tool_names}", file=sys.stderr)
 
     # Create client from environment
     model = os.environ.get("RHO_AGENT_MODEL") or os.environ.get("OPENAI_MODEL", "gpt-5-mini")
@@ -100,6 +109,7 @@ async def run_task(instruction: str, working_dir: str = "/app") -> None:
         approval_callback=auto_approve,
         auto_compact=True,
         context_window=context_window,
+        enable_nudge=True,  # Push agent to keep working if it stops prematurely
     )
 
     # Set up observability to capture full tool traces to SQLite
@@ -160,15 +170,19 @@ def main() -> None:
     """CLI entry point."""
     if len(sys.argv) < 2:
         print(
-            "Usage: python -m rho_agent.eval.harbor.runner '<instruction>' [working_dir]",
+            "Usage: python -m rho_agent.eval.harbor.runner '<instruction>' [working_dir] [--bash-only]",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    instruction = sys.argv[1]
-    working_dir = sys.argv[2] if len(sys.argv) > 2 else "/app"
+    # Parse --bash-only flag
+    bash_only = "--bash-only" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--bash-only"]
 
-    asyncio.run(run_task(instruction, working_dir))
+    instruction = args[0]
+    working_dir = args[1] if len(args) > 1 else "/app"
+
+    asyncio.run(run_task(instruction, working_dir, bash_only=bash_only))
 
 
 if __name__ == "__main__":

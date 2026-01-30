@@ -306,12 +306,42 @@ class BashHandler(ToolHandler):
                 await process.wait()
                 raise
             except asyncio.TimeoutError:
+                # Capture partial output before killing
+                partial_stdout = b""
+                partial_stderr = b""
+                try:
+                    if process.stdout:
+                        partial_stdout = await asyncio.wait_for(
+                            process.stdout.read(50000), timeout=2.0
+                        )
+                except (asyncio.TimeoutError, Exception):
+                    pass
+                try:
+                    if process.stderr:
+                        partial_stderr = await asyncio.wait_for(
+                            process.stderr.read(50000), timeout=2.0
+                        )
+                except (asyncio.TimeoutError, Exception):
+                    pass
+
                 process.kill()
                 await process.wait()
+
+                # Build content with partial output
+                content = partial_stdout.decode("utf-8", errors="replace")
+                if partial_stderr:
+                    content += f"\n[stderr]\n{partial_stderr.decode('utf-8', errors='replace')}"
+                content += f"\n\n[Command timed out after {timeout}s and was killed]"
+
                 return ToolOutput(
-                    content=f"Command timed out after {timeout} seconds",
+                    content=content,
                     success=False,
-                    metadata={"timed_out": True, "exit_code": -1},
+                    metadata={
+                        "exit_code": -1,
+                        "timed_out": True,
+                        "working_dir": working_dir,
+                        "command": command,
+                    },
                 )
 
             exit_code = process.returncode
@@ -333,6 +363,7 @@ class BashHandler(ToolHandler):
                 metadata={
                     "exit_code": exit_code,
                     "command": command,
+                    "working_dir": working_dir,
                 },
             )
 

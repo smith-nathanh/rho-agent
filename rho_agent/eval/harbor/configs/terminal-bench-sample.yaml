@@ -26,6 +26,8 @@ environment:
 agents:
   - import_path: rho_agent.eval.harbor.agent:RhoAgent
     model_name: openai/gpt-5.2
+    kwargs:
+      bash_only: false   # Must be under kwargs for Harbor to pass it to agent
 
 datasets:
   - name: terminal-bench-sample

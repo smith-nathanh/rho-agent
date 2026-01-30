@@ -107,6 +107,7 @@ class CapabilityProfile:
     # Optional overrides
     shell_timeout: int = 120
     shell_working_dir: str | None = None
+    bash_only: bool = False  # If True, only bash tool is registered (no Read, Grep, etc.)
 
     @classmethod
     def readonly(cls) -> "CapabilityProfile":
@@ -146,6 +147,7 @@ class CapabilityProfile:
             approval=ApprovalMode.NONE,
             shell_timeout=300,
             shell_working_dir=working_dir,
+            bash_only=False,  # Set True for bash-only mode
         )
 
     @classmethod

@@ -9,12 +9,27 @@ from ..client.model import ModelClient, Prompt, Message
 from ..tools.base import ToolInvocation
 from ..tools.registry import ToolRegistry
 from .session import Session, ToolResult
-
-# Max characters to store in history per tool result (roughly 5-8k tokens)
-MAX_TOOL_OUTPUT_CHARS = 20000
+from .truncate import truncate_output
 
 # Auto-compaction triggers at this fraction of the model's context window
 AUTO_COMPACT_THRESHOLD = 0.7
+
+# Continuation nudge settings (eval mode only)
+MAX_NUDGES = 3
+NUDGE_MESSAGE = (
+    "Please continue working on the task. If you need a tool that's missing, "
+    "install it. If an approach failed, try a different method."
+)
+COMPLETION_SIGNALS = [
+    "task complete",
+    "successfully completed",
+    "finished",
+    "done",
+    "completed the task",
+    "solution is ready",
+    "have completed",
+    "is complete",
+]
 
 # Compaction prompts (following Codex/Claude Code patterns)
 COMPACTION_SYSTEM_PROMPT = """\
@@ -38,23 +53,6 @@ ApprovalCallback = Callable[[str, dict[str, Any]], Awaitable[bool]]
 
 # Type for compaction callback: (trigger: "manual" | "auto") -> None
 CompactCallback = Callable[[str], Awaitable[None]]
-
-
-def truncate_output(content: str, max_chars: int = MAX_TOOL_OUTPUT_CHARS) -> str:
-    """Truncate tool output to prevent context overflow.
-
-    Uses head+tail strategy: keeps the first half and last half of the
-    budget, so error messages at the end of output are preserved.
-    """
-    if len(content) <= max_chars:
-        return content
-    half = max_chars // 2
-    elided = len(content) - max_chars
-    return (
-        content[:half]
-        + f"\n\n[... {elided} chars elided ...]\n\n"
-        + content[-half:]
-    )
 
 
 @dataclass
@@ -100,6 +98,7 @@ class Agent:
         context_window: int | None = None,
         auto_compact: bool = True,
         cancel_check: Callable[[], bool] | None = None,
+        enable_nudge: bool = False,
     ) -> None:
         self._session = session
         self._registry = registry
@@ -109,6 +108,8 @@ class Agent:
         self._auto_compact = auto_compact
         self._cancel_requested = False
         self._cancel_check = cancel_check
+        self._enable_nudge = enable_nudge
+        self._nudge_count = 0
 
     def request_cancel(self) -> None:
         """Request cancellation of the current turn."""
@@ -117,6 +118,7 @@ class Agent:
     def _reset_cancel(self) -> None:
         """Reset cancellation state for a new turn."""
         self._cancel_requested = False
+        self._nudge_count = 0
 
     def is_cancelled(self) -> bool:
         """Check if cancellation has been requested.
@@ -330,8 +332,20 @@ class Agent:
             elif text_content:
                 self._session.add_assistant_message(text_content)
 
-            # If no tool calls, we're done
+            # If no tool calls, check if we should nudge or finish
             if not pending_tool_calls:
+                # Check if we should nudge (eval mode only)
+                if self._enable_nudge and self._nudge_count < MAX_NUDGES:
+                    text_lower = text_content.lower()
+                    has_completion = any(s in text_lower for s in COMPLETION_SIGNALS)
+                    # Nudge if no completion signal and response is short
+                    if not has_completion and len(text_content) < 500:
+                        self._nudge_count += 1
+                        self._session.add_user_message(NUDGE_MESSAGE)
+                        continue  # Loop back to model
+
+                # Reset nudge count and finish turn
+                self._nudge_count = 0
                 yield AgentEvent(
                     type="turn_complete",
                     usage={
@@ -389,7 +403,7 @@ class Agent:
                 )
                 output = await self._registry.dispatch(invocation)
                 # Truncate output to prevent context overflow
-                truncated_content = truncate_output(output.content)
+                truncated_content = truncate_output(output.content, tool_name=tool_name)
                 tool_results.append(
                     ToolResult(
                         tool_call_id=tool_id,

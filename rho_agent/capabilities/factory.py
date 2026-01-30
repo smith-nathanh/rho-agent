@@ -49,14 +49,16 @@ class ToolFactory:
         env = env or dict(os.environ)
         working_dir = working_dir or os.getcwd()
 
-        # Register core tools (always available)
-        self._register_core_tools(registry)
+        # Register core tools (unless bash_only mode)
+        if not self.profile.bash_only:
+            self._register_core_tools(registry)
 
         # Register bash tool (mode depends on profile)
         self._register_bash_tool(registry, working_dir)
 
-        # Register write/edit tools (if enabled)
-        self._register_write_tools(registry)
+        # Register write/edit tools (if enabled and not bash_only)
+        if not self.profile.bash_only:
+            self._register_write_tools(registry)
 
         # Register database tools (if configured)
         self._register_database_tools(registry, env)

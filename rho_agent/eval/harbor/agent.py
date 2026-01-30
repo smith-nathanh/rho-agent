@@ -49,6 +49,7 @@ class RhoAgent(BaseAgent):
         model_name: str | None = None,
         logger: logging.Logger | None = None,
         agent_timeout_sec: int = 600,
+        bash_only: bool = False,
         *args,
         **kwargs,
     ) -> None:
@@ -59,9 +60,11 @@ class RhoAgent(BaseAgent):
             model_name: Model to use (e.g., "openai/gpt-5-mini").
             logger: Logger instance.
             agent_timeout_sec: Maximum time for agent execution (default: 10 min).
+            bash_only: If True, only provide bash tool (no Read, Grep, etc.).
         """
         super().__init__(logs_dir, model_name, logger, *args, **kwargs)
         self._agent_timeout_sec = agent_timeout_sec
+        self._bash_only = bash_only
 
     @staticmethod
     def name() -> str:
@@ -94,10 +97,6 @@ class RhoAgent(BaseAgent):
 
         # Upload rho-agent source to container
         await environment.upload_dir(rho_agent_root, "/rho-agent")
-
-        # Verify upload
-        result = await environment.exec("ls -la /rho-agent", timeout_sec=10)
-        self.logger.info(f"Upload check: {result.stdout}")
 
         # Install curl if needed (for uv installer)
         await environment.exec(
@@ -164,7 +163,7 @@ class RhoAgent(BaseAgent):
         if service_tier:
             env["RHO_AGENT_SERVICE_TIER"] = service_tier
 
-        self.logger.info(f"Running rho-agent with model: {env['RHO_AGENT_MODEL']}")
+        self.logger.info(f"Running rho-agent with model: {env['RHO_AGENT_MODEL']}, bash_only: {self._bash_only}")
 
         # Use longer timeout for flex tier (slower but cheaper)
         timeout = self._agent_timeout_sec
@@ -175,11 +174,13 @@ class RhoAgent(BaseAgent):
         # Tee stdout/stderr to files in the container so we can retrieve them
         # even if the command times out (environment.exec raises on timeout
         # before returning result, so we'd lose all output otherwise).
+        bash_only_flag = " --bash-only" if self._bash_only else ""
         cmd = (
             f'set -a && source /rho-agent/.env && set +a && '
             f'export PATH="$HOME/.local/bin:$PATH" && '
+            f'export PYTHONPATH=/rho-agent && '
             f'cd /app && '
-            f'/rho-agent/.venv/bin/python -m rho_agent.eval.harbor.runner {escaped} /app '
+            f'/rho-agent/.venv/bin/python -B -m rho_agent.eval.harbor.runner {escaped} /app{bash_only_flag} '
             f'> >(tee /tmp/agent_stdout.txt) 2> >(tee /tmp/agent_stderr.txt >&2)'
         )
         stdout = ""
