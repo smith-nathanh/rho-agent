@@ -60,7 +60,9 @@ class ModelClient:
         api_key: str | None = None,
         timeout: float | None = None,
         service_tier: str | None = None,
+        temperature: float = 0.7,
     ) -> None:
+        self._temperature = temperature
         # For flex processing, use longer timeout (15 min) per OpenAI docs
         if timeout is None:
             timeout = 900.0 if service_tier == "flex" else 60.0
@@ -103,6 +105,7 @@ class ModelClient:
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
+            "temperature": self._temperature,
         }
 
         if prompt.tools:
@@ -199,6 +202,7 @@ class ModelClient:
             "model": self._model,
             "messages": messages,
             "stream": False,
+            "temperature": self._temperature,
         }
 
         if prompt.tools:
@@ -259,6 +263,7 @@ class ModelClient:
                 "model": self._model,
                 "messages": messages,
                 "stream": False,
+                "temperature": self._temperature,
             }
             if self._service_tier:
                 kwargs["service_tier"] = self._service_tier

@@ -19,6 +19,8 @@ Environment variables:
     OPENAI_API_KEY            - API key (required)
     RHO_AGENT_ENABLE_REVIEWER - Set to "1" to enable post-execution review
     RHO_AGENT_REVIEWER_MAX_ITERATIONS - Max review-revise loops (default: 1)
+    RHO_AGENT_CONFIRM_DONE    - Set to "1" to require CONFIRM_DONE after actor completes
+    RHO_AGENT_CONFIRM_DONE_MAX - Max confirm retries before proceeding (default: 3)
 """
 
 import asyncio
@@ -197,12 +199,14 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     base_url = os.environ.get("RHO_AGENT_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
     api_key = os.environ.get("OPENAI_API_KEY")
     service_tier = os.environ.get("RHO_AGENT_SERVICE_TIER")
+    temperature = float(os.environ.get("RHO_AGENT_TEMPERATURE", "0.0"))
 
     client = ModelClient(
         model=model,
         base_url=base_url,
         api_key=api_key,
         service_tier=service_tier,
+        temperature=temperature,
     )
 
     # Determine context window for auto-compaction
@@ -222,7 +226,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
         approval_callback=auto_approve,
         auto_compact=True,
         context_window=context_window,
-        enable_nudge=True,  # Push agent to keep working if it stops prematurely
+        enable_nudge=False,  # CONFIRM_DONE gate handles completion verification
     )
 
     # Set up observability to capture full tool traces to SQLite
@@ -242,40 +246,67 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     if processor:
         await processor.start_session()
     try:
-        events = agent.run_turn(instruction)
-        if processor:
-            events = processor.wrap_turn(events, instruction)
-
         # Track events for reviewer (full trace, not just text output)
         event_trace: list[AgentEvent] = []
 
-        async for event in events:
-            event_trace.append(event)
-            if event.type == "text" and event.content:
-                print(event.content, end="", flush=True)
-            elif event.type == "tool_start":
-                print(f"\n[Tool: {event.tool_name}]", file=sys.stderr)
-            elif event.type == "tool_end":
-                if os.environ.get("RHO_AGENT_DEBUG"):
-                    result_preview = (
-                        event.tool_result[:200] + "..."
-                        if event.tool_result and len(event.tool_result) > 200
-                        else event.tool_result
-                    )
-                    print(f"[Result: {result_preview}]", file=sys.stderr)
-            elif event.type == "compact_start":
-                print("\n[Compacting context...]", file=sys.stderr)
-            elif event.type == "compact_end":
-                print(f"[{event.content}]", file=sys.stderr)
-            elif event.type == "error":
-                print(f"\nError: {event.content}", file=sys.stderr)
-            elif event.type == "turn_complete":
-                if event.usage:
-                    print(
-                        f"\n[Tokens: in={event.usage.get('total_input_tokens', 0)}, "
-                        f"out={event.usage.get('total_output_tokens', 0)}]",
-                        file=sys.stderr,
-                    )
+        async def run_turn(prompt_text: str) -> str:
+            events = agent.run_turn(prompt_text)
+            if processor:
+                events = processor.wrap_turn(events, prompt_text)
+
+            text_content = ""
+            async for event in events:
+                event_trace.append(event)
+                if event.type == "text" and event.content:
+                    text_content += event.content
+                    print(event.content, end="", flush=True)
+                elif event.type == "tool_start":
+                    print(f"\n[Tool: {event.tool_name}]", file=sys.stderr)
+                elif event.type == "tool_end":
+                    if os.environ.get("RHO_AGENT_DEBUG"):
+                        result_preview = (
+                            event.tool_result[:200] + "..."
+                            if event.tool_result and len(event.tool_result) > 200
+                            else event.tool_result
+                        )
+                        print(f"[Result: {result_preview}]", file=sys.stderr)
+                elif event.type == "compact_start":
+                    print("\n[Compacting context...]", file=sys.stderr)
+                elif event.type == "compact_end":
+                    print(f"[{event.content}]", file=sys.stderr)
+                elif event.type == "error":
+                    print(f"\nError: {event.content}", file=sys.stderr)
+                elif event.type == "turn_complete":
+                    if event.usage:
+                        print(
+                            f"\n[Tokens: in={event.usage.get('total_input_tokens', 0)}, "
+                            f"out={event.usage.get('total_output_tokens', 0)}]",
+                            file=sys.stderr,
+                        )
+            return text_content
+
+        # Run initial actor turn
+        last_text = await run_turn(instruction)
+
+        # Completion confirmation gate (Terminus-style)
+        enable_confirm = os.environ.get("RHO_AGENT_CONFIRM_DONE", "1") == "1"
+        max_confirm = int(os.environ.get("RHO_AGENT_CONFIRM_DONE_MAX", "3"))
+        confirm_token = "CONFIRM_DONE"
+        confirm_prompt = (
+            "Before finalizing, verify your solution:\n"
+            "1. If test files exist, run them with the appropriate test runner\n"
+            "2. Check actual test output - exit code 0 alone doesn't mean tests passed\n"
+            "3. Confirm ALL requirements are met, including any performance/accuracy thresholds\n"
+            "4. Re-read the task instructions and verify each requirement\n\n"
+            f"If everything passes verification, reply with exactly {confirm_token}. "
+            "Otherwise, fix issues first."
+        )
+
+        if enable_confirm:
+            for _ in range(max_confirm):
+                confirm_text = await run_turn(confirm_prompt)
+                if confirm_text.strip() == confirm_token:
+                    break
 
         # Reviewer phase (optional)
         enable_reviewer = os.environ.get("RHO_AGENT_ENABLE_REVIEWER") == "1"

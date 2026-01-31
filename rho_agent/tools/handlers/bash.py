@@ -348,14 +348,17 @@ class BashHandler(ToolHandler):
             stdout_str = stdout.decode("utf-8", errors="replace")
             stderr_str = stderr.decode("utf-8", errors="replace")
 
-            # Combine output
-            output_parts = []
-            if stdout_str:
-                output_parts.append(stdout_str)
-            if stderr_str:
-                output_parts.append(f"[stderr]\n{stderr_str}")
+            # Format output with exit code FIRST so model sees success/failure immediately
+            # (Following Codex CLI pattern - models need exit code prominent, not buried)
+            lines = [f"[Exit code: {exit_code}]"]
+            if stdout_str.strip():
+                lines.append(stdout_str)
+            if stderr_str.strip():
+                lines.append(f"[stderr]\n{stderr_str}")
+            if not stdout_str.strip() and not stderr_str.strip():
+                lines.append("(no output)")
 
-            content = "\n".join(output_parts) if output_parts else "(no output)"
+            content = "\n".join(lines)
 
             return ToolOutput(
                 content=content,

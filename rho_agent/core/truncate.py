@@ -47,10 +47,10 @@ def truncate_output(
     # Calculate approximate line number at truncation point
     head_lines = content[:half].count("\n") + 1
 
-    # Build elision notice
-    notice = f"\n\n[... {elided} chars elided"
+    # Build elision notice with actionable guidance
+    notice = f"\n\n[OUTPUT TRUNCATED: {elided} chars elided around line {head_lines}]"
     if file_path:
-        notice += f", full output at {file_path} (truncation around line {head_lines})"
-    notice += " ...]\n\n"
+        notice += f"\nFull output: {file_path}"
+    notice += "\nTip: Filter with grep/head/tail, or redirect to file and search.\n\n"
 
     return content[:half] + notice + content[-half:]

@@ -30,8 +30,11 @@ agents:
     model_name: openai/gpt-5.2
     kwargs:
       bash_only: true              # If true, only provide bash tool (no Read, Grep, etc.)
-      enable_reviewer: false        # If true, run post-execution review after actor completes
-      reviewer_max_iterations: 1    # Max review-revise loops (0 = review only, no revision)
+      enable_reviewer: false       # If true, run post-execution review after actor completes
+      reviewer_max_iterations: 1   # Max review-revise loops (0 = review only, no revision)
+      enable_confirm_done: false    # If true, require explicit CONFIRM_DONE after actor completes
+      confirm_done_max: 3          # Max confirm retries before proceeding
+      temperature: 0.0             # Model temperature (0.0 for deterministic eval)
 
 datasets:
   - name: terminal-bench

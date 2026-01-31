@@ -52,6 +52,9 @@ class RhoAgent(BaseAgent):
         bash_only: bool = False,
         enable_reviewer: bool = False,
         reviewer_max_iterations: int = 1,
+        enable_confirm_done: bool = True,
+        confirm_done_max: int = 3,
+        temperature: float = 0.0,
         *args,
         **kwargs,
     ) -> None:
@@ -65,12 +68,18 @@ class RhoAgent(BaseAgent):
             bash_only: If True, only provide bash tool (no Read, Grep, etc.).
             enable_reviewer: If True, run post-execution review after actor completes.
             reviewer_max_iterations: Max review-revise loops (0 = review only, no revision).
+            enable_confirm_done: If True, require explicit CONFIRM_DONE after actor completes.
+            confirm_done_max: Max confirm retries before proceeding (default: 3).
+            temperature: Model temperature (default: 0.0 for deterministic eval).
         """
         super().__init__(logs_dir, model_name, logger, *args, **kwargs)
         self._agent_timeout_sec = agent_timeout_sec
         self._bash_only = bash_only
         self._enable_reviewer = enable_reviewer
         self._reviewer_max_iterations = reviewer_max_iterations
+        self._enable_confirm_done = enable_confirm_done
+        self._confirm_done_max = confirm_done_max
+        self._temperature = temperature
 
     @staticmethod
     def name() -> str:
@@ -174,10 +183,19 @@ class RhoAgent(BaseAgent):
             env["RHO_AGENT_ENABLE_REVIEWER"] = "1"
             env["RHO_AGENT_REVIEWER_MAX_ITERATIONS"] = str(self._reviewer_max_iterations)
 
+        # Add completion confirmation config
+        env["RHO_AGENT_CONFIRM_DONE"] = "1" if self._enable_confirm_done else "0"
+        env["RHO_AGENT_CONFIRM_DONE_MAX"] = str(self._confirm_done_max)
+
+        # Add temperature config
+        env["RHO_AGENT_TEMPERATURE"] = str(self._temperature)
+
         self.logger.info(
             f"Running rho-agent with model: {env['RHO_AGENT_MODEL']}, "
             f"bash_only: {self._bash_only}, "
-            f"reviewer: {self._enable_reviewer}"
+            f"reviewer: {self._enable_reviewer}, "
+            f"confirm_done: {self._enable_confirm_done}, "
+            f"temperature: {self._temperature}"
         )
 
         # Use longer timeout for flex tier (slower but cheaper)

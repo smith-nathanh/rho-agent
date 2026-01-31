@@ -5,6 +5,7 @@ This directory contains the Harbor integration for running rho-agent on Harbor b
 ## What is TerminalBench?
 
 TerminalBench is a benchmark for evaluating AI agents that operate exclusively through a terminal interface. The name refers to the **interface constraint**, not the task domain - all tasks must be solved using only command-line tools, with no GUI, browser, or IDE access.
+This integration currently targets **TerminalBench-2** (tasks sourced from `laude-institute/terminal-bench-2`).
 
 ### What it tests
 
@@ -63,7 +64,7 @@ The terminal constraint creates a consistent, reproducible evaluation environmen
 │                              ▼                              │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │  Verifier                                            │   │
-│  │  - Runs task-specific tests                          │   │
+│  │  - Runs task-specific tests or checks                │   │
 │  │  - Outputs reward (0.0 or 1.0)                       │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
@@ -100,6 +101,10 @@ Config files are in `configs/`:
 | `terminal-bench-prelim.yaml` | hello-world | 1 | Smoke test - verify setup works |
 | `terminal-bench-sample.yaml` | terminal-bench-sample | 10 | Quick evaluation across task types |
 | `terminal-bench.yaml` | terminal-bench | 89 | Full benchmark run |
+
+Agent kwargs in these configs support:
+- `enable_reviewer` / `reviewer_max_iterations`: post-execution review loop
+- `enable_confirm_done` / `confirm_done_max`: require explicit `CONFIRM_DONE` before finishing
 
 ### Running
 
