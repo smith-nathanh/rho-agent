@@ -74,7 +74,7 @@ The terminal constraint creates a consistent, reproducible evaluation environmen
 
 1. Harbor reads the job config and downloads tasks from the registry
 2. For each task, Harbor starts a fresh Docker container with the task environment
-3. The agent (`RoAgent`) is installed and runs with the task instruction
+3. The agent (`RhoAgent`) is installed and runs with the task instruction
 4. The agent executes commands, writes files, installs packages as needed
 5. When the agent finishes (or times out), Harbor runs the verifier
 6. The verifier checks if the task was completed correctly (reward = 0 or 1)
