@@ -16,6 +16,7 @@ Environment variables:
     RHO_AGENT_MODEL           - Override for OPENAI_MODEL
     RHO_AGENT_BASE_URL        - Override for OPENAI_BASE_URL
     RHO_AGENT_SERVICE_TIER    - OpenAI service tier: "flex" for lower cost (default: None)
+    RHO_AGENT_REASONING_EFFORT - Reasoning effort: "low", "medium", "high" (default: "high")
     OPENAI_API_KEY            - API key (required)
     RHO_AGENT_ENABLE_REVIEWER - Set to "1" to enable post-execution review
     RHO_AGENT_REVIEWER_MAX_ITERATIONS - Max review-revise loops (default: 1)
@@ -56,6 +57,17 @@ _REVIEWER_PROMPT = Path(__file__).parent.parent.parent / "prompts" / "eval_revie
 _REVIEWER_SYSTEM = """\
 You are a code reviewer evaluating whether an AI agent successfully completed a task.
 Be concise and direct. Focus on whether the task requirements were met."""
+
+
+def format_tool_call(name: str, args: dict | None) -> str:
+    """Format tool name and args for console logging."""
+    if not args:
+        return f"[Tool: {name}]"
+    # Create compact args summary
+    args_preview = json.dumps(args, separators=(",", ":"))
+    if len(args_preview) > 200:
+        args_preview = args_preview[:200] + "..."
+    return f"[Tool: {name}] {args_preview}"
 
 
 def format_event_trace(events: list[AgentEvent]) -> str:
@@ -159,7 +171,7 @@ async def run_reviewer_phase(
             if event.type == "text" and event.content:
                 print(event.content, end="", flush=True)
             elif event.type == "tool_start":
-                print(f"\n[Tool: {event.tool_name}]", file=sys.stderr)
+                print(f"\n{format_tool_call(event.tool_name, event.tool_args)}", file=sys.stderr)
 
         # Use new trace for next review iteration
         event_trace = revision_events
@@ -200,6 +212,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     api_key = os.environ.get("OPENAI_API_KEY")
     service_tier = os.environ.get("RHO_AGENT_SERVICE_TIER")
     temperature = float(os.environ.get("RHO_AGENT_TEMPERATURE", "0.0"))
+    reasoning_effort = os.environ.get("RHO_AGENT_REASONING_EFFORT")
 
     client = ModelClient(
         model=model,
@@ -207,6 +220,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
         api_key=api_key,
         service_tier=service_tier,
         temperature=temperature,
+        reasoning_effort=reasoning_effort,
     )
 
     # Determine context window for auto-compaction
@@ -261,7 +275,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                     text_content += event.content
                     print(event.content, end="", flush=True)
                 elif event.type == "tool_start":
-                    print(f"\n[Tool: {event.tool_name}]", file=sys.stderr)
+                    print(f"\n{format_tool_call(event.tool_name, event.tool_args)}", file=sys.stderr)
                 elif event.type == "tool_end":
                     if os.environ.get("RHO_AGENT_DEBUG"):
                         result_preview = (

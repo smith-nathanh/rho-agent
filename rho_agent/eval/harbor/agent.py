@@ -55,6 +55,7 @@ class RhoAgent(BaseAgent):
         enable_confirm_done: bool = True,
         confirm_done_max: int = 3,
         temperature: float = 0.0,
+        reasoning_effort: str = "high",
         *args,
         **kwargs,
     ) -> None:
@@ -71,6 +72,7 @@ class RhoAgent(BaseAgent):
             enable_confirm_done: If True, require explicit CONFIRM_DONE after actor completes.
             confirm_done_max: Max confirm retries before proceeding (default: 3).
             temperature: Model temperature (default: 0.0 for deterministic eval).
+            reasoning_effort: Reasoning effort level: "low", "medium", "high" (default: "high").
         """
         super().__init__(logs_dir, model_name, logger, *args, **kwargs)
         self._agent_timeout_sec = agent_timeout_sec
@@ -80,6 +82,7 @@ class RhoAgent(BaseAgent):
         self._enable_confirm_done = enable_confirm_done
         self._confirm_done_max = confirm_done_max
         self._temperature = temperature
+        self._reasoning_effort = reasoning_effort
 
     @staticmethod
     def name() -> str:
@@ -190,12 +193,16 @@ class RhoAgent(BaseAgent):
         # Add temperature config
         env["RHO_AGENT_TEMPERATURE"] = str(self._temperature)
 
+        # Add reasoning effort config
+        env["RHO_AGENT_REASONING_EFFORT"] = self._reasoning_effort
+
         self.logger.info(
             f"Running rho-agent with model: {env['RHO_AGENT_MODEL']}, "
             f"bash_only: {self._bash_only}, "
             f"reviewer: {self._enable_reviewer}, "
             f"confirm_done: {self._enable_confirm_done}, "
-            f"temperature: {self._temperature}"
+            f"temperature: {self._temperature}, "
+            f"reasoning_effort: {self._reasoning_effort}"
         )
 
         # Use longer timeout for flex tier (slower but cheaper)

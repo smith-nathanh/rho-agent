@@ -61,8 +61,10 @@ class ModelClient:
         timeout: float | None = None,
         service_tier: str | None = None,
         temperature: float = 0.7,
+        reasoning_effort: str | None = None,
     ) -> None:
         self._temperature = temperature
+        self._reasoning_effort = reasoning_effort
         # For flex processing, use longer timeout (15 min) per OpenAI docs
         if timeout is None:
             timeout = 900.0 if service_tier == "flex" else 60.0
@@ -105,8 +107,14 @@ class ModelClient:
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
-            "temperature": self._temperature,
         }
+
+        # reasoning_effort and temperature are mutually exclusive
+        # GPT-5/o-series models don't support temperature with reasoning
+        if self._reasoning_effort:
+            kwargs["reasoning_effort"] = self._reasoning_effort
+        else:
+            kwargs["temperature"] = self._temperature
 
         if prompt.tools:
             kwargs["tools"] = prompt.tools
@@ -202,8 +210,13 @@ class ModelClient:
             "model": self._model,
             "messages": messages,
             "stream": False,
-            "temperature": self._temperature,
         }
+
+        # reasoning_effort and temperature are mutually exclusive
+        if self._reasoning_effort:
+            kwargs["reasoning_effort"] = self._reasoning_effort
+        else:
+            kwargs["temperature"] = self._temperature
 
         if prompt.tools:
             kwargs["tools"] = prompt.tools
@@ -263,8 +276,12 @@ class ModelClient:
                 "model": self._model,
                 "messages": messages,
                 "stream": False,
-                "temperature": self._temperature,
             }
+            # reasoning_effort and temperature are mutually exclusive
+            if self._reasoning_effort:
+                kwargs["reasoning_effort"] = self._reasoning_effort
+            else:
+                kwargs["temperature"] = self._temperature
             if self._service_tier:
                 kwargs["service_tier"] = self._service_tier
 

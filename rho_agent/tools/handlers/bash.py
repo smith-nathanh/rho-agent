@@ -3,10 +3,21 @@
 Supports two modes:
 - RESTRICTED: Only allowlisted read-only commands (grep, cat, find, etc.)
 - UNRESTRICTED: Any command allowed (for sandboxed container environments)
+
+Output format matches Codex CLI's exec_command:
+{
+  "output": "<stdout + stderr>",
+  "metadata": {
+    "exit_code": 0,
+    "duration_seconds": 1.2
+  }
+}
 """
 
 import asyncio
+import json
 import os
+import time
 from typing import Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
@@ -269,6 +280,21 @@ class BashHandler(ToolHandler):
             "required": ["command"],
         }
 
+    def _format_output(
+        self, output: str, exit_code: int, duration_seconds: float
+    ) -> str:
+        """Format output as JSON matching Codex CLI exec_command format."""
+        return json.dumps(
+            {
+                "output": output,
+                "metadata": {
+                    "exit_code": exit_code,
+                    "duration_seconds": round(duration_seconds, 1),
+                },
+            },
+            indent=2,
+        )
+
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
         """Execute the shell command and return output."""
         command = invocation.arguments.get("command", "")
@@ -286,6 +312,8 @@ class BashHandler(ToolHandler):
                     content=f"Command blocked: {reason}",
                     success=False,
                 )
+
+        start_time = time.perf_counter()
 
         try:
             process = await asyncio.create_subprocess_shell(
@@ -306,6 +334,8 @@ class BashHandler(ToolHandler):
                 await process.wait()
                 raise
             except asyncio.TimeoutError:
+                duration = time.perf_counter() - start_time
+
                 # Capture partial output before killing
                 partial_stdout = b""
                 partial_stderr = b""
@@ -327,11 +357,14 @@ class BashHandler(ToolHandler):
                 process.kill()
                 await process.wait()
 
-                # Build content with partial output
-                content = partial_stdout.decode("utf-8", errors="replace")
+                # Combine stdout/stderr (Codex uses aggregated_output)
+                output = partial_stdout.decode("utf-8", errors="replace")
                 if partial_stderr:
-                    content += f"\n[stderr]\n{partial_stderr.decode('utf-8', errors='replace')}"
-                content += f"\n\n[Command timed out after {timeout}s and was killed]"
+                    stderr_text = partial_stderr.decode("utf-8", errors="replace")
+                    output = f"{output}\n{stderr_text}" if output else stderr_text
+                output += f"\n\n[Command timed out after {timeout}s and was killed]"
+
+                content = self._format_output(output, exit_code=-1, duration_seconds=duration)
 
                 return ToolOutput(
                     content=content,
@@ -339,32 +372,35 @@ class BashHandler(ToolHandler):
                     metadata={
                         "exit_code": -1,
                         "timed_out": True,
+                        "duration_seconds": round(duration, 1),
                         "working_dir": working_dir,
                         "command": command,
                     },
                 )
 
+            duration = time.perf_counter() - start_time
             exit_code = process.returncode
             stdout_str = stdout.decode("utf-8", errors="replace")
             stderr_str = stderr.decode("utf-8", errors="replace")
 
-            # Format output with exit code FIRST so model sees success/failure immediately
-            # (Following Codex CLI pattern - models need exit code prominent, not buried)
-            lines = [f"[Exit code: {exit_code}]"]
-            if stdout_str.strip():
-                lines.append(stdout_str)
-            if stderr_str.strip():
-                lines.append(f"[stderr]\n{stderr_str}")
-            if not stdout_str.strip() and not stderr_str.strip():
-                lines.append("(no output)")
+            # Combine stdout/stderr into single output (Codex aggregated_output style)
+            if stdout_str and stderr_str:
+                output = f"{stdout_str}\n{stderr_str}"
+            elif stdout_str:
+                output = stdout_str
+            elif stderr_str:
+                output = stderr_str
+            else:
+                output = ""
 
-            content = "\n".join(lines)
+            content = self._format_output(output, exit_code, duration)
 
             return ToolOutput(
                 content=content,
                 success=exit_code == 0,
                 metadata={
                     "exit_code": exit_code,
+                    "duration_seconds": round(duration, 1),
                     "command": command,
                     "working_dir": working_dir,
                 },

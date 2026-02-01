@@ -403,7 +403,7 @@ class Agent:
                 )
                 output = await self._registry.dispatch(invocation)
                 # Truncate output to prevent context overflow
-                truncated_content = truncate_output(output.content, tool_name=tool_name)
+                truncated_content = truncate_output(output.content)
                 tool_results.append(
                     ToolResult(
                         tool_call_id=tool_id,

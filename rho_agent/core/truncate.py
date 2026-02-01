@@ -1,56 +1,73 @@
-"""Output truncation with file persistence for debugging."""
+"""Output truncation matching Codex CLI format.
 
-import hashlib
-from pathlib import Path
+Uses token-based truncation with ...N tokens truncated... marker format
+to match Codex CLI's exec_command output.
+"""
 
-MAX_TOOL_OUTPUT_CHARS = 20000
-OUTPUT_PERSIST_DIR = Path("/tmp/rho-outputs")
+# Codex uses ~4 bytes per token heuristic
+APPROX_BYTES_PER_TOKEN = 4
+
+# Default max tokens (matching Codex's default of ~5000 tokens)
+MAX_OUTPUT_TOKENS = 5000
 
 
 def truncate_output(
     content: str,
-    max_chars: int = MAX_TOOL_OUTPUT_CHARS,
-    tool_name: str = "tool",
-    persist_dir: Path | None = OUTPUT_PERSIST_DIR,
+    max_tokens: int = MAX_OUTPUT_TOKENS,
 ) -> str:
     """Truncate tool output to prevent context overflow.
 
-    Uses head+tail strategy: keeps the first half and last half of the
-    budget, so error messages at the end of output are preserved.
-
-    When truncating, saves the full output to a file for debugging.
+    Uses token-based truncation matching Codex CLI format:
+    - Adds "Total output lines: N" header when truncated
+    - Uses "...N tokens truncated..." marker
+    - 50/50 head+tail split
 
     Args:
         content: The output to truncate.
-        max_chars: Maximum characters to keep.
-        tool_name: Name of the tool (used in persisted filename).
-        persist_dir: Directory to save full output (None to disable).
+        max_tokens: Maximum tokens to keep (uses 4 bytes/token heuristic).
 
     Returns:
         Truncated content with elision notice, or original if under limit.
     """
-    if len(content) <= max_chars:
+    max_bytes = max_tokens * APPROX_BYTES_PER_TOKEN
+    content_bytes = len(content.encode("utf-8"))
+
+    if content_bytes <= max_bytes:
         return content
 
-    half = max_chars // 2
-    elided = len(content) - max_chars
+    # Calculate how much to keep (50/50 split)
+    half_bytes = max_bytes // 2
 
-    # Persist full output for debugging
-    file_path = None
-    if persist_dir:
-        persist_dir.mkdir(parents=True, exist_ok=True)
-        content_hash = hashlib.sha256(content.encode()).hexdigest()[:12]
-        file_path = persist_dir / f"{tool_name}_{content_hash}.txt"
-        if not file_path.exists():
-            file_path.write_text(content)
+    # Find character positions that correspond to byte boundaries
+    # (handles multi-byte UTF-8 characters)
+    head_chars = 0
+    head_bytes = 0
+    for char in content:
+        char_bytes = len(char.encode("utf-8"))
+        if head_bytes + char_bytes > half_bytes:
+            break
+        head_bytes += char_bytes
+        head_chars += 1
 
-    # Calculate approximate line number at truncation point
-    head_lines = content[:half].count("\n") + 1
+    tail_chars = 0
+    tail_bytes = 0
+    for char in reversed(content):
+        char_bytes = len(char.encode("utf-8"))
+        if tail_bytes + char_bytes > half_bytes:
+            break
+        tail_bytes += char_bytes
+        tail_chars += 1
 
-    # Build elision notice with actionable guidance
-    notice = f"\n\n[OUTPUT TRUNCATED: {elided} chars elided around line {head_lines}]"
-    if file_path:
-        notice += f"\nFull output: {file_path}"
-    notice += "\nTip: Filter with grep/head/tail, or redirect to file and search.\n\n"
+    # Calculate tokens truncated
+    elided_bytes = content_bytes - head_bytes - tail_bytes
+    elided_tokens = elided_bytes // APPROX_BYTES_PER_TOKEN
 
-    return content[:half] + notice + content[-half:]
+    # Count total lines for header
+    total_lines = content.count("\n") + 1
+
+    # Build output with Codex format
+    head = content[:head_chars]
+    tail = content[-tail_chars:] if tail_chars > 0 else ""
+    marker = f"\n...{elided_tokens} tokens truncated...\n"
+
+    return f"Total output lines: {total_lines}\n\n{head}{marker}{tail}"

@@ -33,6 +33,7 @@ agents:
       enable_confirm_done: false   # If true, require explicit CONFIRM_DONE after actor completes
       confirm_done_max: 3          # Max confirm retries before proceeding
       temperature: 0.0             # Model temperature (0.0 for deterministic eval)
+      reasoning_effort: high       # Reasoning effort: "low", "medium", "high"
 
 datasets:
   - name: terminal-bench-sample
