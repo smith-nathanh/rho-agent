@@ -41,7 +41,7 @@ class RhoAgent(BaseAgent):
     """
 
     # Harbor agent interface
-    SUPPORTS_ATIF: bool = False  # TODO: Add trajectory support later
+    SUPPORTS_ATIF: bool = True
 
     def __init__(
         self,
@@ -54,7 +54,7 @@ class RhoAgent(BaseAgent):
         enable_confirm_done: bool = True,
         confirm_done_max: int = 3,
         temperature: float = 0.0,
-        reasoning_effort: str = "high",
+        reasoning_effort: str | None = None,
         *args,
         **kwargs,
     ) -> None:
@@ -70,7 +70,7 @@ class RhoAgent(BaseAgent):
             enable_confirm_done: If True, require explicit CONFIRM_DONE after actor completes.
             confirm_done_max: Max confirm retries before proceeding (default: 3).
             temperature: Model temperature (default: 0.0 for deterministic eval).
-            reasoning_effort: Reasoning effort level: "low", "medium", "high" (default: "high").
+            reasoning_effort: Reasoning effort level: "low", "medium", "high" (default: None).
         """
         super().__init__(logs_dir, model_name, logger, *args, **kwargs)
         self._bash_only = bash_only
@@ -129,9 +129,10 @@ class RhoAgent(BaseAgent):
             )
 
         # Sync rho-agent dependencies using uv (handles Python + deps automatically)
+        # Include evals extra for LiteLLM support
         self.logger.info("Syncing rho-agent dependencies...")
         result = await environment.exec(
-            'export PATH="$HOME/.local/bin:$PATH" && cd /rho-agent && uv sync',
+            'export PATH="$HOME/.local/bin:$PATH" && cd /rho-agent && uv sync --extra evals',
             timeout_sec=180,
         )
         self.logger.info(f"uv sync: rc={result.return_code}")
@@ -190,8 +191,9 @@ class RhoAgent(BaseAgent):
         # Add temperature config
         env["RHO_AGENT_TEMPERATURE"] = str(self._temperature)
 
-        # Add reasoning effort config
-        env["RHO_AGENT_REASONING_EFFORT"] = self._reasoning_effort
+        # Add reasoning effort config (only if explicitly set)
+        if self._reasoning_effort:
+            env["RHO_AGENT_REASONING_EFFORT"] = self._reasoning_effort
 
         self.logger.info(
             f"Running rho-agent with model: {env['RHO_AGENT_MODEL']}, "
@@ -247,7 +249,7 @@ class RhoAgent(BaseAgent):
             self._populate_context_from_telemetry(context)
 
     def _populate_context_from_telemetry(self, context: AgentContext) -> None:
-        """Parse token usage and populate Harbor's AgentContext."""
+        """Parse token usage, cost, and populate Harbor's AgentContext."""
         if not self.logs_dir:
             return
 
@@ -259,8 +261,13 @@ class RhoAgent(BaseAgent):
                 data = json.loads(tokens_path.read_text())
                 context.n_input_tokens = data.get("input", 0)
                 context.n_output_tokens = data.get("output", 0)
+                reasoning_tokens = data.get("reasoning", 0)
+                if "cost_usd" in data:
+                    context.cost_usd = data["cost_usd"]
                 self.logger.info(
-                    f"Token usage (from tokens.json): input={context.n_input_tokens}, output={context.n_output_tokens}"
+                    f"Token usage (from tokens.json): input={context.n_input_tokens}, "
+                    f"output={context.n_output_tokens}, reasoning={reasoning_tokens}, "
+                    f"cost=${context.cost_usd or 0:.4f}"
                 )
                 return
             except Exception as e:

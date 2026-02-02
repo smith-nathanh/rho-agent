@@ -168,6 +168,9 @@ class Agent:
         self._session.update_token_usage(
             usage.get("input_tokens", 0),
             usage.get("output_tokens", 0),
+            usage.get("cached_tokens", 0),
+            usage.get("reasoning_tokens", 0),
+            usage.get("cost_usd", 0.0),
         )
 
         # Format the summary with prefix
@@ -320,6 +323,9 @@ class Agent:
                         self._session.update_token_usage(
                             event.usage.get("input_tokens", 0),
                             event.usage.get("output_tokens", 0),
+                            event.usage.get("cached_tokens", 0),
+                            event.usage.get("reasoning_tokens", 0),
+                            event.usage.get("cost_usd", 0.0),
                         )
 
                 elif event.type == "error":
@@ -351,6 +357,9 @@ class Agent:
                     usage={
                         "total_input_tokens": self._session.total_input_tokens,
                         "total_output_tokens": self._session.total_output_tokens,
+                        "total_cached_tokens": self._session.total_cached_tokens,
+                        "total_reasoning_tokens": self._session.total_reasoning_tokens,
+                        "total_cost_usd": self._session.total_cost_usd,
                     },
                 )
                 return
@@ -427,6 +436,9 @@ class Agent:
                     usage={
                         "total_input_tokens": self._session.total_input_tokens,
                         "total_output_tokens": self._session.total_output_tokens,
+                        "total_cached_tokens": self._session.total_cached_tokens,
+                        "total_reasoning_tokens": self._session.total_reasoning_tokens,
+                        "total_cost_usd": self._session.total_cost_usd,
                     },
                 )
                 return

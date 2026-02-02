@@ -23,6 +23,9 @@ class Session:
     history: list[dict[str, Any]] = field(default_factory=list)
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_cached_tokens: int = 0
+    total_reasoning_tokens: int = 0
+    total_cost_usd: float = 0.0
     last_input_tokens: int = 0  # Context size of most recent API call
 
     def add_user_message(self, content: str) -> None:
@@ -64,10 +67,28 @@ class Session:
                 }
             )
 
-    def update_token_usage(self, input_tokens: int, output_tokens: int) -> None:
-        """Update cumulative token usage."""
+    def update_token_usage(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cached_tokens: int = 0,
+        reasoning_tokens: int = 0,
+        cost_usd: float = 0.0,
+    ) -> None:
+        """Update cumulative token usage and cost.
+
+        Args:
+            input_tokens: Number of input tokens consumed.
+            output_tokens: Number of output tokens generated.
+            cached_tokens: Number of cached tokens (provider-dependent).
+            reasoning_tokens: Number of reasoning tokens (subset of output_tokens).
+            cost_usd: Cost in USD for this API call.
+        """
         self.total_input_tokens += input_tokens
         self.total_output_tokens += output_tokens
+        self.total_cached_tokens += cached_tokens
+        self.total_reasoning_tokens += reasoning_tokens
+        self.total_cost_usd += cost_usd
         if input_tokens > 0:
             self.last_input_tokens = input_tokens
 

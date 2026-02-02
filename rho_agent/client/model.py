@@ -19,13 +19,20 @@ class ToolCall:
 
 @dataclass
 class StreamEvent:
-    """An event from the model stream."""
+    """An event from the model stream.
+
+    Usage dict (for type="done") may contain:
+        - input_tokens: int
+        - output_tokens: int
+        - cached_tokens: int (optional, provider-dependent)
+        - cost_usd: float (optional, from LiteLLMClient)
+    """
 
     type: str  # "text", "tool_call", "done", "error"
     content: str | None = None
     tool_call: ToolCall | None = None
     stop_reason: str | None = None
-    usage: dict[str, int] | None = None
+    usage: dict[str, Any] | None = None
 
 
 @dataclass
@@ -266,7 +273,7 @@ class ModelClient:
 
     async def complete(
         self, messages: list[dict[str, Any]]
-    ) -> tuple[str, dict[str, int]]:
+    ) -> tuple[str, dict[str, Any]]:
         """Non-streaming completion for simple requests like summarization.
 
         Returns (content, usage_dict).
@@ -292,12 +299,13 @@ class ModelClient:
                 "output_tokens": response.usage.completion_tokens
                 if response.usage
                 else 0,
+                "cost_usd": 0.0,
             }
             return content, usage
         except APIStatusError as e:
             return (
                 f"API error {e.status_code} (after retries): {e.message}",
-                {"input_tokens": 0, "output_tokens": 0},
+                {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0},
             )
         except Exception as e:
-            return f"Error: {e}", {"input_tokens": 0, "output_tokens": 0}
+            return f"Error: {e}", {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}

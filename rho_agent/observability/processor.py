@@ -53,6 +53,7 @@ class ObservabilityProcessor:
         # Metrics
         self._turn_input_tokens = 0
         self._turn_output_tokens = 0
+        self._turn_reasoning_tokens = 0
 
     @property
     def context(self) -> TelemetryContext:
@@ -108,6 +109,7 @@ class ObservabilityProcessor:
         )
         self._turn_input_tokens = 0
         self._turn_output_tokens = 0
+        self._turn_reasoning_tokens = 0
 
         await self._exporter.start_turn(self._current_turn, user_input)
 
@@ -128,6 +130,7 @@ class ObservabilityProcessor:
             if self._current_turn:
                 self._current_turn.input_tokens = self._turn_input_tokens
                 self._current_turn.output_tokens = self._turn_output_tokens
+                self._current_turn.reasoning_tokens = self._turn_reasoning_tokens
                 self._current_turn.end()
                 await self._exporter.end_turn(self._current_turn)
                 self._context.end_turn()
@@ -166,16 +169,19 @@ class ObservabilityProcessor:
                 # Usage contains cumulative totals, we want the delta
                 total_input = event.usage.get("total_input_tokens", 0)
                 total_output = event.usage.get("total_output_tokens", 0)
+                total_reasoning = event.usage.get("total_reasoning_tokens", 0)
 
                 # Calculate delta from session totals
                 delta_input = total_input - self._context.total_input_tokens
                 delta_output = total_output - self._context.total_output_tokens
+                delta_reasoning = total_reasoning - self._context.total_reasoning_tokens
 
                 self._turn_input_tokens = delta_input
                 self._turn_output_tokens = delta_output
+                self._turn_reasoning_tokens = delta_reasoning
 
                 # Update session totals
-                self._context.record_tokens(delta_input, delta_output)
+                self._context.record_tokens(delta_input, delta_output, delta_reasoning)
 
         elif event.type == "error":
             # Record error in pending tool if any

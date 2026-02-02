@@ -50,6 +50,7 @@ class TelemetryContext:
     total_turns: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_reasoning_tokens: int = 0
     total_tool_calls: int = 0
 
     # Current turn tracking
@@ -110,10 +111,13 @@ class TelemetryContext:
         """End the current turn."""
         self.current_turn_id = None
 
-    def record_tokens(self, input_tokens: int, output_tokens: int) -> None:
+    def record_tokens(
+        self, input_tokens: int, output_tokens: int, reasoning_tokens: int = 0
+    ) -> None:
         """Record token usage."""
         self.total_input_tokens += input_tokens
         self.total_output_tokens += output_tokens
+        self.total_reasoning_tokens += reasoning_tokens
 
     def record_tool_call(self) -> None:
         """Record a tool call."""
@@ -140,6 +144,7 @@ class TelemetryContext:
             "total_turns": self.total_turns,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
+            "total_reasoning_tokens": self.total_reasoning_tokens,
             "total_tool_calls": self.total_tool_calls,
             "metadata": self.metadata,
         }
@@ -156,6 +161,7 @@ class TurnContext:
     ended_at: datetime | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    reasoning_tokens: int = 0
     tool_calls: int = 0
     user_input: str = ""
 
@@ -173,6 +179,7 @@ class TurnContext:
             "ended_at": self.ended_at.isoformat() if self.ended_at else None,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "reasoning_tokens": self.reasoning_tokens,
             "tool_calls": self.tool_calls,
         }
 

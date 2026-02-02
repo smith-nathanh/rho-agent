@@ -16,7 +16,8 @@ Environment variables:
     RHO_AGENT_MODEL           - Override for OPENAI_MODEL
     RHO_AGENT_BASE_URL        - Override for OPENAI_BASE_URL
     RHO_AGENT_SERVICE_TIER    - OpenAI service tier: "flex" for lower cost (default: None)
-    RHO_AGENT_REASONING_EFFORT - Reasoning effort: "low", "medium", "high" (default: "high")
+    RHO_AGENT_REASONING_EFFORT - Reasoning effort: "low", "medium", "high" (default: None)
+    RHO_AGENT_CHUNK_TIMEOUT   - Streaming chunk timeout in seconds (default: 180)
     OPENAI_API_KEY            - API key (required)
     RHO_AGENT_ENABLE_REVIEWER - Set to "1" to enable post-execution review
     RHO_AGENT_REVIEWER_MAX_ITERATIONS - Max review-revise loops (default: 1)
@@ -34,9 +35,10 @@ from dotenv import load_dotenv
 
 from rho_agent.capabilities import CapabilityProfile
 from rho_agent.capabilities.factory import ToolFactory
-from rho_agent.client.model import ModelClient
+from rho_agent.client.litellm_client import LiteLLMClient
 from rho_agent.core.agent import Agent, AgentEvent
 from rho_agent.core.session import Session
+from rho_agent.eval.harbor.trajectory import TrajectoryBuilder
 from rho_agent.observability import ObservabilityConfig, CaptureConfig, TenantConfig, create_processor
 from rho_agent.prompts import load_prompt, prepare_prompt
 
@@ -99,7 +101,7 @@ async def run_reviewer_phase(
     instruction: str,
     event_trace: list[AgentEvent],
     agent: Agent,
-    client: "ModelClient",
+    client: LiteLLMClient,
     max_iterations: int,
 ) -> None:
     """Run post-execution review with optional revision loop.
@@ -207,28 +209,30 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     print(f"[rho-agent] Tools: {tool_names}", file=sys.stderr)
 
     # Create client from environment
-    model = os.environ.get("RHO_AGENT_MODEL") or os.environ.get("OPENAI_MODEL", "gpt-5-mini")
-    base_url = os.environ.get("RHO_AGENT_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+    # LiteLLM uses model names like "openai/gpt-5-mini" or "anthropic/claude-3-5-sonnet"
+    model = os.environ.get("RHO_AGENT_MODEL") or os.environ.get("OPENAI_MODEL", "openai/gpt-5-mini")
     api_key = os.environ.get("OPENAI_API_KEY")
-    service_tier = os.environ.get("RHO_AGENT_SERVICE_TIER")
     temperature = float(os.environ.get("RHO_AGENT_TEMPERATURE", "0.0"))
     reasoning_effort = os.environ.get("RHO_AGENT_REASONING_EFFORT")
+    chunk_timeout = float(os.environ.get("RHO_AGENT_CHUNK_TIMEOUT", "180.0"))
 
-    client = ModelClient(
+    client = LiteLLMClient(
         model=model,
-        base_url=base_url,
         api_key=api_key,
-        service_tier=service_tier,
         temperature=temperature,
         reasoning_effort=reasoning_effort,
+        chunk_timeout=chunk_timeout,
     )
 
     # Determine context window for auto-compaction
-    model_lower = model.lower()
-    if "gpt-5" in model_lower:
+    # Strip provider prefix for model detection (e.g., "openai/gpt-5-mini" -> "gpt-5-mini")
+    model_name = model.split("/")[-1].lower()
+    if "gpt-5" in model_name:
         context_window = 400_000  # GPT-5.x family
-    elif "gpt-oss" in model_lower:
+    elif "gpt-oss" in model_name:
         context_window = 128_000  # GPT-OSS-120B
+    elif "claude" in model_name:
+        context_window = 200_000  # Claude 3.x family
     else:
         context_window = 128_000  # conservative default
 
@@ -260,6 +264,10 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     # runner exits and Harbor runs verification.
     if processor:
         await processor.start_session()
+
+    # Create trajectory builder for ATIF output
+    trajectory_builder = TrajectoryBuilder(model=model)
+
     try:
         # Track events for reviewer (full trace, not just text output)
         event_trace: list[AgentEvent] = []
@@ -270,8 +278,10 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                 events = processor.wrap_turn(events, prompt_text)
 
             text_content = ""
+            turn_events: list[AgentEvent] = []
             async for event in events:
                 event_trace.append(event)
+                turn_events.append(event)
                 if event.type == "text" and event.content:
                     text_content += event.content
                     print(event.content, end="", flush=True)
@@ -285,6 +295,14 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                             else event.tool_result
                         )
                         print(f"[Result: {result_preview}]", file=sys.stderr)
+                    # Write tokens incrementally after each tool (survives timeout)
+                    Path("/logs/agent/tokens.json").write_text(json.dumps({
+                        "input": session.total_input_tokens,
+                        "output": session.total_output_tokens,
+                        "cached": session.total_cached_tokens,
+                        "reasoning": session.total_reasoning_tokens,
+                        "cost_usd": session.total_cost_usd,
+                    }))
                 elif event.type == "compact_start":
                     print("\n[Compacting context...]", file=sys.stderr)
                 elif event.type == "compact_end":
@@ -293,16 +311,27 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                     print(f"\nError: {event.content}", file=sys.stderr)
                 elif event.type == "turn_complete":
                     if event.usage:
+                        cost = event.usage.get('total_cost_usd', 0.0)
+                        reasoning = event.usage.get('total_reasoning_tokens', 0)
+                        reasoning_str = f", reasoning={reasoning}" if reasoning else ""
                         print(
                             f"\n[Tokens: in={event.usage.get('total_input_tokens', 0)}, "
-                            f"out={event.usage.get('total_output_tokens', 0)}]",
+                            f"out={event.usage.get('total_output_tokens', 0)}{reasoning_str}, "
+                            f"cost=${cost:.4f}]",
                             file=sys.stderr,
                         )
-                    # Write tokens incrementally to mounted path (survives process kill)
+                    # Write tokens/cost incrementally to mounted path (survives process kill)
                     Path("/logs/agent/tokens.json").write_text(json.dumps({
                         "input": session.total_input_tokens,
                         "output": session.total_output_tokens,
+                        "cached": session.total_cached_tokens,
+                        "reasoning": session.total_reasoning_tokens,
+                        "cost_usd": session.total_cost_usd,
                     }))
+
+            # Build trajectory from this turn's events
+            trajectory_builder.build_from_events(turn_events, user_input=prompt_text)
+
             return text_content
 
         # Run initial actor turn
@@ -349,6 +378,9 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
             processor.context.total_input_tokens = session.total_input_tokens
             processor.context.total_output_tokens = session.total_output_tokens
             await processor.end_session()
+
+        # Save ATIF trajectory for Harbor analysis
+        trajectory_builder.save("/logs/agent/trajectory.json")
 
     print()  # Final newline
 

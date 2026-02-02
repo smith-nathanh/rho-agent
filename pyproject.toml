@@ -35,6 +35,9 @@ build-backend = "hatchling.build"
 # Install harbor from: https://github.com/laude-institute/harbor
 harbor = []  # Harbor is installed separately via pip install -e ~/proj/harbor
 
+# Eval dependencies (LiteLLM for multi-provider support and cost tracking)
+evals = ["litellm>=1.50.0"]
+
 # Observability dependencies
 observability = [
     "opentelemetry-api>=1.20.0",
