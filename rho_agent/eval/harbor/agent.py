@@ -48,7 +48,6 @@ class RhoAgent(BaseAgent):
         logs_dir: Path,
         model_name: str | None = None,
         logger: logging.Logger | None = None,
-        agent_timeout_sec: int = 600,
         bash_only: bool = False,
         enable_reviewer: bool = False,
         reviewer_max_iterations: int = 1,
@@ -65,7 +64,6 @@ class RhoAgent(BaseAgent):
             logs_dir: Directory to write agent logs to.
             model_name: Model to use (e.g., "openai/gpt-5-mini").
             logger: Logger instance.
-            agent_timeout_sec: Maximum time for agent execution (default: 10 min).
             bash_only: If True, only provide bash tool (no Read, Grep, etc.).
             enable_reviewer: If True, run post-execution review after actor completes.
             reviewer_max_iterations: Max review-revise loops (0 = review only, no revision).
@@ -75,7 +73,6 @@ class RhoAgent(BaseAgent):
             reasoning_effort: Reasoning effort level: "low", "medium", "high" (default: "high").
         """
         super().__init__(logs_dir, model_name, logger, *args, **kwargs)
-        self._agent_timeout_sec = agent_timeout_sec
         self._bash_only = bash_only
         self._enable_reviewer = enable_reviewer
         self._reviewer_max_iterations = reviewer_max_iterations
@@ -164,11 +161,11 @@ class RhoAgent(BaseAgent):
         if "/" in model:
             model = model.split("/", 1)[1]
 
-        telemetry_db = "/tmp/telemetry.db"
+        # Use /logs/agent/ which is mounted from host - no download needed
         env = {
             "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", ""),
             "RHO_AGENT_MODEL": model,
-            "RHO_AGENT_TELEMETRY_DB": telemetry_db,
+            "RHO_AGENT_TELEMETRY_DB": "/logs/agent/telemetry.db",
         }
 
         # Add base URL if configured
@@ -205,15 +202,9 @@ class RhoAgent(BaseAgent):
             f"reasoning_effort: {self._reasoning_effort}"
         )
 
-        # Use longer timeout for flex tier (slower but cheaper)
-        timeout = self._agent_timeout_sec
-        if service_tier == "flex":
-            timeout = max(timeout, 1800)  # at least 30 min for flex
-
         # Run rho-agent in the container using uv run
-        # Tee stdout/stderr to files in the container so we can retrieve them
-        # even if the command times out (environment.exec raises on timeout
-        # before returning result, so we'd lose all output otherwise).
+        # Tee stdout/stderr to /logs/agent/ which is mounted from host
+        # This ensures output survives even if the process is killed by timeout
         bash_only_flag = " --bash-only" if self._bash_only else ""
         cmd = (
             f'set -a && source /rho-agent/.env && set +a && '
@@ -221,52 +212,83 @@ class RhoAgent(BaseAgent):
             f'export PYTHONPATH=/rho-agent && '
             f'cd /app && '
             f'/rho-agent/.venv/bin/python -B -m rho_agent.eval.harbor.runner {escaped} /app{bash_only_flag} '
-            f'> >(tee /tmp/agent_stdout.txt) 2> >(tee /tmp/agent_stderr.txt >&2)'
+            f'> >(tee /logs/agent/stdout.txt) 2> >(tee /logs/agent/stderr.txt >&2)'
         )
         stdout = ""
         stderr = ""
         try:
             result = await environment.exec(
                 f"bash -c {shlex.quote(cmd)}",
-                timeout_sec=timeout,
                 env=env,
             )
             stdout = result.stdout or ""
             stderr = result.stderr or ""
         except Exception:
-            # Timeout or other error - retrieve output from container files
-            self.logger.warning("Agent exec failed, retrieving output from container...")
-            try:
-                out = await environment.exec("cat /tmp/agent_stdout.txt", timeout_sec=10)
-                stdout = out.stdout or ""
-            except Exception:
-                stdout = ""
-            try:
-                err = await environment.exec("cat /tmp/agent_stderr.txt", timeout_sec=10)
-                stderr = err.stdout or ""
-            except Exception:
-                stderr = ""
+            # Timeout or other error - output is already in /logs/agent/ via mount
+            self.logger.warning("Agent exec failed (timeout or error)")
             raise  # Re-raise so Harbor records the timeout
         finally:
+            # Read output from mounted logs directory (no download needed)
+            if self.logs_dir:
+                stdout_path = self.logs_dir / "stdout.txt"
+                stderr_path = self.logs_dir / "stderr.txt"
+                if stdout_path.exists():
+                    stdout = stdout_path.read_text()
+                if stderr_path.exists():
+                    stderr = stderr_path.read_text()
+
             # Log output
             if stdout:
                 self.logger.info(f"stdout:\n{stdout}")
             if stderr:
                 self.logger.warning(f"stderr:\n{stderr}")
 
-            # Write output to logs directory for debugging
-            if self.logs_dir:
-                (self.logs_dir / "agent_stdout.txt").write_text(stdout)
-                (self.logs_dir / "agent_stderr.txt").write_text(stderr)
+            # Populate Harbor context with token usage
+            self._populate_context_from_telemetry(context)
 
-            # Retrieve telemetry DB for full tool traces
-            if self.logs_dir:
-                try:
-                    await environment.download_file(
-                        telemetry_db, self.logs_dir / "telemetry.db"
-                    )
-                except Exception:
-                    self.logger.debug("No telemetry DB to retrieve")
+    def _populate_context_from_telemetry(self, context: AgentContext) -> None:
+        """Parse token usage and populate Harbor's AgentContext."""
+        if not self.logs_dir:
+            return
+
+        # Try incremental tokens file first (survives process kill)
+        tokens_path = self.logs_dir / "tokens.json"
+        if tokens_path.exists():
+            try:
+                import json
+                data = json.loads(tokens_path.read_text())
+                context.n_input_tokens = data.get("input", 0)
+                context.n_output_tokens = data.get("output", 0)
+                self.logger.info(
+                    f"Token usage (from tokens.json): input={context.n_input_tokens}, output={context.n_output_tokens}"
+                )
+                return
+            except Exception as e:
+                self.logger.warning(f"Failed to parse tokens.json: {e}")
+
+        # Fall back to telemetry DB
+        telemetry_path = self.logs_dir / "telemetry.db"
+        if not telemetry_path.exists():
+            return
+
+        try:
+            import sqlite3
+            conn = sqlite3.connect(telemetry_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT total_input_tokens, total_output_tokens FROM sessions LIMIT 1"
+            )
+            row = cursor.fetchone()
+            conn.close()
+
+            if row:
+                context.n_input_tokens = row[0] or 0
+                context.n_output_tokens = row[1] or 0
+                self.logger.info(
+                    f"Token usage (from DB): input={context.n_input_tokens}, output={context.n_output_tokens}"
+                )
+        except Exception as e:
+            self.logger.warning(f"Failed to parse telemetry DB: {e}")
 
 
 # For Harbor's import_path to work

@@ -244,7 +244,8 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     )
 
     # Set up observability to capture full tool traces to SQLite
-    telemetry_db = os.environ.get("RHO_AGENT_TELEMETRY_DB", "/tmp/telemetry.db")
+    # Use /logs/agent/ which is mounted from host - survives process kill
+    telemetry_db = os.environ.get("RHO_AGENT_TELEMETRY_DB", "/logs/agent/telemetry.db")
     obs_config = ObservabilityConfig(
         enabled=True,
         tenant=TenantConfig(team_id="eval", project_id="harbor"),
@@ -297,6 +298,11 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                             f"out={event.usage.get('total_output_tokens', 0)}]",
                             file=sys.stderr,
                         )
+                    # Write tokens incrementally to mounted path (survives process kill)
+                    Path("/logs/agent/tokens.json").write_text(json.dumps({
+                        "input": session.total_input_tokens,
+                        "output": session.total_output_tokens,
+                    }))
             return text_content
 
         # Run initial actor turn
@@ -336,6 +342,12 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
             )
     finally:
         if processor:
+            # Sync session tokens to processor context before ending.
+            # The session tracks tokens incrementally from each API response,
+            # but the processor only updates on turn_complete events which
+            # may not fire if the agent times out.
+            processor.context.total_input_tokens = session.total_input_tokens
+            processor.context.total_output_tokens = session.total_output_tokens
             await processor.end_session()
 
     print()  # Final newline

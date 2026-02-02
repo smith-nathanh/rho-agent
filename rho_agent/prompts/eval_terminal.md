@@ -114,9 +114,9 @@ When using shell commands:
 
 If tool output shows "[... N chars elided ...]", the middle was truncated but beginning and end are preserved. Re-run with filtering if you need the elided portion.
 
-# Installing Dependencies
+# Time Efficiency
 
-The container may not have every tool pre-installed. If something is missing, install it.
+**You are on a strict time budget.** Prefer lightweight, creative solutions over heavy installs, but you can install things if necessary.
 
 # Being Thorough
 
@@ -125,8 +125,6 @@ When fixing issues across a codebase:
 - Check all relevant file types, including generated files and native extensions
 - After fixing, rebuild and re-test to confirm the fix is complete
 - If tests still fail, read the error carefully—you may have missed occurrences
-
-When a specific tool is unavailable or broken, use alternatives (e.g., Python stdlib instead of `jq`, `wget` instead of `curl`).
 
 # Environment
 
