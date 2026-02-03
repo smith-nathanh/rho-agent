@@ -89,6 +89,8 @@ class TrajectoryBuilder:
         self._total_cached_tokens: int = 0
         self._total_reasoning_tokens: int = 0
         self._total_cost_usd: float = 0.0
+        self._context_size: int = 0
+        self._pending_metrics: dict[str, Any] | None = None
 
     def add_user_step(self, message: str) -> None:
         """Add a user input as a step.
@@ -149,6 +151,19 @@ class TrajectoryBuilder:
                     )
                 )
 
+            elif event.type == "api_call_complete":
+                # Capture per-call metrics for attachment to agent step
+                if event.usage:
+                    self._pending_metrics = {
+                        "prompt_tokens": event.usage.get("input_tokens"),
+                        "completion_tokens": event.usage.get("output_tokens"),
+                        "cached_tokens": event.usage.get("cached_tokens"),
+                        "cost_usd": event.usage.get("cost_usd"),
+                    }
+                    reasoning = event.usage.get("reasoning_tokens", 0)
+                    if reasoning:
+                        self._pending_metrics["extra"] = {"reasoning_tokens": reasoning}
+
             elif event.type == "turn_complete":
                 # Extract metrics from turn_complete
                 if event.usage:
@@ -157,6 +172,7 @@ class TrajectoryBuilder:
                     self._total_cached_tokens = event.usage.get("total_cached_tokens", 0)
                     self._total_reasoning_tokens = event.usage.get("total_reasoning_tokens", 0)
                     self._total_cost_usd = event.usage.get("total_cost_usd", 0.0)
+                    self._context_size = event.usage.get("context_size", 0)
 
         # Create agent step(s) from accumulated content
         if current_text or current_tool_calls:
@@ -165,8 +181,10 @@ class TrajectoryBuilder:
                 message=current_text if current_text else None,
                 tool_calls=current_tool_calls,
                 observations=pending_observations,
+                metrics=self._pending_metrics,
             )
             self._steps.append(step)
+            self._pending_metrics = None
 
     def to_trajectory(self) -> dict[str, Any]:
         """Export as ATIF-compliant dict.
@@ -212,6 +230,7 @@ class TrajectoryBuilder:
             "total_output_tokens": self._total_output_tokens,
             "total_cached_tokens": self._total_cached_tokens,
             "total_cost_usd": self._total_cost_usd,
+            "context_size": self._context_size,
         }
 
         # Add reasoning tokens in extra field for ATIF compliance

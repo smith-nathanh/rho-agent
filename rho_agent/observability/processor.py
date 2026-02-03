@@ -183,6 +183,12 @@ class ObservabilityProcessor:
                 # Update session totals
                 self._context.record_tokens(delta_input, delta_output, delta_reasoning)
 
+                # Extract context_size
+                context_size = event.usage.get("context_size", 0)
+                self._context.context_size = context_size
+                if self._current_turn:
+                    self._current_turn.context_size = context_size
+
         elif event.type == "error":
             # Record error in pending tool if any
             if self._pending_tool:

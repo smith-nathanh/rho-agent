@@ -302,7 +302,18 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                         "cached": session.total_cached_tokens,
                         "reasoning": session.total_reasoning_tokens,
                         "cost_usd": session.total_cost_usd,
+                        "context_size": session.last_input_tokens,
                     }))
+                elif event.type == "api_call_complete":
+                    if os.environ.get("RHO_AGENT_DEBUG"):
+                        usage = event.usage or {}
+                        print(
+                            f"[API call {usage.get('call_index')}: "
+                            f"context={usage.get('input_tokens')}, "
+                            f"out={usage.get('output_tokens')}, "
+                            f"cost=${usage.get('cost_usd', 0):.4f}]",
+                            file=sys.stderr,
+                        )
                 elif event.type == "compact_start":
                     print("\n[Compacting context...]", file=sys.stderr)
                 elif event.type == "compact_end":
@@ -327,6 +338,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                         "cached": session.total_cached_tokens,
                         "reasoning": session.total_reasoning_tokens,
                         "cost_usd": session.total_cost_usd,
+                        "context_size": session.last_input_tokens,
                     }))
 
             # Build trajectory from this turn's events

@@ -11,16 +11,7 @@ from typing import Any, Iterator
 from ..context import TelemetryContext, TurnContext, ToolExecutionContext
 
 
-# Schema version for migrations
-SCHEMA_VERSION = 2
-
 SCHEMA_SQL = """
--- Schema version tracking
-CREATE TABLE IF NOT EXISTS schema_version (
-    version INTEGER PRIMARY KEY,
-    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 -- Sessions table: one row per agent invocation
 CREATE TABLE IF NOT EXISTS sessions (
     session_id TEXT PRIMARY KEY,
@@ -37,6 +28,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     total_output_tokens INTEGER DEFAULT 0,
     total_reasoning_tokens INTEGER DEFAULT 0,
     total_tool_calls INTEGER DEFAULT 0,
+    context_size INTEGER DEFAULT 0,
     metadata JSON
 );
 
@@ -50,6 +42,7 @@ CREATE TABLE IF NOT EXISTS turns (
     input_tokens INTEGER DEFAULT 0,
     output_tokens INTEGER DEFAULT 0,
     reasoning_tokens INTEGER DEFAULT 0,
+    context_size INTEGER DEFAULT 0,
     user_input TEXT
 );
 
@@ -91,6 +84,7 @@ class SessionSummary:
     total_output_tokens: int
     total_reasoning_tokens: int
     total_tool_calls: int
+    context_size: int
     turn_count: int
 
 
@@ -112,6 +106,7 @@ class SessionDetail:
     total_output_tokens: int
     total_reasoning_tokens: int
     total_tool_calls: int
+    context_size: int
     metadata: dict[str, Any]
     turns: list[dict[str, Any]]
 
@@ -169,36 +164,6 @@ class TelemetryStorage:
         with self._connection() as conn:
             conn.executescript(SCHEMA_SQL)
 
-            # Check/update schema version
-            cursor = conn.execute(
-                "SELECT MAX(version) FROM schema_version"
-            )
-            row = cursor.fetchone()
-            current_version = row[0] if row and row[0] else 0
-
-            # Run migrations
-            if current_version < 2:
-                # Migration v1 -> v2: Add reasoning_tokens columns
-                try:
-                    conn.execute(
-                        "ALTER TABLE sessions ADD COLUMN total_reasoning_tokens INTEGER DEFAULT 0"
-                    )
-                except sqlite3.OperationalError:
-                    pass  # Column already exists
-                try:
-                    conn.execute(
-                        "ALTER TABLE turns ADD COLUMN reasoning_tokens INTEGER DEFAULT 0"
-                    )
-                except sqlite3.OperationalError:
-                    pass  # Column already exists
-
-            if current_version < SCHEMA_VERSION:
-                conn.execute(
-                    "INSERT INTO schema_version (version) VALUES (?)",
-                    (SCHEMA_VERSION,),
-                )
-                conn.commit()
-
     def _parse_timestamp(self, ts: str | datetime | None) -> datetime | None:
         """Parse timestamp from various formats."""
         if ts is None:
@@ -251,6 +216,7 @@ class TelemetryStorage:
                     total_output_tokens = ?,
                     total_reasoning_tokens = ?,
                     total_tool_calls = ?,
+                    context_size = ?,
                     metadata = ?
                 WHERE session_id = ?
                 """,
@@ -261,6 +227,7 @@ class TelemetryStorage:
                     context.total_output_tokens,
                     context.total_reasoning_tokens,
                     context.total_tool_calls,
+                    context.context_size,
                     json.dumps(context.metadata),
                     context.session_id,
                 ),
@@ -331,7 +298,8 @@ class TelemetryStorage:
                     ended_at = ?,
                     input_tokens = ?,
                     output_tokens = ?,
-                    reasoning_tokens = ?
+                    reasoning_tokens = ?,
+                    context_size = ?
                 WHERE turn_id = ?
                 """,
                 (
@@ -339,6 +307,7 @@ class TelemetryStorage:
                     turn.input_tokens,
                     turn.output_tokens,
                     turn.reasoning_tokens,
+                    turn.context_size,
                     turn.turn_id,
                 ),
             )
@@ -403,7 +372,7 @@ class TelemetryStorage:
                     s.session_id, s.team_id, s.project_id, s.model,
                     s.started_at, s.ended_at, s.status,
                     s.total_input_tokens, s.total_output_tokens, s.total_reasoning_tokens,
-                    s.total_tool_calls,
+                    s.total_tool_calls, s.context_size,
                     COUNT(t.turn_id) as turn_count
                 FROM sessions s
                 LEFT JOIN turns t ON s.session_id = t.session_id
@@ -430,6 +399,7 @@ class TelemetryStorage:
                         total_output_tokens=row["total_output_tokens"] or 0,
                         total_reasoning_tokens=row["total_reasoning_tokens"] or 0,
                         total_tool_calls=row["total_tool_calls"] or 0,
+                        context_size=row["context_size"] or 0,
                         turn_count=row["turn_count"] or 0,
                     )
                 )
@@ -453,7 +423,7 @@ class TelemetryStorage:
             turns_query = """
                 SELECT
                     t.turn_id, t.turn_index, t.started_at, t.ended_at,
-                    t.input_tokens, t.output_tokens, t.reasoning_tokens, t.user_input
+                    t.input_tokens, t.output_tokens, t.reasoning_tokens, t.context_size, t.user_input
                 FROM turns t
                 WHERE t.session_id = ?
                 ORDER BY t.turn_index
@@ -493,6 +463,7 @@ class TelemetryStorage:
                         "input_tokens": turn_row["input_tokens"] or 0,
                         "output_tokens": turn_row["output_tokens"] or 0,
                         "reasoning_tokens": turn_row["reasoning_tokens"] or 0,
+                        "context_size": turn_row["context_size"] or 0,
                         "user_input": turn_row["user_input"],
                         "tool_executions": tool_executions,
                     }
@@ -513,6 +484,7 @@ class TelemetryStorage:
                 total_output_tokens=session_row["total_output_tokens"] or 0,
                 total_reasoning_tokens=session_row["total_reasoning_tokens"] or 0,
                 total_tool_calls=session_row["total_tool_calls"] or 0,
+                context_size=session_row["context_size"] or 0,
                 metadata=json.loads(session_row["metadata"]) if session_row["metadata"] else {},
                 turns=turns,
             )

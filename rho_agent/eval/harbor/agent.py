@@ -37,7 +37,7 @@ class RhoAgent(BaseAgent):
     3. Returns results for Harbor's verification system
 
     The container provides sandboxing, so rho-agent uses unrestricted
-    eval-mode tools (bash, write_file, edit_file).
+    eval-mode tools depending on the config settings.
     """
 
     # Harbor agent interface

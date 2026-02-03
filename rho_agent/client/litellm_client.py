@@ -115,8 +115,13 @@ class LiteLLMClient:
 
         return kwargs
 
-    def _extract_usage(self, usage_obj: Any) -> dict[str, Any]:
-        """Extract usage dict from usage object including cost."""
+    def _extract_usage(self, usage_obj: Any, response: Any = None) -> dict[str, Any]:
+        """Extract usage dict from usage object including cost.
+
+        Args:
+            usage_obj: The usage object from the API response.
+            response: Optional full response object for cost calculation.
+        """
         usage: dict[str, Any] = {
             "input_tokens": 0,
             "output_tokens": 0,
@@ -140,16 +145,14 @@ class LiteLLMClient:
                     usage["reasoning_tokens"] = details.reasoning_tokens or 0
 
         # Compute cost using LiteLLM's pricing database
-        try:
-            cost = self._litellm.completion_cost(
-                model=self._model,
-                prompt_tokens=usage.get("input_tokens", 0),
-                completion_tokens=usage.get("output_tokens", 0),
-            )
-            if cost:
-                usage["cost_usd"] = cost
-        except Exception:
-            pass
+        # Pass the full response object for accurate cost calculation
+        if response:
+            try:
+                cost = self._litellm.completion_cost(completion_response=response)
+                if cost:
+                    usage["cost_usd"] = cost
+            except Exception:
+                pass
 
         return usage
 
@@ -172,7 +175,7 @@ class LiteLLMClient:
             async for chunk in self._iter_with_timeout(response):
                 # Check for usage in chunk (comes in final chunk with stream_options)
                 if hasattr(chunk, "usage") and chunk.usage:
-                    usage = self._extract_usage(chunk.usage)
+                    usage = self._extract_usage(chunk.usage, response=chunk)
 
                 if not chunk.choices:
                     continue
@@ -260,7 +263,7 @@ class LiteLLMClient:
             response = await self._litellm.acompletion(**kwargs)
 
             content = response.choices[0].message.content or ""
-            usage = self._extract_usage(response.usage)
+            usage = self._extract_usage(response.usage, response=response)
 
             return content, usage
 

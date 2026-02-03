@@ -389,9 +389,12 @@ def handle_event(event: AgentEvent) -> None:
         # Ensure we end on a new line
         print()
         usage = event.usage or {}
-        console.print(
-            f"[dim][{usage.get('total_input_tokens', 0)} in, "
-            f"{usage.get('total_output_tokens', 0)} out][/dim]"
+        context_size = usage.get('context_size', 0)
+        total_in = usage.get('total_input_tokens', 0)
+        total_out = usage.get('total_output_tokens', 0)
+        # Use plain print instead of Rich console for token display
+        print(
+            f"[context: {context_size}, total: {total_in} in, {total_out} out]"
         )
 
     elif event.type == "error":

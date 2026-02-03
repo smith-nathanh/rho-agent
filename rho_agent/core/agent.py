@@ -57,9 +57,22 @@ CompactCallback = Callable[[str], Awaitable[None]]
 
 @dataclass
 class AgentEvent:
-    """Event emitted by the agent during execution."""
+    """Event emitted by the agent during execution.
 
-    type: str  # "text", "tool_start", "tool_end", "turn_complete", "error", "tool_blocked", "compact_start", "compact_end", "cancelled"
+    Event types:
+    - "text": Streaming text content from the model
+    - "tool_start": Tool invocation started
+    - "tool_end": Tool invocation completed
+    - "api_call_complete": Single API call finished (per-call metrics)
+    - "turn_complete": Full turn finished (cumulative metrics)
+    - "error": An error occurred
+    - "tool_blocked": Tool call was blocked by user
+    - "compact_start": Context compaction starting
+    - "compact_end": Context compaction finished
+    - "cancelled": Turn was cancelled
+    """
+
+    type: str
     content: str | None = None
     tool_name: str | None = None
     tool_args: dict[str, Any] | None = None
@@ -110,6 +123,7 @@ class Agent:
         self._cancel_check = cancel_check
         self._enable_nudge = enable_nudge
         self._nudge_count = 0
+        self._call_index = 0  # Tracks API calls within current turn
 
     def request_cancel(self) -> None:
         """Request cancellation of the current turn."""
@@ -119,6 +133,7 @@ class Agent:
         """Reset cancellation state for a new turn."""
         self._cancel_requested = False
         self._nudge_count = 0
+        self._call_index = 0
 
     def is_cancelled(self) -> bool:
         """Check if cancellation has been requested.
@@ -328,6 +343,20 @@ class Agent:
                             event.usage.get("cost_usd", 0.0),
                         )
 
+                        # Emit per-call metrics
+                        self._call_index += 1
+                        yield AgentEvent(
+                            type="api_call_complete",
+                            usage={
+                                "input_tokens": event.usage.get("input_tokens", 0),
+                                "output_tokens": event.usage.get("output_tokens", 0),
+                                "cached_tokens": event.usage.get("cached_tokens", 0),
+                                "reasoning_tokens": event.usage.get("reasoning_tokens", 0),
+                                "cost_usd": event.usage.get("cost_usd", 0.0),
+                                "call_index": self._call_index,
+                            },
+                        )
+
                 elif event.type == "error":
                     yield AgentEvent(type="error", content=event.content)
                     return
@@ -360,6 +389,7 @@ class Agent:
                         "total_cached_tokens": self._session.total_cached_tokens,
                         "total_reasoning_tokens": self._session.total_reasoning_tokens,
                         "total_cost_usd": self._session.total_cost_usd,
+                        "context_size": self._session.last_input_tokens,
                     },
                 )
                 return
@@ -439,6 +469,7 @@ class Agent:
                         "total_cached_tokens": self._session.total_cached_tokens,
                         "total_reasoning_tokens": self._session.total_reasoning_tokens,
                         "total_cost_usd": self._session.total_cost_usd,
+                        "context_size": self._session.last_input_tokens,
                     },
                 )
                 return
