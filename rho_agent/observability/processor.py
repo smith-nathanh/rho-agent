@@ -146,6 +146,7 @@ class ObservabilityProcessor:
                 arguments=event.tool_args or {} if self._config.capture.tool_arguments else {},
             )
             self._context.record_tool_call()
+            await self._exporter.increment_tool_call(self._context.session_id)
 
         elif event.type == "tool_end":
             # Complete the tool execution

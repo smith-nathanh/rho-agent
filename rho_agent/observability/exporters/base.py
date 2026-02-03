@@ -94,6 +94,14 @@ class Exporter(ABC):
         """
         pass
 
+    async def increment_tool_call(self, session_id: str) -> None:
+        """Increment session tool call counter.
+
+        Override this to persist tool counts incrementally.
+        Default is no-op for backwards compatibility.
+        """
+        pass
+
 
 class NoOpExporter(Exporter):
     """Exporter that does nothing. Used when observability is disabled."""
@@ -167,6 +175,10 @@ class CompositeExporter(Exporter):
     ) -> None:
         for exporter in self._exporters:
             await exporter.record_tool_execution(execution)
+
+    async def increment_tool_call(self, session_id: str) -> None:
+        for exporter in self._exporters:
+            await exporter.increment_tool_call(session_id)
 
     async def flush(self) -> None:
         for exporter in self._exporters:

@@ -84,6 +84,10 @@ class SQLiteExporter(Exporter):
         """Record a tool execution."""
         await asyncio.to_thread(self._storage.record_tool_execution, execution)
 
+    async def increment_tool_call(self, session_id: str) -> None:
+        """Increment session tool call counter."""
+        await asyncio.to_thread(self._storage.increment_session_tool_calls, session_id)
+
     async def flush(self) -> None:
         """SQLite auto-commits, so flush is a no-op."""
         pass

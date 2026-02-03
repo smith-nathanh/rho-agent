@@ -268,6 +268,15 @@ class TelemetryStorage:
             )
             conn.commit()
 
+    def increment_session_tool_calls(self, session_id: str, count: int = 1) -> None:
+        """Increment tool call count for a session (survives timeout)."""
+        with self._connection() as conn:
+            conn.execute(
+                "UPDATE sessions SET total_tool_calls = total_tool_calls + ? WHERE session_id = ?",
+                (count, session_id),
+            )
+            conn.commit()
+
     # --- Turn operations ---
 
     def create_turn(self, turn: TurnContext, user_input: str = "") -> None:
