@@ -67,7 +67,7 @@ class ModelClient:
         api_key: str | None = None,
         timeout: float | None = None,
         service_tier: str | None = None,
-        temperature: float = 0.7,
+        temperature: float | None = None,
         reasoning_effort: str | None = None,
     ) -> None:
         self._temperature = temperature
@@ -120,7 +120,7 @@ class ModelClient:
         # GPT-5/o-series models don't support temperature with reasoning
         if self._reasoning_effort:
             kwargs["reasoning_effort"] = self._reasoning_effort
-        else:
+        elif self._temperature is not None:
             kwargs["temperature"] = self._temperature
 
         if prompt.tools:
@@ -222,7 +222,7 @@ class ModelClient:
         # reasoning_effort and temperature are mutually exclusive
         if self._reasoning_effort:
             kwargs["reasoning_effort"] = self._reasoning_effort
-        else:
+        elif self._temperature is not None:
             kwargs["temperature"] = self._temperature
 
         if prompt.tools:
@@ -287,7 +287,7 @@ class ModelClient:
             # reasoning_effort and temperature are mutually exclusive
             if self._reasoning_effort:
                 kwargs["reasoning_effort"] = self._reasoning_effort
-            else:
+            elif self._temperature is not None:
                 kwargs["temperature"] = self._temperature
             if self._service_tier:
                 kwargs["service_tier"] = self._service_tier

@@ -749,6 +749,10 @@ def main(
         Optional[str],
         typer.Option("--base-url", help="API base URL for OpenAI-compatible endpoints"),
     ] = os.getenv("OPENAI_BASE_URL"),
+    reasoning_effort: Annotated[
+        Optional[str],
+        typer.Option("--reasoning-effort", help="Reasoning effort: low, medium, high"),
+    ] = os.getenv("RHO_AGENT_REASONING_EFFORT"),
     system: Annotated[
         Optional[str],
         typer.Option("--system", "-s", help="Override system prompt entirely"),
@@ -1054,7 +1058,7 @@ def main(
         effective_model = model
 
     registry = create_registry(working_dir=resolved_working_dir, profile=capability_profile)
-    client = ModelClient(model=effective_model, base_url=base_url)
+    client = ModelClient(model=effective_model, base_url=base_url, reasoning_effort=reasoning_effort)
     approval_handler = ApprovalHandler(auto_approve=auto_approve)
 
     agent = Agent(

@@ -43,7 +43,7 @@ class LiteLLMClient:
         api_key: str | None = None,
         chunk_timeout: float | None = None,
         initial_timeout: float | None = None,
-        temperature: float = 0.7,
+        temperature: float | None = None,
         reasoning_effort: str | None = None,
     ) -> None:
         """Initialize the LiteLLM client.
@@ -115,7 +115,7 @@ class LiteLLMClient:
         # reasoning_effort is for OpenAI o-series/GPT-5 models
         if self._reasoning_effort:
             kwargs["reasoning_effort"] = self._reasoning_effort
-        else:
+        elif self._temperature is not None:
             kwargs["temperature"] = self._temperature
 
         if prompt and prompt.tools:

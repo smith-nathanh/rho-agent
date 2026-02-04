@@ -53,7 +53,7 @@ class RhoAgent(BaseAgent):
         reviewer_max_iterations: int = 1,
         enable_confirm_done: bool = True,
         confirm_done_max: int = 3,
-        temperature: float = 0.0,
+        temperature: float | None = None,
         reasoning_effort: str | None = None,
         cost_ceiling_usd: float = 0.0,
         *args,
@@ -70,7 +70,7 @@ class RhoAgent(BaseAgent):
             reviewer_max_iterations: Max review-revise loops (0 = review only, no revision).
             enable_confirm_done: If True, require explicit CONFIRM_DONE after actor completes.
             confirm_done_max: Max confirm retries before proceeding (default: 3).
-            temperature: Model temperature (default: 0.0 for deterministic eval).
+            temperature: Model temperature (default: None, uses API default).
             reasoning_effort: Reasoning effort level: "low", "medium", "high" (default: None).
             cost_ceiling_usd: Max cost per task in USD, 0 = disabled (default: 0.0).
         """
@@ -191,8 +191,9 @@ class RhoAgent(BaseAgent):
         env["RHO_AGENT_CONFIRM_DONE"] = "1" if self._enable_confirm_done else "0"
         env["RHO_AGENT_CONFIRM_DONE_MAX"] = str(self._confirm_done_max)
 
-        # Add temperature config
-        env["RHO_AGENT_TEMPERATURE"] = str(self._temperature)
+        # Add temperature config (only if explicitly set)
+        if self._temperature is not None:
+            env["RHO_AGENT_TEMPERATURE"] = str(self._temperature)
 
         # Add reasoning effort config (only if explicitly set)
         if self._reasoning_effort:
