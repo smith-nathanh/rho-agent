@@ -19,6 +19,7 @@ Environment variables:
     RHO_AGENT_REASONING_EFFORT - Reasoning effort: "low", "medium", "high" (default: None)
     RHO_AGENT_CHUNK_TIMEOUT   - Streaming chunk timeout in seconds (default: 180)
     RHO_AGENT_INITIAL_TIMEOUT - Initial response timeout in seconds (default: 600)
+    RHO_AGENT_COST_CEILING_USD - Max cost per task in USD, 0 = disabled (default: 0)
     OPENAI_API_KEY            - API key (required)
     RHO_AGENT_ENABLE_REVIEWER - Set to "1" to enable post-execution review
     RHO_AGENT_REVIEWER_MAX_ITERATIONS - Max review-revise loops (default: 1)
@@ -217,6 +218,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     reasoning_effort = os.environ.get("RHO_AGENT_REASONING_EFFORT")
     chunk_timeout = float(os.environ.get("RHO_AGENT_CHUNK_TIMEOUT", "180.0"))
     initial_timeout = float(os.environ.get("RHO_AGENT_INITIAL_TIMEOUT", "600.0"))
+    cost_ceiling_usd = float(os.environ.get("RHO_AGENT_COST_CEILING_USD", "0.0"))
 
     client = LiteLLMClient(
         model=model,
@@ -276,6 +278,14 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
         event_trace: list[AgentEvent] = []
 
         async def run_turn(prompt_text: str) -> str:
+            # Check cost ceiling before calling agent - end gracefully to allow grading
+            if cost_ceiling_usd > 0 and session.total_cost_usd >= cost_ceiling_usd:
+                print(
+                    f"\n[Cost ceiling reached: ${session.total_cost_usd:.2f} >= ${cost_ceiling_usd:.2f}]",
+                    file=sys.stderr,
+                )
+                return ""
+
             events = agent.run_turn(prompt_text)
             if processor:
                 events = processor.wrap_turn(events, prompt_text)

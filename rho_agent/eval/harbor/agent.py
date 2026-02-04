@@ -55,6 +55,7 @@ class RhoAgent(BaseAgent):
         confirm_done_max: int = 3,
         temperature: float = 0.0,
         reasoning_effort: str | None = None,
+        cost_ceiling_usd: float = 0.0,
         *args,
         **kwargs,
     ) -> None:
@@ -71,6 +72,7 @@ class RhoAgent(BaseAgent):
             confirm_done_max: Max confirm retries before proceeding (default: 3).
             temperature: Model temperature (default: 0.0 for deterministic eval).
             reasoning_effort: Reasoning effort level: "low", "medium", "high" (default: None).
+            cost_ceiling_usd: Max cost per task in USD, 0 = disabled (default: 0.0).
         """
         super().__init__(logs_dir, model_name, logger, *args, **kwargs)
         self._bash_only = bash_only
@@ -80,6 +82,7 @@ class RhoAgent(BaseAgent):
         self._confirm_done_max = confirm_done_max
         self._temperature = temperature
         self._reasoning_effort = reasoning_effort
+        self._cost_ceiling_usd = cost_ceiling_usd
 
     @staticmethod
     def name() -> str:
@@ -195,13 +198,18 @@ class RhoAgent(BaseAgent):
         if self._reasoning_effort:
             env["RHO_AGENT_REASONING_EFFORT"] = self._reasoning_effort
 
+        # Add cost ceiling config (only if set > 0)
+        if self._cost_ceiling_usd > 0:
+            env["RHO_AGENT_COST_CEILING_USD"] = str(self._cost_ceiling_usd)
+
         self.logger.info(
             f"Running rho-agent with model: {env['RHO_AGENT_MODEL']}, "
             f"bash_only: {self._bash_only}, "
             f"reviewer: {self._enable_reviewer}, "
             f"confirm_done: {self._enable_confirm_done}, "
             f"temperature: {self._temperature}, "
-            f"reasoning_effort: {self._reasoning_effort}"
+            f"reasoning_effort: {self._reasoning_effort}, "
+            f"cost_ceiling_usd: {self._cost_ceiling_usd}"
         )
 
         # Run rho-agent in the container using uv run
