@@ -34,11 +34,15 @@ class LiteLLMClient:
     # Default chunk timeout: how long to wait for next chunk before aborting
     DEFAULT_CHUNK_TIMEOUT: float = 180.0  # 3 minutes between chunks
 
+    # Default initial timeout: how long to wait for first chunk in streaming
+    DEFAULT_INITIAL_TIMEOUT: float = 600.0  # 10 minutes for first chunk
+
     def __init__(
         self,
         model: str = "gpt-5-nano",
         api_key: str | None = None,
         chunk_timeout: float | None = None,
+        initial_timeout: float | None = None,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
     ) -> None:
@@ -48,6 +52,7 @@ class LiteLLMClient:
             model: Model identifier (e.g., "openai/gpt-5-mini", "anthropic/claude-3-5-sonnet").
             api_key: Optional API key (falls back to environment variables).
             chunk_timeout: Max seconds to wait for next chunk (default: 180).
+            initial_timeout: Max seconds to wait for first chunk (default: 600).
             temperature: Sampling temperature.
             reasoning_effort: Reasoning effort level for compatible models.
         """
@@ -63,6 +68,7 @@ class LiteLLMClient:
         self._model = model
         self._api_key = api_key
         self._chunk_timeout = chunk_timeout or self.DEFAULT_CHUNK_TIMEOUT
+        self._initial_timeout = initial_timeout or self.DEFAULT_INITIAL_TIMEOUT
         self._temperature = temperature
         self._reasoning_effort = reasoning_effort
 
@@ -99,6 +105,8 @@ class LiteLLMClient:
         if stream:
             # Request usage in final chunk (OpenAI API feature)
             kwargs["stream_options"] = {"include_usage": True}
+            # Time to wait for first chunk before aborting
+            kwargs["stream_timeout"] = self._initial_timeout
 
         if self._api_key:
             kwargs["api_key"] = self._api_key

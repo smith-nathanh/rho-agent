@@ -18,6 +18,7 @@ Environment variables:
     RHO_AGENT_SERVICE_TIER    - OpenAI service tier: "flex" for lower cost (default: None)
     RHO_AGENT_REASONING_EFFORT - Reasoning effort: "low", "medium", "high" (default: None)
     RHO_AGENT_CHUNK_TIMEOUT   - Streaming chunk timeout in seconds (default: 180)
+    RHO_AGENT_INITIAL_TIMEOUT - Initial response timeout in seconds (default: 600)
     OPENAI_API_KEY            - API key (required)
     RHO_AGENT_ENABLE_REVIEWER - Set to "1" to enable post-execution review
     RHO_AGENT_REVIEWER_MAX_ITERATIONS - Max review-revise loops (default: 1)
@@ -215,6 +216,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     temperature = float(os.environ.get("RHO_AGENT_TEMPERATURE", "0.0"))
     reasoning_effort = os.environ.get("RHO_AGENT_REASONING_EFFORT")
     chunk_timeout = float(os.environ.get("RHO_AGENT_CHUNK_TIMEOUT", "180.0"))
+    initial_timeout = float(os.environ.get("RHO_AGENT_INITIAL_TIMEOUT", "600.0"))
 
     client = LiteLLMClient(
         model=model,
@@ -222,6 +224,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
         temperature=temperature,
         reasoning_effort=reasoning_effort,
         chunk_timeout=chunk_timeout,
+        initial_timeout=initial_timeout,
     )
 
     # Determine context window for auto-compaction
