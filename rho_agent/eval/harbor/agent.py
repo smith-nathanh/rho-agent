@@ -207,13 +207,13 @@ class RhoAgent(BaseAgent):
         # Run rho-agent in the container using uv run
         # Tee stdout/stderr to /logs/agent/ which is mounted from host
         # This ensures output survives even if the process is killed by timeout
+        # Use the container's WORKDIR (which varies by task)
         bash_only_flag = " --bash-only" if self._bash_only else ""
         cmd = (
             f'set -a && source /rho-agent/.env && set +a && '
             f'export PATH="$HOME/.local/bin:$PATH" && '
             f'export PYTHONPATH=/rho-agent && '
-            f'cd /app && '
-            f'/rho-agent/.venv/bin/python -B -m rho_agent.eval.harbor.runner {escaped} /app{bash_only_flag} '
+            f'/rho-agent/.venv/bin/python -B -m rho_agent.eval.harbor.runner {escaped} "$(pwd)"{bash_only_flag} '
             f'> >(tee /logs/agent/stdout.txt) 2> >(tee /logs/agent/stderr.txt >&2)'
         )
         stdout = ""
