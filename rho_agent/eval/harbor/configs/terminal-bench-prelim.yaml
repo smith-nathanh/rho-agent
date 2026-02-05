@@ -18,10 +18,6 @@ environment:
   force_build: false
   delete: true
   override_gpus: 0  # We use API, no local GPU needed
-  mounts:
-    - source: /Users/nate/proj/rho-agent
-      target: /rho-agent
-      read_only: true
 
 agents:
   - import_path: rho_agent.eval.harbor.agent:RhoAgent

@@ -23,8 +23,8 @@ plans
 test_data.db
 results/
 demo/*db
-image*.jpg
-SCREENSHOT*.png
+*.jpg
+*.png
 
 # Reference prompts from Codex CLI
 .codex-prompts/

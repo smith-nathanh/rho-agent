@@ -20,10 +20,6 @@ environment:
   force_build: false
   delete: false  # Keep images cached to avoid Docker Hub issues
   override_gpus: 0  # We use API, no local GPU needed
-  mounts:
-    - source: /Users/nate/proj/rho-agent
-      target: /rho-agent
-      read_only: true
 
 agents:
   - import_path: rho_agent.eval.harbor.agent:RhoAgent

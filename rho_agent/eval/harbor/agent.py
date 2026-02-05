@@ -1,4 +1,4 @@
-"""Harbor BaseAgent wrapper for rho-agent.
+"""Harbor BaseInstalledAgent wrapper for rho-agent.
 
 This module provides a Harbor-compatible agent that runs rho-agent
 inside Harbor's container environment for TerminalBench evaluation.
@@ -10,30 +10,22 @@ Usage in job.yaml:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shlex
 from pathlib import Path
 
-from dotenv import load_dotenv
-from harbor.agents.base import BaseAgent
-from harbor.environments.base import BaseEnvironment
+from harbor.agents.installed.base import BaseInstalledAgent, ExecInput
 from harbor.models.agent.context import AgentContext
 
-# Load .env from rho-agent project root (4 levels up from this file)
-_pkg_root = Path(__file__).parent.parent.parent.parent
-for _env_path in [_pkg_root / ".env", Path("/rho-agent/.env")]:
-    if _env_path.exists():
-        load_dotenv(_env_path)
-        break
 
-
-class RhoAgent(BaseAgent):
+class RhoAgent(BaseInstalledAgent):
     """Runs rho-agent inside Harbor's container environment.
 
     This agent wrapper:
-    1. Installs rho-agent in the container during setup
-    2. Runs the rho-agent.harbor.runner module with the task instruction
+    1. Installs rho-agent from git in the container during setup
+    2. Runs the rho_agent.eval.harbor.runner module with the task instruction
     3. Returns results for Harbor's verification system
 
     The container provides sandboxing, so rho-agent uses unrestricted
@@ -42,6 +34,8 @@ class RhoAgent(BaseAgent):
 
     # Harbor agent interface
     SUPPORTS_ATIF: bool = True
+
+    RHO_AGENT_REPO = "https://github.com/smith-nathanh/rho-agent.git"
 
     def __init__(
         self,
@@ -74,7 +68,7 @@ class RhoAgent(BaseAgent):
             reasoning_effort: Reasoning effort level: "low", "medium", "high" (default: None).
             cost_ceiling_usd: Max cost per task in USD, 0 = disabled (default: 0.0).
         """
-        super().__init__(logs_dir, model_name, logger, *args, **kwargs)
+        super().__init__(logs_dir, model_name=model_name, logger=logger, *args, **kwargs)
         self._bash_only = bash_only
         self._enable_reviewer = enable_reviewer
         self._reviewer_max_iterations = reviewer_max_iterations
@@ -91,81 +85,76 @@ class RhoAgent(BaseAgent):
 
     def version(self) -> str | None:
         """Return the agent version."""
-        # TODO: Read from pyproject.toml
-        return "0.1.0"
+        return self._version or "latest"
 
-    async def setup(self, environment: BaseEnvironment) -> None:
-        """Install rho-agent in the container.
+    @property
+    def _install_agent_template_path(self) -> Path:
+        """Path to the Jinja2 install script template."""
+        return Path(__file__).parent / "install-rho-agent.sh.j2"
 
-        Called by Harbor before running the agent on tasks.
-        """
-        # Log resolved model config so it's visible at launch
-        model = os.environ.get("RHO_AGENT_MODEL") or os.environ.get("OPENAI_MODEL") or self.model_name or "gpt-5-mini"
-        if "/" in model:
-            model = model.split("/", 1)[1]
-        base_url = os.environ.get("RHO_AGENT_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
-        service_tier = os.environ.get("RHO_AGENT_SERVICE_TIER")
-        self.logger.info(f"Model: {model} | Base URL: {base_url}" + (f" | Service tier: {service_tier}" if service_tier else ""))
+    @property
+    def _template_variables(self) -> dict[str, str]:
+        """Variables to pass to the install script template."""
+        variables = {"repo_url": self.RHO_AGENT_REPO}
+        if self._version:
+            variables["version"] = self._version
+        return variables
 
-        self.logger.info("Setting up rho-agent in container...")
+    def populate_context_post_run(self, context: AgentContext) -> None:
+        """Parse token usage and cost from telemetry, populate Harbor's AgentContext."""
+        # Try incremental tokens file first (survives process kill)
+        tokens_path = self.logs_dir / "tokens.json"
+        if tokens_path.exists():
+            try:
+                data = json.loads(tokens_path.read_text())
+                context.n_input_tokens = data.get("input", 0)
+                context.n_output_tokens = data.get("output", 0)
+                context.n_cache_tokens = data.get("cached", 0)
+                if "cost_usd" in data:
+                    context.cost_usd = data["cost_usd"]
+                reasoning_tokens = data.get("reasoning", 0)
+                self.logger.info(
+                    f"Token usage: input={context.n_input_tokens}, "
+                    f"output={context.n_output_tokens}, reasoning={reasoning_tokens}, "
+                    f"cost=${context.cost_usd or 0:.4f}"
+                )
+                return
+            except Exception as e:
+                self.logger.warning(f"Failed to parse tokens.json: {e}")
 
-        # Find rho-agent source directory (go up from this file)
-        rho_agent_root = Path(__file__).parent.parent.parent.parent
-        self.logger.info(f"Uploading rho-agent from {rho_agent_root}")
+        # Fall back to telemetry DB
+        telemetry_path = self.logs_dir / "telemetry.db"
+        if not telemetry_path.exists():
+            return
 
-        # Upload rho-agent source to container
-        await environment.upload_dir(rho_agent_root, "/rho-agent")
-
-        # Install curl if needed (for uv installer)
-        await environment.exec(
-            "command -v curl || (apt-get update && apt-get install -y curl)",
-            timeout_sec=60,
-        )
-
-        # Install uv if not available
-        result = await environment.exec("command -v uv", timeout_sec=10)
-        if result.return_code != 0:
-            self.logger.info("Installing uv...")
-            await environment.exec(
-                "curl -LsSf https://astral.sh/uv/install.sh | sh",
-                timeout_sec=60,
+        try:
+            import sqlite3
+            conn = sqlite3.connect(telemetry_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT total_input_tokens, total_output_tokens FROM sessions LIMIT 1"
             )
+            row = cursor.fetchone()
+            conn.close()
 
-        # Sync rho-agent dependencies using uv (handles Python + deps automatically)
-        # Include evals extra for LiteLLM support
-        self.logger.info("Syncing rho-agent dependencies...")
-        result = await environment.exec(
-            'export PATH="$HOME/.local/bin:$PATH" && cd /rho-agent && uv sync --extra evals',
-            timeout_sec=180,
-        )
-        self.logger.info(f"uv sync: rc={result.return_code}")
-        if result.return_code != 0:
-            self.logger.error(f"uv sync failed: {result.stdout}")
+            if row:
+                context.n_input_tokens = row[0] or 0
+                context.n_output_tokens = row[1] or 0
+                self.logger.info(
+                    f"Token usage (from DB): input={context.n_input_tokens}, "
+                    f"output={context.n_output_tokens}"
+                )
+        except Exception as e:
+            self.logger.warning(f"Failed to parse telemetry DB: {e}")
 
-    async def run(
-        self,
-        instruction: str,
-        environment: BaseEnvironment,
-        context: AgentContext,
-    ) -> None:
-        """Run rho-agent on the task.
-
-        Args:
-            instruction: The task instruction from instruction.md.
-            environment: Harbor's container environment for execution.
-            context: Agent context for tracking tokens and trajectories.
-        """
-        # Escape instruction for shell
-        escaped = shlex.quote(instruction)
-
+    def create_run_agent_commands(self, instruction: str) -> list[ExecInput]:
+        """Create commands to run rho-agent on the task."""
         # Build environment variables
         # Strip provider prefix from model name (e.g., "openai/gpt-5-mini" -> "gpt-5-mini")
-        # Env var overrides config so you can switch models without editing YAML
         model = os.environ.get("RHO_AGENT_MODEL") or os.environ.get("OPENAI_MODEL") or self.model_name or "gpt-5-mini"
         if "/" in model:
             model = model.split("/", 1)[1]
 
-        # Use /logs/agent/ which is mounted from host - no download needed
         env = {
             "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", ""),
             "RHO_AGENT_MODEL": model,
@@ -204,7 +193,7 @@ class RhoAgent(BaseAgent):
             env["RHO_AGENT_COST_CEILING_USD"] = str(self._cost_ceiling_usd)
 
         self.logger.info(
-            f"Running rho-agent with model: {env['RHO_AGENT_MODEL']}, "
+            f"Running rho-agent with model: {model}, "
             f"bash_only: {self._bash_only}, "
             f"reviewer: {self._enable_reviewer}, "
             f"confirm_done: {self._enable_confirm_done}, "
@@ -213,98 +202,26 @@ class RhoAgent(BaseAgent):
             f"cost_ceiling_usd: {self._cost_ceiling_usd}"
         )
 
-        # Run rho-agent in the container using uv run
-        # Tee stdout/stderr to /logs/agent/ which is mounted from host
-        # This ensures output survives even if the process is killed by timeout
-        # Use the container's WORKDIR (which varies by task)
+        # Escape instruction for shell
+        escaped = shlex.quote(instruction)
+
+        # Build the run command
+        # Source .env for any additional config, then run the runner module
+        # Use tee to stream output to mounted logs (survives timeout)
         bash_only_flag = " --bash-only" if self._bash_only else ""
         cmd = (
-            f'set -a && source /rho-agent/.env && set +a && '
+            f'set -a && [ -f /rho-agent/.env ] && source /rho-agent/.env && set +a && '
             f'export PATH="$HOME/.local/bin:$PATH" && '
-            f'export PYTHONPATH=/rho-agent && '
             f'/rho-agent/.venv/bin/python -B -m rho_agent.eval.harbor.runner {escaped} "$(pwd)"{bash_only_flag} '
-            f'> >(tee /logs/agent/stdout.txt) 2> >(tee /logs/agent/stderr.txt >&2)'
+            f'2>&1 | tee /logs/agent/stdout.txt'
         )
-        stdout = ""
-        stderr = ""
-        try:
-            result = await environment.exec(
-                f"bash -c {shlex.quote(cmd)}",
+
+        return [
+            ExecInput(
+                command=f"bash -c {shlex.quote(cmd)}",
                 env=env,
             )
-            stdout = result.stdout or ""
-            stderr = result.stderr or ""
-        except Exception:
-            # Timeout or other error - output is already in /logs/agent/ via mount
-            self.logger.warning("Agent exec failed (timeout or error)")
-            raise  # Re-raise so Harbor records the timeout
-        finally:
-            # Read output from mounted logs directory (no download needed)
-            if self.logs_dir:
-                stdout_path = self.logs_dir / "stdout.txt"
-                stderr_path = self.logs_dir / "stderr.txt"
-                if stdout_path.exists():
-                    stdout = stdout_path.read_text()
-                if stderr_path.exists():
-                    stderr = stderr_path.read_text()
-
-            # Log output
-            if stdout:
-                self.logger.info(f"stdout:\n{stdout}")
-            if stderr:
-                self.logger.warning(f"stderr:\n{stderr}")
-
-            # Populate Harbor context with token usage
-            self._populate_context_from_telemetry(context)
-
-    def _populate_context_from_telemetry(self, context: AgentContext) -> None:
-        """Parse token usage, cost, and populate Harbor's AgentContext."""
-        if not self.logs_dir:
-            return
-
-        # Try incremental tokens file first (survives process kill)
-        tokens_path = self.logs_dir / "tokens.json"
-        if tokens_path.exists():
-            try:
-                import json
-                data = json.loads(tokens_path.read_text())
-                context.n_input_tokens = data.get("input", 0)
-                context.n_output_tokens = data.get("output", 0)
-                reasoning_tokens = data.get("reasoning", 0)
-                if "cost_usd" in data:
-                    context.cost_usd = data["cost_usd"]
-                self.logger.info(
-                    f"Token usage (from tokens.json): input={context.n_input_tokens}, "
-                    f"output={context.n_output_tokens}, reasoning={reasoning_tokens}, "
-                    f"cost=${context.cost_usd or 0:.4f}"
-                )
-                return
-            except Exception as e:
-                self.logger.warning(f"Failed to parse tokens.json: {e}")
-
-        # Fall back to telemetry DB
-        telemetry_path = self.logs_dir / "telemetry.db"
-        if not telemetry_path.exists():
-            return
-
-        try:
-            import sqlite3
-            conn = sqlite3.connect(telemetry_path)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT total_input_tokens, total_output_tokens FROM sessions LIMIT 1"
-            )
-            row = cursor.fetchone()
-            conn.close()
-
-            if row:
-                context.n_input_tokens = row[0] or 0
-                context.n_output_tokens = row[1] or 0
-                self.logger.info(
-                    f"Token usage (from DB): input={context.n_input_tokens}, output={context.n_output_tokens}"
-                )
-        except Exception as e:
-            self.logger.warning(f"Failed to parse telemetry DB: {e}")
+        ]
 
 
 # For Harbor's import_path to work

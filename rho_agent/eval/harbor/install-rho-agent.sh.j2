@@ -1,0 +1,44 @@
+#!/bin/bash
+set -euo pipefail
+
+echo "Installing rho-agent..."
+
+# Install system dependencies
+apt-get update
+apt-get install -y curl git
+
+# Clone rho-agent repository
+cd /
+if [ -d "/rho-agent" ]; then
+    echo "rho-agent directory already exists, pulling latest..."
+    cd /rho-agent && git fetch origin && git reset --hard origin/main
+else
+    echo "Cloning rho-agent repository..."
+    {% if repo_url %}
+    git clone {{ repo_url }} /rho-agent
+    {% else %}
+    git clone https://github.com/smith-nathanh/rho-agent.git /rho-agent
+    {% endif %}
+fi
+
+cd /rho-agent
+
+{% if version %}
+echo "Checking out version: {{ version }}"
+git checkout {{ version }}
+{% endif %}
+
+# Install uv if not available
+if ! command -v uv &> /dev/null; then
+    echo "Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+fi
+
+# Add uv to PATH for current session
+export PATH="$HOME/.local/bin:$PATH"
+
+# Sync dependencies with evals extra (includes LiteLLM)
+echo "Syncing rho-agent dependencies..."
+uv sync --extra evals
+
+echo "rho-agent installation complete!"
