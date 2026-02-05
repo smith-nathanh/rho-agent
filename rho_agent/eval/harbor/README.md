@@ -103,8 +103,12 @@ Config files are in `configs/`:
 | `terminal-bench.yaml` | terminal-bench | 89 | Full benchmark run |
 
 Agent kwargs in these configs support:
+- `bash_only`: only provide bash tool (no Read, Grep, etc.)
 - `enable_reviewer` / `reviewer_max_iterations`: post-execution review loop
 - `enable_confirm_done` / `confirm_done_max`: require explicit `CONFIRM_DONE` before finishing
+- `temperature`: model temperature (default: API default)
+- `reasoning_effort`: "low", "medium", or "high" for reasoning models
+- `cost_ceiling_usd`: max cost per task in USD (0 = disabled)
 
 ### Running
 
@@ -218,11 +222,12 @@ The agent uses rho-agent's capability profiles to configure tools. In eval mode,
 
 ### How rho-agent runs in Harbor
 
-1. **Setup phase** (`agent.py:setup`):
-   - Uploads rho-agent source to `/rho-agent` in container
+1. **Setup phase** (`BaseInstalledAgent`):
+   - Clones rho-agent from GitHub to `/rho-agent` in container
    - Installs uv and syncs dependencies
+   - **Note:** Changes must be committed and pushed to GitHub before running evals
 
-2. **Run phase** (`agent.py:run`):
+2. **Run phase** (`agent.py:create_run_agent_commands`):
    - Executes `runner.py` with the task instruction
    - Runner creates an agent with unrestricted tools (bash, write_file, edit_file)
    - Agent works in `/app` directory until complete or timeout
