@@ -208,10 +208,11 @@ class RhoAgent(BaseInstalledAgent):
         # Build the run command
         # Source .env for any additional config, then run the runner module
         # Use tee to stream output to mounted logs (survives timeout)
+        # Note: .env may not exist (gitignored), so use || true to prevent chain failure
         bash_only_flag = " --bash-only" if self._bash_only else ""
         cmd = (
-            f'set -a && [ -f /rho-agent/.env ] && source /rho-agent/.env && set +a && '
-            f'export PATH="$HOME/.local/bin:$PATH" && '
+            f'set -a; [ -f /rho-agent/.env ] && source /rho-agent/.env || true; set +a; '
+            f'export PATH="$HOME/.local/bin:$PATH"; '
             f'/rho-agent/.venv/bin/python -B -m rho_agent.eval.harbor.runner {escaped} "$(pwd)"{bash_only_flag} '
             f'2>&1 | tee /logs/agent/stdout.txt'
         )
