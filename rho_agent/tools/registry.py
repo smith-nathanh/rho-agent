@@ -48,6 +48,10 @@ class ToolRegistry:
         """Register a tool handler."""
         self._handlers[handler.name] = handler
 
+    def unregister(self, name: str) -> None:
+        """Unregister a tool handler by name (no-op if missing)."""
+        self._handlers.pop(name, None)
+
     def get(self, name: str) -> ToolHandler | None:
         """Get a handler by name."""
         return self._handlers.get(name)

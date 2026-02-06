@@ -1,0 +1,19 @@
+# developer-bash-only.yaml - Unrestricted bash with only the bash tool registered
+
+profile: developer-bash-only
+description: "Developer shell mode with bash-only tools"
+
+shell:
+  mode: unrestricted
+
+file_write:
+  mode: off
+
+database:
+  mode: readonly
+
+approval:
+  mode: dangerous
+
+shell_timeout: 300
+bash_only: true

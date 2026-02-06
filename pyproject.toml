@@ -1,7 +1,7 @@
 [project]
 name = "rho-agent"
 version = "0.1.0"
-description = "A read-only agent"
+description = "An agent harness and CLI with readonly and developer modes."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.scripts]
-rho-agent = "rho_agent.cli:app"
+rho-agent = "rho_agent.cli:cli"
 rho-eval = "rho_agent.eval.cli:app"
 
 [build-system]

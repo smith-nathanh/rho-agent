@@ -127,8 +127,13 @@ uv run harbor run --config ~/proj/rho-agent/rho_agent/eval/harbor/configs/termin
 
 ### Environment variables
 
+Since the container clones rho-agent from GitHub, your local `.env` file is never copied into the container (it's `.gitignore`'d). Instead, `agent.py` reads environment variables from the **host** process (loaded via `load_dotenv()`) and explicitly injects them into the container through Harbor's `ExecInput(env={...})`. This means your local `.env` works without needing to be present in the container.
+
 | Variable | Description | Example |
 |----------|-------------|---------|
+| `OPENAI_API_KEY` | API key for the model provider | `sk-...` |
+| `RHO_AGENT_MODEL` / `OPENAI_MODEL` | Model to use | `gpt-5-mini` |
+| `RHO_AGENT_BASE_URL` / `OPENAI_BASE_URL` | Custom API endpoint | `https://...` |
 | `RHO_AGENT_SERVICE_TIER` | OpenAI service tier (e.g. `flex` for 50% cost savings, slower) | `flex` |
 
 ```bash

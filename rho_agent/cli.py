@@ -1,13 +1,16 @@
 """CLI entry point for rho-agent."""
 
 import asyncio
+import importlib.metadata
 import os
 import platform
 import re
 import signal
+import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from time import monotonic
 from typing import Annotated, Any, Iterable, Optional
 
 import typer
@@ -28,6 +31,7 @@ from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 
 from .client.model import ModelClient
@@ -35,12 +39,18 @@ from .core.agent import Agent, AgentEvent
 from .core.conversations import ConversationStore
 from .core.session import Session
 from .prompts import load_prompt, parse_vars, prepare_prompt
-from .capabilities import CapabilityProfile, ShellMode, FileWriteMode
+from .capabilities import CapabilityProfile, ShellMode
 from .capabilities.factory import ToolFactory, load_profile
 from .tools.registry import ToolRegistry
+from .ui.theme import THEME
+from .cli_errors import (
+    MissingApiKeyError,
+    InvalidProfileError,
+    InvalidModeError,
+    PromptLoadError,
+)
 from .observability.config import ObservabilityConfig, DEFAULT_TELEMETRY_DB
-from .observability.processor import ObservabilityProcessor, create_processor
-from .observability.context import TelemetryContext
+from .observability.processor import ObservabilityProcessor
 from .signals import AgentInfo, SignalManager
 
 # Config directory for rho-agent data
@@ -60,42 +70,73 @@ console = Console()
 # Typer app
 app = typer.Typer(
     name="rho-agent",
-    help="A read-only research assistant for inspecting logs, files, and databases.",
+    help="An agent harness and CLI with readonly and developer modes.",
+    epilog=(
+        "Examples:\n"
+        "  rho-agent\n"
+        "  rho-agent \"What errors are in app.log?\"\n"
+        "  rho-agent --prompt \"Investigate why CI is failing\"\n"
+        "  rho-agent --profile readonly\n"
+        "  rho-agent --profile developer\n"
+        "  rho-agent -r latest\n"
+        "  rho-agent --system-prompt ./prompt.md --var env=prod"
+    ),
     add_completion=False,
 )
 
-DEFAULT_SYSTEM_PROMPT = """\
-You are a research assistant that helps inspect logs, files, and databases.
 
-## How to Use Tools
-- You have tools available. Use them by calling them directly - DO NOT output JSON or tool syntax in your response.
-- You can call tools MULTIPLE TIMES to complete a task. After each tool result, decide if you need more information.
-- Keep investigating until you have enough information to answer the user's question completely.
-- When you need to inspect files, run commands, or query databases - USE YOUR TOOLS. Do not guess or make up information.
+def _markup(text: str, color: str) -> str:
+    return f"[{color}]{text}[/{color}]"
 
-## Constraints
-- You are read-only - you cannot modify existing files or execute destructive commands.
-- You CAN use the write_output tool to create new output files (summaries, reports, scripts) when asked.
 
-## Database Tools
-Database tools are only available when their connection environment variables are set:
-- Oracle: Enabled when ORACLE_DSN is set (also uses ORACLE_USER, ORACLE_PASSWORD)
-- SQLite: Enabled when SQLITE_DB is set (path to database file)
-- Vertica: Enabled when VERTICA_HOST is set (also uses VERTICA_PORT, VERTICA_DATABASE, VERTICA_USER, VERTICA_PASSWORD)
+def _is_interactive_terminal() -> bool:
+    return console.is_terminal and sys.stdin.isatty() and sys.stdout.isatty()
 
-If a user asks about a database but you don't have the corresponding tool, let them know which environment variable to set.
 
-## Environment
-- Platform: {platform}
-- Home directory: {home_dir}
-- Working directory: {working_dir}
+def _get_version() -> str:
+    try:
+        return importlib.metadata.version("rho-agent")
+    except importlib.metadata.PackageNotFoundError:
+        return "dev"
 
-When users reference paths with ~, expand them to {home_dir}.
-Always use absolute paths in tool calls.
-"""
+
+class TokenStatus:
+    """Session token metrics for persistent status display."""
+
+    def __init__(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
+        self.context_size = 0
+        self.total_input_tokens = input_tokens
+        self.total_output_tokens = output_tokens
+
+    def update(self, usage: dict[str, int] | None) -> None:
+        if not usage:
+            return
+        self.context_size = usage.get("context_size", self.context_size)
+        self.total_input_tokens = usage.get(
+            "total_input_tokens", self.total_input_tokens
+        )
+        self.total_output_tokens = usage.get(
+            "total_output_tokens", self.total_output_tokens
+        )
+
+    def render(self) -> str:
+        return (
+            f"context:{self.context_size} "
+            f"in:{self.total_input_tokens} "
+            f"out:{self.total_output_tokens}"
+        )
 
 # Commands the user can type during the session
-COMMANDS = ["/approve", "/compact", "/help", "/clear", "exit", "quit"]
+COMMANDS = [
+    "/approve",
+    "/compact",
+    "/write",
+    "/resume",
+    "/help",
+    "/clear",
+    "exit",
+    "quit",
+]
 
 # Pattern to detect path-like strings in text
 PATH_PATTERN = re.compile(
@@ -216,14 +257,14 @@ class ApprovalHandler:
     def enable_auto_approve(self) -> None:
         """Enable auto-approve mode for this session."""
         self.auto_approve = True
-        console.print("[green]Auto-approve enabled for this session[/green]")
+        console.print(_markup("Auto-approve enabled for this session", THEME.success))
 
     async def check_approval(self, tool_name: str, tool_args: dict[str, Any]) -> bool:
         """Prompt user for approval. Returns True if approved."""
         if self.auto_approve:
             return True
 
-        console.print("[yellow]Approve? \\[Y/n]:[/yellow] ", end="")
+        console.print(_markup("Approve? \\[Y/n]:", THEME.warning), end=" ")
 
         try:
             response = input().strip().lower()
@@ -340,7 +381,12 @@ def _format_tool_preview(
     return "\n".join(preview_lines)
 
 
-def handle_event(event: AgentEvent) -> None:
+def handle_event(
+    event: AgentEvent,
+    *,
+    show_turn_usage: bool = True,
+    token_status: TokenStatus | None = None,
+) -> None:
     """Handle an agent event by printing to console."""
     if event.type == "text":
         # Stream text immediately as it arrives
@@ -349,56 +395,72 @@ def handle_event(event: AgentEvent) -> None:
     elif event.type == "tool_start":
         # Show compact tool signature (like Claude Code)
         sig = _format_tool_signature(event.tool_name, event.tool_args)
-        console.print(f"[cyan]{sig}[/cyan]")
+        console.print()
+        console.print(
+            Panel(
+                _markup(sig, THEME.tool_call),
+                title=_markup("tool", THEME.secondary),
+                border_style=THEME.secondary,
+                padding=(0, 1),
+            )
+        )
 
     elif event.type == "tool_end":
         # Show a brief summary of what the tool found
         summary = _format_tool_summary(
             event.tool_name, event.tool_metadata, event.tool_result
         )
-        if summary:
-            console.print(f"[dim]  → {summary}[/dim]")
-
-        # Show preview of the actual output
         preview = _format_tool_preview(event.tool_result)
+        body_lines: list[str] = []
+        if summary:
+            body_lines.append(_markup(f"-> {summary}", THEME.success))
         if preview:
-            # Indent each line for visual grouping
-            indented = "\n".join(f"    {line}" for line in preview.split("\n"))
-            console.print(f"[dim]{indented}[/dim]")
+            body_lines.append(_markup(preview, THEME.tool_result))
+        if body_lines:
+            console.print(
+                Panel(
+                    "\n".join(body_lines),
+                    border_style=THEME.border,
+                    padding=(0, 1),
+                )
+            )
 
     elif event.type == "tool_blocked":
-        console.print("[red]Command rejected[/red]")
+        console.print(_markup("Command rejected", THEME.error))
 
     elif event.type == "compact_start":
         trigger = event.content or "manual"
         if trigger == "auto":
             console.print(
-                "[yellow]Context limit approaching, auto-compacting...[/yellow]"
+                _markup("Context limit approaching, auto-compacting...", THEME.warning)
             )
         else:
-            console.print("[yellow]Compacting conversation...[/yellow]")
+            console.print(_markup("Compacting conversation...", THEME.warning))
 
     elif event.type == "compact_end":
-        console.print(f"[green]{event.content}[/green]")
+        console.print(_markup(event.content or "", THEME.success))
         console.print(
-            "[dim]Note: Multiple compactions can reduce accuracy. "
-            "Start a new session when possible.[/dim]"
+            _markup(
+                "Note: Multiple compactions can reduce accuracy. "
+                "Start a new session when possible.",
+                THEME.muted,
+            )
         )
 
     elif event.type == "turn_complete":
-        # Ensure we end on a new line
+        # Ensure we end on a new line after streamed text
         print()
-        usage = event.usage or {}
-        context_size = usage.get('context_size', 0)
-        total_in = usage.get('total_input_tokens', 0)
-        total_out = usage.get('total_output_tokens', 0)
-        # Use plain print instead of Rich console for token display
-        print(
-            f"[context: {context_size}, total: {total_in} in, {total_out} out]"
-        )
+        if token_status:
+            token_status.update(event.usage)
+        if show_turn_usage:
+            usage = event.usage or {}
+            context_size = usage.get("context_size", 0)
+            total_in = usage.get("total_input_tokens", 0)
+            total_out = usage.get("total_output_tokens", 0)
+            print(f"[context: {context_size}, total: {total_in} in, {total_out} out]")
 
     elif event.type == "error":
-        console.print(f"[red]Error: {event.content}[/red]")
+        console.print(_markup(f"Error: {event.content}", THEME.error))
 
 
 def handle_command(
@@ -423,24 +485,47 @@ def handle_command(
             return f"compact:{parts[1]}"
         return "compact"
 
+    if cmd.startswith("/write"):
+        # Handled in run_interactive (needs registry/profile context)
+        return "write"
+
+    if cmd.startswith("/resume"):
+        # Handled in run_interactive (needs conversation store/session context)
+        return "resume"
+
     if cmd == "/help":
+        def line(lhs: str, rhs: str) -> str:
+            # Pad using visible text width, then escape for Rich markup safety.
+            safe_lhs = escape(lhs.ljust(28))
+            safe_rhs = escape(rhs)
+            return f"  {safe_lhs}- {safe_rhs}"
+
+        help_text = "\n".join(
+            [
+                "[bold]Commands:[/bold]",
+                line("/approve", "Enable auto-approve for all tool calls"),
+                line("/compact [guidance]", "Compact conversation history"),
+                line("/write [on|off|status]", "Toggle create-only write tool (readonly mode)"),
+                line("/resume [latest|id]", "Resume a saved conversation"),
+                line("/help", "Show this help"),
+                line("/clear", "Clear the screen"),
+                line("exit", "Quit the session"),
+                "",
+                "[bold]Input:[/bold]",
+                line("Enter", "Send message"),
+                line("Esc+Enter", "New line"),
+                "",
+                "[bold]Conversations:[/bold]",
+                line("rho-agent --list", "List saved conversations"),
+                line("rho-agent -r latest", "Resume most recent conversation"),
+                line("rho-agent -r <id>", "Resume specific conversation"),
+            ]
+        )
         console.print(
             Panel(
-                "[bold]Commands:[/bold]\n"
-                "  /approve             - Enable auto-approve for all tool calls\n"
-                "  /compact [guidance]  - Compact conversation history\n"
-                "  /help                - Show this help\n"
-                "  /clear               - Clear the screen\n"
-                "  exit                 - Quit the session\n"
-                "\n[bold]Input:[/bold]\n"
-                "  Enter               - Send message\n"
-                "  Esc+Enter           - New line\n"
-                "\n[bold]Conversations:[/bold]\n"
-                "  rho-agent --list     - List saved conversations\n"
-                "  rho-agent -r latest  - Resume most recent conversation\n"
-                "  rho-agent -r <id>    - Resume specific conversation",
+                help_text,
                 title="Help",
-                border_style="blue",
+                border_style=THEME.border,
             )
         )
         return None
@@ -457,6 +542,8 @@ async def run_interactive(
     approval_handler: ApprovalHandler,
     session: Session,
     model: str,
+    mode_name: str,
+    registry: ToolRegistry,
     working_dir: str,
     conversation_store: ConversationStore,
     session_started: datetime,
@@ -472,6 +559,12 @@ async def run_interactive(
     # Start observability session if enabled
     if observability:
         await observability.start_session()
+
+    token_status = TokenStatus(
+        input_tokens=session.total_input_tokens,
+        output_tokens=session.total_output_tokens,
+    )
+    interactive_tty = _is_interactive_terminal()
 
     key_bindings = KeyBindings()
 
@@ -489,29 +582,225 @@ async def run_interactive(
         completer=create_completer(working_dir=working_dir),
         multiline=True,
         key_bindings=key_bindings,
+        bottom_toolbar=(lambda: token_status.render()),
         complete_while_typing=False,
         complete_in_thread=True,
     )
 
     # Welcome message
-    obs_status = "[green]telemetry enabled[/green]" if observability else ""
+    obs_status = (
+        _markup("telemetry enabled", THEME.success)
+        if observability
+        else _markup("telemetry off", THEME.muted)
+    )
+    version = _get_version()
     console.print(
         Panel(
-            "[bold]rho-agent[/bold] - Read-only research assistant\n"
-            f"Model: [cyan]{model}[/cyan] {obs_status}\n"
+            f"[bold]{_markup('ρ rho-agent', THEME.primary)}[/bold] v{version}\n"
+            f"Mode: {_markup(mode_name, THEME.accent)}\n"
+            f"Model: {_markup(model, THEME.accent)} {obs_status}\n"
             "Enter to send, Esc+Enter for newline, Ctrl+C to cancel.\n"
             "Type [bold]/help[/bold] for commands, [bold]exit[/bold] to quit.",
-            border_style="green",
+            border_style=THEME.border,
         )
     )
 
     session_status = "completed"
+
+    def handle_file_write_toggle(cmd: str) -> None:
+        if mode_name != "readonly":
+            console.print(
+                _markup(
+                    "File write toggling is only available in readonly mode.",
+                    THEME.warning,
+                )
+            )
+            return
+
+        parts = cmd.split()
+        has_write = "write" in registry
+
+        if len(parts) == 1:
+            if has_write:
+                console.print(
+                    _markup(
+                        "File write is ON (create-only, approval required).",
+                        THEME.success,
+                    )
+                )
+                return
+            console.print(
+                _markup(
+                    "Enable file write for exports? \\[y/N]:",
+                    THEME.warning,
+                ),
+                end=" ",
+            )
+            try:
+                response = input().strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                response = "n"
+            target = "on" if response in ("y", "yes") else "status"
+        else:
+            target = parts[1].lower()
+
+        if target in ("status",):
+            status = "ON" if has_write else "OFF"
+            color = THEME.success if has_write else THEME.muted
+            console.print(_markup(f"File write is {status}.", color))
+            return
+
+        if target in ("on", "enable"):
+            if has_write:
+                console.print(_markup("File write is already ON.", THEME.muted))
+                return
+            from .tools.handlers.write import WriteHandler
+
+            registry.register(WriteHandler(create_only=True, requires_approval=True))
+            console.print(
+                _markup(
+                    "File write enabled for this session (create-only, approval required).",
+                    THEME.success,
+                )
+            )
+            return
+
+        if target in ("off", "disable"):
+            if not has_write:
+                console.print(_markup("File write is already OFF.", THEME.muted))
+                return
+            registry.unregister("write")
+            console.print(_markup("File write disabled for this session.", THEME.warning))
+            return
+
+        console.print(
+            _markup(
+                "Usage: /write [on|off|status]",
+                THEME.warning,
+            )
+        )
+
+    def _resolve_resume_id(raw: str, conversations: list[Any]) -> str | None:
+        target = raw.strip()
+        if not target:
+            return None
+        # Numeric selection from /resume list (1-based)
+        if target.isdigit():
+            idx = int(target)
+            if 1 <= idx <= len(conversations):
+                return conversations[idx - 1].id
+            return None
+        if target.lower() == "latest":
+            return conversations[0].id if conversations else None
+        # Exact ID first
+        for conv in conversations:
+            if conv.id == target:
+                return conv.id
+        # Prefix match
+        matches = [conv.id for conv in conversations if conv.id.startswith(target)]
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
+    def handle_resume(cmd: str) -> None:
+        nonlocal conversation_id, session_started
+
+        conversations = conversation_store.list_conversations(limit=20)
+        if not conversations:
+            console.print(_markup("No saved conversations to resume.", THEME.error))
+            return
+
+        parts = cmd.split(maxsplit=1)
+        selected_id: str | None = None
+
+        if len(parts) > 1:
+            selected_id = _resolve_resume_id(parts[1], conversations)
+            if not selected_id:
+                console.print(
+                    _markup(
+                        f"Could not resolve conversation '{parts[1]}'. "
+                        "Use /resume to list and select.",
+                        THEME.warning,
+                    )
+                )
+                return
+        else:
+            console.print(_markup("Recent conversations:", THEME.secondary))
+            for idx, conv in enumerate(conversations, start=1):
+                try:
+                    started_dt = datetime.fromisoformat(conv.started)
+                    time_str = started_dt.strftime("%Y-%m-%d %H:%M")
+                except ValueError:
+                    time_str = conv.id
+                console.print(
+                    f"{_markup(f'{idx:>2}.', THEME.secondary)} "
+                    f"{_markup(conv.id, THEME.accent)}  {time_str}  "
+                    f"{_markup(conv.model, THEME.muted)}"
+                )
+                if conv.display_preview:
+                    console.print(_markup(f"  {conv.display_preview}", THEME.muted))
+            console.print()
+            console.print(
+                _markup(
+                    "Enter number, conversation ID, or prefix (blank to cancel):",
+                    THEME.warning,
+                ),
+                end=" ",
+            )
+            try:
+                raw = input().strip()
+            except (EOFError, KeyboardInterrupt):
+                raw = ""
+            if not raw:
+                console.print(_markup("Resume cancelled.", THEME.muted))
+                return
+            selected_id = _resolve_resume_id(raw, conversations)
+            if not selected_id:
+                console.print(
+                    _markup(
+                        f"Could not resolve conversation '{raw}'.",
+                        THEME.error,
+                    )
+                )
+                return
+
+        resumed = conversation_store.load(selected_id)
+        if not resumed:
+            console.print(
+                _markup(f"Conversation not found: {selected_id}", THEME.error)
+            )
+            return
+
+        session.system_prompt = resumed.system_prompt
+        session.history = resumed.history.copy()
+        session.total_input_tokens = resumed.input_tokens
+        session.total_output_tokens = resumed.output_tokens
+        token_status.context_size = 0
+        token_status.total_input_tokens = resumed.input_tokens
+        token_status.total_output_tokens = resumed.output_tokens
+        conversation_id = resumed.id
+        try:
+            session_started = datetime.fromisoformat(resumed.started)
+        except ValueError:
+            session_started = datetime.now()
+
+        console.print(
+            _markup(f"Resumed conversation: {resumed.id}", THEME.success)
+        )
+        console.print(
+            _markup(
+                f"Messages: {len(resumed.history)}  "
+                f"tokens in/out: {resumed.input_tokens}/{resumed.output_tokens}",
+                THEME.muted,
+            )
+        )
+
     try:
         while True:
             try:
                 console.print()
                 user_input = await prompt_session.prompt_async(
-                    HTML("<ansigreen><b>&gt;</b></ansigreen> ")
+                    HTML(f"<style fg='{THEME.prompt}'><b>&gt;</b></style> ")
                 )
                 user_input = user_input.strip()
             except (EOFError, KeyboardInterrupt):
@@ -524,6 +813,13 @@ async def run_interactive(
                 break
 
             if user_input.startswith("/"):
+                if user_input.startswith("/write"):
+                    handle_file_write_toggle(user_input)
+                    continue
+                if user_input.startswith("/resume"):
+                    handle_resume(user_input)
+                    continue
+
                 action = handle_command(user_input, approval_handler)
                 if action and action.startswith("compact"):
                     # Handle /compact command
@@ -546,7 +842,7 @@ async def run_interactive(
             loop = asyncio.get_event_loop()
 
             def on_cancel():
-                console.print("\n[yellow]Cancelling...[/yellow]")
+                console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
                 agent.request_cancel()
 
             # Register signal handler for this turn (Unix only)
@@ -559,18 +855,41 @@ async def run_interactive(
                 if observability:
                     events = observability.wrap_turn(events, user_input)
 
+                status_ctx = None
+                start = monotonic()
+                if interactive_tty:
+                    status_ctx = console.status(
+                        "⠋ working (0s)",
+                        spinner="dots",
+                        spinner_style=THEME.accent,
+                    )
+                    status_ctx.__enter__()
+                saw_model_output = False
+
                 async for event in events:
+                    if status_ctx and not saw_model_output:
+                        elapsed = int(monotonic() - start)
+                        status_ctx.update(
+                            f"⠋ working ({elapsed}s • Ctrl+C: cancel)"
+                        )
+                    if event.type in ("text", "tool_start", "error", "cancelled"):
+                        saw_model_output = True
+                        if status_ctx:
+                            status_ctx.__exit__(None, None, None)
+                            status_ctx = None
                     if event.type == "cancelled":
                         # Check if this was an external kill signal
                         if signal_manager and session_id and signal_manager.is_cancelled(session_id):
                             session_status = "cancelled"
                             if observability:
                                 observability.context.metadata["cancel_source"] = "kill_command"
-                            console.print("[yellow]Killed by rho-agent kill[/yellow]")
+                            console.print(_markup("Killed by rho-agent kill", THEME.warning))
                         else:
-                            console.print("[dim]Turn cancelled[/dim]")
+                            console.print(_markup("Turn cancelled", THEME.muted))
                         break
-                    handle_event(event)
+                    handle_event(event, show_turn_usage=False, token_status=token_status)
+                if status_ctx:
+                    status_ctx.__exit__(None, None, None)
             finally:
                 # Remove signal handler after turn
                 if platform.system() != "Windows":
@@ -600,7 +919,7 @@ async def run_interactive(
             )
             console.print(f"\n[dim]Goodbye! Conversation saved to {saved_path}[/dim]")
         else:
-            console.print("\n[dim]Goodbye![/dim]")
+            console.print(_markup("\nGoodbye!", THEME.muted))
 
 
 async def run_single(
@@ -616,9 +935,10 @@ async def run_single(
         await observability.start_session()
 
     loop = asyncio.get_event_loop()
+    interactive_tty = _is_interactive_terminal()
 
     def on_cancel():
-        console.print("\n[yellow]Cancelling...[/yellow]")
+        console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
         agent.request_cancel()
 
     if platform.system() != "Windows":
@@ -631,17 +951,38 @@ async def run_single(
         if observability:
             events = observability.wrap_turn(events, prompt)
 
+        status_ctx = None
+        start = monotonic()
+        if interactive_tty:
+            status_ctx = console.status(
+                "⠋ working (0s)",
+                spinner="dots",
+                spinner_style=THEME.accent,
+            )
+            status_ctx.__enter__()
+        saw_model_output = False
+
         async for event in events:
+            if status_ctx and not saw_model_output:
+                elapsed = int(monotonic() - start)
+                status_ctx.update(f"⠋ working ({elapsed}s • Ctrl+C: cancel)")
+            if event.type in ("text", "tool_start", "error", "cancelled"):
+                saw_model_output = True
+                if status_ctx:
+                    status_ctx.__exit__(None, None, None)
+                    status_ctx = None
             if event.type == "cancelled":
                 if signal_manager and session_id and signal_manager.is_cancelled(session_id):
                     session_status = "cancelled"
                     if observability:
                         observability.context.metadata["cancel_source"] = "kill_command"
-                    console.print("[yellow]Killed by rho-agent kill[/yellow]")
+                    console.print(_markup("Killed by rho-agent kill", THEME.warning))
                 else:
-                    console.print("[dim]Cancelled[/dim]")
+                    console.print(_markup("Cancelled", THEME.muted))
                 break
             handle_event(event)
+        if status_ctx:
+            status_ctx.__exit__(None, None, None)
     except Exception:
         session_status = "error"
         raise
@@ -668,9 +1009,12 @@ async def run_single_with_output(
 
     # Check if output file already exists before running
     if output_file.exists():
-        console.print(f"[red]Output file already exists: {output_file}[/red]")
+        console.print(_markup(f"Output file already exists: {output_file}", THEME.error))
         console.print(
-            "[dim]Use a different path or delete the existing file first.[/dim]"
+            _markup(
+                "Use a different path or delete the existing file first.",
+                THEME.muted,
+            )
         )
         return False
 
@@ -682,9 +1026,10 @@ async def run_single_with_output(
     cancelled = False
 
     loop = asyncio.get_event_loop()
+    interactive_tty = _is_interactive_terminal()
 
     def on_cancel():
-        console.print("\n[yellow]Cancelling...[/yellow]")
+        console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
         agent.request_cancel()
 
     if platform.system() != "Windows":
@@ -697,21 +1042,42 @@ async def run_single_with_output(
         if observability:
             events = observability.wrap_turn(events, prompt)
 
+        status_ctx = None
+        start = monotonic()
+        if interactive_tty:
+            status_ctx = console.status(
+                "⠋ working (0s)",
+                spinner="dots",
+                spinner_style=THEME.accent,
+            )
+            status_ctx.__enter__()
+        saw_model_output = False
+
         async for event in events:
+            if status_ctx and not saw_model_output:
+                elapsed = int(monotonic() - start)
+                status_ctx.update(f"⠋ working ({elapsed}s • Ctrl+C: cancel)")
+            if event.type in ("text", "tool_start", "error", "cancelled"):
+                saw_model_output = True
+                if status_ctx:
+                    status_ctx.__exit__(None, None, None)
+                    status_ctx = None
             if event.type == "cancelled":
                 if signal_manager and session_id and signal_manager.is_cancelled(session_id):
                     session_status = "cancelled"
                     if observability:
                         observability.context.metadata["cancel_source"] = "kill_command"
-                    console.print("[yellow]Killed by rho-agent kill[/yellow]")
+                    console.print(_markup("Killed by rho-agent kill", THEME.warning))
                 else:
-                    console.print("[dim]Cancelled[/dim]")
+                    console.print(_markup("Cancelled", THEME.muted))
                 cancelled = True
                 break
             handle_event(event)
             # Collect text for output file
             if event.type == "text" and event.content:
                 collected_text.append(event.content)
+        if status_ctx:
+            status_ctx.__exit__(None, None, None)
     except Exception:
         session_status = "error"
         raise
@@ -728,18 +1094,21 @@ async def run_single_with_output(
     try:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text("".join(collected_text), encoding="utf-8")
-        console.print(f"\n[green]Output written to: {output_file}[/green]")
+        console.print(f"\n{_markup(f'Output written to: {output_file}', THEME.success)}")
         return True
     except Exception as exc:
-        console.print(f"\n[red]Failed to write output: {exc}[/red]")
+        console.print(f"\n{_markup(f'Failed to write output: {exc}', THEME.error)}")
         return False
 
 
 @app.command()
 def main(
-    prompt: Annotated[
+    prompt_arg: Annotated[
         Optional[str],
-        typer.Argument(help="Single prompt to run (omit for interactive mode)"),
+        typer.Argument(
+            metavar="PROMPT",
+            help="Single prompt to run (omit for interactive mode)",
+        ),
     ] = None,
     model: Annotated[
         str,
@@ -753,14 +1122,20 @@ def main(
         Optional[str],
         typer.Option("--reasoning-effort", help="Reasoning effort: low, medium, high"),
     ] = os.getenv("RHO_AGENT_REASONING_EFFORT"),
-    system: Annotated[
-        Optional[str],
-        typer.Option("--system", "-s", help="Override system prompt entirely"),
-    ] = None,
-    prompt_file: Annotated[
+    system_prompt_file: Annotated[
         Optional[str],
         typer.Option(
-            "--prompt", "-p", help="Markdown prompt file with YAML frontmatter"
+            "--system-prompt",
+            "-s",
+            help="Markdown system prompt file with YAML frontmatter",
+        ),
+    ] = None,
+    prompt: Annotated[
+        Optional[str],
+        typer.Option(
+            "--prompt",
+            "-p",
+            help="High-level prompt text for one-shot mode (will use default system prompt unless specified)",
         ),
     ] = None,
     var: Annotated[
@@ -817,13 +1192,6 @@ def main(
             help="Override shell mode: 'restricted' or 'unrestricted'",
         ),
     ] = None,
-    file_write_mode: Annotated[
-        Optional[str],
-        typer.Option(
-            "--file-write-mode",
-            help="Override file write mode: 'off', 'create-only', or 'full'",
-        ),
-    ] = None,
     team_id: Annotated[
         Optional[str],
         typer.Option(
@@ -846,7 +1214,7 @@ def main(
         ),
     ] = os.getenv("RHO_AGENT_OBSERVABILITY_CONFIG"),
 ) -> None:
-    """rho-agent: A read-only research assistant."""
+    """rho-agent: An agent harness and CLI with readonly and developer modes."""
     # Set preview lines for tool output display
     global TOOL_PREVIEW_LINES
     TOOL_PREVIEW_LINES = preview_lines
@@ -858,7 +1226,7 @@ def main(
     if list_conversations:
         conversations = conversation_store.list_conversations()
         if not conversations:
-            console.print("[dim]No saved conversations found.[/dim]")
+            console.print(_markup("No saved conversations found.", THEME.muted))
             raise typer.Exit(0)
 
         console.print("[bold]Saved conversations:[/bold]\n")
@@ -870,7 +1238,8 @@ def main(
             except ValueError:
                 time_str = conv.id
             console.print(
-                f"[cyan]{conv.id}[/cyan]  {time_str}  [dim]{conv.model}[/dim]"
+                f"{_markup(conv.id, THEME.accent)}  {time_str}  "
+                f"{_markup(conv.model, THEME.muted)}"
             )
             console.print(f"  {conv.display_preview}")
             console.print()
@@ -883,15 +1252,17 @@ def main(
         if resume.lower() == "latest":
             conversation_id = conversation_store.get_latest_id()
             if not conversation_id:
-                console.print("[red]No saved conversations to resume.[/red]")
+                console.print(_markup("No saved conversations to resume.", THEME.error))
                 raise typer.Exit(1)
         else:
             conversation_id = resume
 
         resumed_conversation = conversation_store.load(conversation_id)
         if not resumed_conversation:
-            console.print(f"[red]Conversation not found: {conversation_id}[/red]")
-            console.print("[dim]Use --list to see saved conversations.[/dim]")
+            console.print(
+                _markup(f"Conversation not found: {conversation_id}", THEME.error)
+            )
+            console.print(_markup("Use --list to see saved conversations.", THEME.muted))
             raise typer.Exit(1)
 
     # Resolve working directory
@@ -911,24 +1282,27 @@ def main(
         try:
             capability_profile = load_profile(profile)
         except (ValueError, FileNotFoundError) as e:
-            console.print(f"[red]Profile error: {e}[/red]")
+            console.print(_markup(str(InvalidProfileError(str(e))), THEME.error))
             raise typer.Exit(1) from e
     else:
         capability_profile = CapabilityProfile.readonly()
+    mode_name = capability_profile.name
 
     # Apply command-line overrides to profile
     if shell_mode:
         try:
             capability_profile.shell = ShellMode(shell_mode)
         except ValueError:
-            console.print(f"[red]Invalid shell mode: {shell_mode}. Use 'restricted' or 'unrestricted'[/red]")
-            raise typer.Exit(1)
-
-    if file_write_mode:
-        try:
-            capability_profile.file_write = FileWriteMode(file_write_mode)
-        except ValueError:
-            console.print(f"[red]Invalid file write mode: {file_write_mode}. Use 'off', 'create-only', or 'full'[/red]")
+            console.print(
+                _markup(
+                    str(
+                        InvalidModeError(
+                            "shell mode", shell_mode, "restricted, unrestricted"
+                        )
+                    ),
+                    THEME.error,
+                )
+            )
             raise typer.Exit(1)
 
     # Build system prompt and initial prompt (skip if resuming)
@@ -938,18 +1312,16 @@ def main(
     if resumed_conversation:
         # System prompt will be loaded from the conversation
         pass
-    elif system:
-        # --system overrides everything
-        system_prompt = system
-    elif prompt_file:
-        # --prompt loads markdown file as system prompt
+    elif system_prompt_file:
+        # --system-prompt loads markdown file as system prompt
+        template_path = system_prompt_file
         try:
-            loaded_prompt = load_prompt(prompt_file)
+            loaded_prompt = load_prompt(template_path)
         except FileNotFoundError as exc:
-            console.print(f"[red]{exc}[/red]")
+            console.print(_markup(str(PromptLoadError(str(exc))), THEME.error))
             raise typer.Exit(1) from exc
         except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
+            console.print(_markup(str(PromptLoadError(str(exc))), THEME.error))
             raise typer.Exit(1) from exc
 
         # Collect variables from --vars-file and --var flags
@@ -958,7 +1330,12 @@ def main(
         if vars_file:
             vars_path = Path(vars_file).expanduser().resolve()
             if not vars_path.exists():
-                console.print(f"[red]Vars file not found: {vars_path}[/red]")
+                console.print(
+                    _markup(
+                        str(PromptLoadError(f"Vars file not found: {vars_path}")),
+                        THEME.error,
+                    )
+                )
                 raise typer.Exit(1)
             try:
                 with open(vars_path, encoding="utf-8") as f:
@@ -966,7 +1343,9 @@ def main(
                 if isinstance(file_vars, dict):
                     prompt_vars.update({k: str(v) for k, v in file_vars.items()})
             except Exception as exc:
-                console.print(f"[red]Failed to load vars file: {exc}[/red]")
+                console.print(
+                    _markup(str(PromptLoadError(f"Failed to load vars file: {exc}")), THEME.error)
+                )
                 raise typer.Exit(1) from exc
 
         # --var flags override vars file
@@ -974,24 +1353,36 @@ def main(
             try:
                 prompt_vars.update(parse_vars(var))
             except ValueError as exc:
-                console.print(f"[red]{exc}[/red]")
+                console.print(_markup(str(PromptLoadError(str(exc))), THEME.error))
                 raise typer.Exit(1) from exc
 
         # Prepare the prompt
         try:
             system_prompt, initial_prompt = prepare_prompt(loaded_prompt, prompt_vars)
         except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
+            console.print(_markup(str(PromptLoadError(str(exc))), THEME.error))
             raise typer.Exit(1) from exc
-    elif DEFAULT_PROMPT_FILE.exists():
-        # User's custom default prompt
+    else:
+        # Prefer user default prompt, otherwise package default prompt.
+        default_prompt_path = (
+            DEFAULT_PROMPT_FILE if DEFAULT_PROMPT_FILE.exists() else BUILTIN_PROMPT_FILE
+        )
         try:
-            loaded_prompt = load_prompt(DEFAULT_PROMPT_FILE)
-        except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
+            loaded_prompt = load_prompt(default_prompt_path)
+        except (FileNotFoundError, ValueError) as exc:
+            console.print(
+                _markup(
+                    str(
+                        PromptLoadError(
+                            f"Could not load default prompt at {default_prompt_path}: {exc}"
+                        )
+                    ),
+                    THEME.error,
+                )
+            )
             raise typer.Exit(1) from exc
 
-        # Provide profile-aware variables (same as builtin)
+        # Provide profile-aware variables
         prompt_vars = {
             "platform": platform.system(),
             "home_dir": str(Path.home()),
@@ -1001,42 +1392,13 @@ def main(
             "file_write_mode": capability_profile.file_write.value,
             "database_mode": capability_profile.database.value,
         }
-
         try:
             system_prompt, initial_prompt = prepare_prompt(loaded_prompt, prompt_vars)
         except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1) from exc
-    else:
-        # Built-in default prompt with profile-aware variables
-        try:
-            loaded_prompt = load_prompt(BUILTIN_PROMPT_FILE)
-        except (FileNotFoundError, ValueError) as exc:
-            # Fallback to inline prompt if file is missing
-            console.print(f"[yellow]Warning: Could not load default prompt: {exc}[/yellow]")
-            system_prompt = DEFAULT_SYSTEM_PROMPT.format(
-                platform=platform.system(),
-                home_dir=str(Path.home()),
-                working_dir=resolved_working_dir,
+            console.print(
+                _markup(f"Prompt error: {PromptLoadError(str(exc))}", THEME.error)
             )
-            loaded_prompt = None
-
-        if loaded_prompt:
-            # Provide profile-aware variables
-            prompt_vars = {
-                "platform": platform.system(),
-                "home_dir": str(Path.home()),
-                "working_dir": resolved_working_dir,
-                "profile_name": capability_profile.name,
-                "shell_mode": capability_profile.shell.value,
-                "file_write_mode": capability_profile.file_write.value,
-                "database_mode": capability_profile.database.value,
-            }
-            try:
-                system_prompt, initial_prompt = prepare_prompt(loaded_prompt, prompt_vars)
-            except ValueError as exc:
-                console.print(f"[red]Prompt error: {exc}[/red]")
-                raise typer.Exit(1) from exc
+            raise typer.Exit(1) from exc
 
     # Set up components - use resumed conversation if available
     if resumed_conversation:
@@ -1047,15 +1409,22 @@ def main(
         # Use the model from resumed conversation unless explicitly overridden
         effective_model = (
             model
-            if model != os.getenv("OPENAI_MODEL", "gpt-5-nano")
+            if model != os.getenv("OPENAI_MODEL", "gpt-5-mini")
             else resumed_conversation.model
         )
         # Parse the original start time
         session_started = datetime.fromisoformat(resumed_conversation.started)
-        console.print(f"[green]Resuming conversation: {conversation_id}[/green]")
+        console.print(
+            _markup(f"Resuming conversation: {conversation_id}", THEME.success)
+        )
     else:
         session = Session(system_prompt=system_prompt)
         effective_model = model
+
+    if not base_url and not os.getenv("OPENAI_API_KEY"):
+        console.print(_markup(str(MissingApiKeyError()), THEME.error))
+        raise typer.Exit(1)
+
 
     registry = create_registry(working_dir=resolved_working_dir, profile=capability_profile)
     client = ModelClient(model=effective_model, base_url=base_url, reasoning_effort=reasoning_effort)
@@ -1092,11 +1461,28 @@ def main(
                     f"[dim]Telemetry: {obs_config.tenant.team_id}/{obs_config.tenant.project_id}[/dim]"
                 )
         except Exception as e:
-            console.print(f"[yellow]Warning: Failed to initialize observability: {e}[/yellow]")
+            console.print(
+                _markup(
+                    f"Warning: Failed to initialize observability: {e}",
+                    THEME.warning,
+                )
+            )
 
     # Determine the prompt to run
-    # Positional prompt overrides template's initial_prompt
-    run_prompt = prompt if prompt else initial_prompt
+    # Prompt precedence:
+    # 1) --prompt (explicit text)
+    # 2) positional prompt argument
+    # 3) template initial_prompt
+    run_prompt = prompt if prompt else (prompt_arg if prompt_arg else initial_prompt)
+
+    if not run_prompt and not _is_interactive_terminal():
+        console.print(
+            _markup(
+                "Non-interactive terminal detected. Provide a prompt argument, or run in a TTY for interactive mode.",
+                THEME.warning,
+            )
+        )
+        raise typer.Exit(1)
 
     # Register this agent session for ps/kill support
     agent_info = AgentInfo(
@@ -1110,7 +1496,8 @@ def main(
 
     try:
         if run_prompt:
-            # Single prompt mode (from --prompt or positional arg)
+            console.print(_markup(f"Mode: {mode_name}", THEME.accent))
+            # Single prompt mode (from --prompt text, positional arg, or template initial_prompt)
             if output:
                 # Capture output to file
                 asyncio.run(run_single_with_output(
@@ -1129,6 +1516,8 @@ def main(
                     approval_handler,
                     session,
                     effective_model,
+                    mode_name,
+                    registry,
                     resolved_working_dir,
                     conversation_store,
                     session_started,
@@ -1166,12 +1555,12 @@ def dashboard(
     dashboard_path = Path(__file__).parent / "observability" / "dashboard" / "app.py"
 
     if not dashboard_path.exists():
-        console.print(f"[red]Dashboard app not found at {dashboard_path}[/red]")
+        console.print(_markup(f"Dashboard app not found at {dashboard_path}", THEME.error))
         raise typer.Exit(1)
 
-    console.print(f"[green]Starting dashboard on port {port}...[/green]")
-    console.print(f"[dim]Database: {resolved_db}[/dim]")
-    console.print(f"[dim]Open http://localhost:{port} in your browser[/dim]")
+    console.print(_markup(f"Starting dashboard on port {port}...", THEME.success))
+    console.print(_markup(f"Database: {resolved_db}", THEME.muted))
+    console.print(_markup(f"Open http://localhost:{port} in your browser", THEME.muted))
 
     try:
         subprocess.run(
@@ -1185,9 +1574,9 @@ def dashboard(
             check=True,
         )
     except KeyboardInterrupt:
-        console.print("\n[dim]Dashboard stopped[/dim]")
+        console.print(_markup("\nDashboard stopped", THEME.muted))
     except subprocess.CalledProcessError as e:
-        console.print(f"[red]Dashboard failed to start: {e}[/red]")
+        console.print(_markup(f"Dashboard failed to start: {e}", THEME.error))
         raise typer.Exit(1) from e
 
 
@@ -1206,7 +1595,7 @@ def ps(
         if cleaned:
             for sid in cleaned:
                 console.print(f"[dim]Cleaned: {sid[:8]}[/dim]")
-            console.print(f"[green]Removed {len(cleaned)} stale entries[/green]")
+            console.print(_markup(f"Removed {len(cleaned)} stale entries", THEME.success))
         else:
             console.print("[dim]No stale entries found[/dim]")
 
@@ -1234,8 +1623,8 @@ def ps(
         if len(info.instruction_preview) > 50:
             preview += "..."
         console.print(
-            f"  [cyan]{short_id}[/cyan]  [green]running[/green]  "
-            f"[dim]{info.model:<14}[/dim]  {duration:>6}  {preview}"
+            f"  {_markup(short_id, THEME.accent)}  {_markup('running', THEME.success)}  "
+            f"{_markup(f'{info.model:<14}', THEME.muted)}  {duration:>6}  {preview}"
         )
 
 
@@ -1257,24 +1646,43 @@ def kill(
         cancelled = sm.cancel_all()
         if cancelled:
             for sid in cancelled:
-                console.print(f"[yellow]Cancelled: {sid[:8]}[/yellow]")
-            console.print(f"[green]Sent cancel signal to {len(cancelled)} agents[/green]")
+                console.print(_markup(f"Cancelled: {sid[:8]}", THEME.warning))
+            console.print(
+                _markup(
+                    f"Sent cancel signal to {len(cancelled)} agents", THEME.success
+                )
+            )
         else:
             console.print("[dim]No running agents to kill[/dim]")
         return
 
     if not prefix:
-        console.print("[red]Provide a session ID prefix, or use --all[/red]")
+        console.print(
+            _markup("Provide a session ID prefix, or use --all", THEME.error)
+        )
         raise typer.Exit(1)
 
     cancelled = sm.cancel_by_prefix(prefix)
     if cancelled:
         for sid in cancelled:
-            console.print(f"[yellow]Cancelled: {sid[:8]}[/yellow]")
+            console.print(_markup(f"Cancelled: {sid[:8]}", THEME.warning))
     else:
-        console.print(f"[red]No running agents matching prefix '{prefix}'[/red]")
+        console.print(
+            _markup(f"No running agents matching prefix '{prefix}'", THEME.error)
+        )
         raise typer.Exit(1)
 
 
+def cli() -> None:
+    """CLI entrypoint with `main` as the default command."""
+    args = sys.argv[1:]
+    subcommands = {"main", "dashboard", "ps", "kill"}
+
+    if not args or args[0] not in subcommands:
+        args = ["main", *args]
+
+    app(args=args, prog_name="rho-agent")
+
+
 if __name__ == "__main__":
-    app()
+    cli()

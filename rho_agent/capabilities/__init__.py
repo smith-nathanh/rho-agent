@@ -218,6 +218,7 @@ class CapabilityProfile:
             dangerous_patterns=patterns,
             shell_timeout=data.get("shell_timeout", 120),
             shell_working_dir=data.get("shell_working_dir"),
+            bash_only=bool(data.get("bash_only", False)),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -235,6 +236,7 @@ class CapabilityProfile:
             },
             "shell_timeout": self.shell_timeout,
             "shell_working_dir": self.shell_working_dir,
+            "bash_only": self.bash_only,
         }
 
     def requires_tool_approval(self, tool_name: str) -> bool:

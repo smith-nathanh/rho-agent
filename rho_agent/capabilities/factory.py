@@ -60,11 +60,10 @@ class ToolFactory:
         if not self.profile.bash_only:
             self._register_write_tools(registry)
 
-        # Register database tools (if configured)
-        self._register_database_tools(registry, env)
-
-        # Register external service tools (if configured)
-        self._register_external_services(registry, env)
+        # Register database and external service tools unless bash_only mode
+        if not self.profile.bash_only:
+            self._register_database_tools(registry, env)
+            self._register_external_services(registry, env)
 
         return registry
 
