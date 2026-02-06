@@ -86,7 +86,9 @@ app = typer.Typer(
 
 
 def _markup(text: str, color: str) -> str:
-    return f"[{color}]{text}[/{color}]"
+    # Escape user/model/tool text so Rich markup tags inside content
+    # don't get interpreted as formatting directives.
+    return f"[{color}]{escape(text)}[/{color}]"
 
 
 def _is_interactive_terminal() -> bool:
