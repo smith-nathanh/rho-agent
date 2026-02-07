@@ -1,13 +1,12 @@
-"""Output truncation matching Codex CLI format.
+"""Output truncation utilities to prevent context bloat.
 
 Uses token-based truncation with ...N tokens truncated... marker format
-to match Codex CLI's exec_command output.
 """
 
-# Codex uses ~4 bytes per token heuristic
+# Approximate bytes-per-token heuristic
 APPROX_BYTES_PER_TOKEN = 4
 
-# Default max tokens (matching Codex's default of ~5000 tokens)
+# Default max tokens
 MAX_OUTPUT_TOKENS = 5000
 
 
@@ -17,7 +16,7 @@ def truncate_output(
 ) -> str:
     """Truncate tool output to prevent context overflow.
 
-    Uses token-based truncation matching Codex CLI format:
+    Uses token-based truncation:
     - Adds "Total output lines: N" header when truncated
     - Uses "...N tokens truncated..." marker
     - 50/50 head+tail split
@@ -65,7 +64,7 @@ def truncate_output(
     # Count total lines for header
     total_lines = content.count("\n") + 1
 
-    # Build output with Codex format
+    # Build output
     head = content[:head_chars]
     tail = content[-tail_chars:] if tail_chars > 0 else ""
     marker = f"\n...{elided_tokens} tokens truncated...\n"

@@ -2,6 +2,7 @@
 
 import asyncio
 import importlib.metadata
+import json
 import os
 import platform
 import re
@@ -173,6 +174,13 @@ class TokenStatus:
             f"in:{self.total_input_tokens} "
             f"out:{self.total_output_tokens}"
         )
+
+
+def _sync_token_status_from_session(token_status: TokenStatus, session: Session) -> None:
+    """Sync UI token status from current session counters."""
+    token_status.context_size = session.last_input_tokens
+    token_status.total_input_tokens = session.total_input_tokens
+    token_status.total_output_tokens = session.total_output_tokens
 
 # Commands the user can type during the session
 COMMANDS = [
@@ -380,6 +388,24 @@ def _format_tool_summary(
             if rows:
                 return f"{rows} rows"
 
+        # bash tool
+        if tool_name == "bash":
+            timed_out = metadata.get("timed_out", False)
+            duration = metadata.get("duration_seconds")
+            exit_code = metadata.get("exit_code")
+            if timed_out:
+                if duration is not None:
+                    return f"Command timed out ({duration}s)"
+                return "Command timed out"
+            if exit_code == 0:
+                if duration is not None:
+                    return f"Command succeeded ({duration}s)"
+                return "Command succeeded"
+            if exit_code is not None:
+                if duration is not None:
+                    return f"Command failed (exit {exit_code}, {duration}s)"
+                return f"Command failed (exit {exit_code})"
+
     # Fallback: count lines in result
     if result:
         lines = result.count("\n") + 1
@@ -390,7 +416,9 @@ def _format_tool_summary(
 
 
 def _format_tool_preview(
-    result: str | None, max_lines: int | None = None
+    result: str | None,
+    tool_name: str | None = None,
+    max_lines: int | None = None,
 ) -> str | None:
     """Get first N lines of tool output as a preview."""
     if max_lines is None:
@@ -399,9 +427,22 @@ def _format_tool_preview(
     if not result or max_lines <= 0:
         return None
 
-    lines = result.split("\n")
+    display_result = result
+
+    # Bash returns a JSON wrapper; show command output body in interactive preview.
+    if tool_name == "bash":
+        try:
+            payload = json.loads(result)
+            if isinstance(payload, dict):
+                output = payload.get("output")
+                if isinstance(output, str):
+                    display_result = output
+        except json.JSONDecodeError:
+            pass
+
+    lines = display_result.split("\n")
     if len(lines) <= max_lines:
-        return result
+        return display_result
 
     preview_lines = lines[:max_lines]
     remaining = len(lines) - max_lines
@@ -438,7 +479,7 @@ def handle_event(
         summary = _format_tool_summary(
             event.tool_name, event.tool_metadata, event.tool_result
         )
-        preview = _format_tool_preview(event.tool_result)
+        preview = _format_tool_preview(event.tool_result, event.tool_name)
         body_lines: list[str] = []
         if summary:
             body_lines.append(_markup(f"-> {summary}", THEME.success))
@@ -902,6 +943,7 @@ async def run_interactive(
                             status_ctx = None
                     if event.type == "cancelled":
                         # Check if this was an external kill signal
+                        _sync_token_status_from_session(token_status, runtime.session)
                         if signal_manager and session_id and signal_manager.is_cancelled(session_id):
                             session_status = "cancelled"
                             if runtime.observability:
@@ -910,6 +952,8 @@ async def run_interactive(
                         else:
                             console.print(_markup("Turn cancelled", THEME.muted))
                         break
+                    if event.type == "error":
+                        _sync_token_status_from_session(token_status, runtime.session)
                     handle_event(event, show_turn_usage=False, token_status=token_status)
                 if status_ctx:
                     status_ctx.__exit__(None, None, None)
@@ -991,6 +1035,10 @@ async def run_single(
                 if status_ctx:
                     status_ctx.__exit__(None, None, None)
                     status_ctx = None
+            if event.type == "error":
+                session_status = "error"
+                handle_event(event)
+                break
             if event.type == "cancelled":
                 if signal_manager and session_id and signal_manager.is_cancelled(session_id):
                     session_status = "cancelled"
@@ -1041,6 +1089,7 @@ async def run_single_with_output(
 
     collected_text: list[str] = []
     cancelled = False
+    had_error = False
 
     loop = asyncio.get_event_loop()
     interactive_tty = _is_interactive_terminal()
@@ -1079,6 +1128,11 @@ async def run_single_with_output(
                 if status_ctx:
                     status_ctx.__exit__(None, None, None)
                     status_ctx = None
+            if event.type == "error":
+                session_status = "error"
+                had_error = True
+                handle_event(event)
+                break
             if event.type == "cancelled":
                 if signal_manager and session_id and signal_manager.is_cancelled(session_id):
                     session_status = "cancelled"
@@ -1104,6 +1158,8 @@ async def run_single_with_output(
         await close_runtime(runtime, session_status)
 
     if cancelled:
+        return False
+    if had_error:
         return False
 
     # Write collected text to output file

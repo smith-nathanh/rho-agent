@@ -1,13 +1,12 @@
 """Observability processor that wraps agent event streams."""
 
+import uuid
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
-from typing import Any
 
 from ..core.agent import AgentEvent
 from .config import ObservabilityConfig
 from .context import TelemetryContext, TurnContext, ToolExecutionContext
-from .exporters.base import Exporter, NoOpExporter
+from .exporters.base import Exporter
 from .exporters.sqlite import create_exporter
 
 
@@ -48,7 +47,8 @@ class ObservabilityProcessor:
 
         # Current turn state
         self._current_turn: TurnContext | None = None
-        self._pending_tool: ToolExecutionContext | None = None
+        self._pending_tools: dict[str, ToolExecutionContext] = {}
+        self._pending_tool_order: list[str] = []
 
         # Metrics
         self._turn_input_tokens = 0
@@ -126,6 +126,8 @@ class ObservabilityProcessor:
         self._turn_input_tokens = 0
         self._turn_output_tokens = 0
         self._turn_reasoning_tokens = 0
+        self._pending_tools = {}
+        self._pending_tool_order = []
 
         await self._exporter.start_turn(self._current_turn, user_input)
 
@@ -156,29 +158,51 @@ class ObservabilityProcessor:
         """Process an event for telemetry capture."""
         if event.type == "tool_start":
             # Start tracking a tool execution
-            self._pending_tool = ToolExecutionContext(
+            tool_execution = ToolExecutionContext(
                 turn_id=self._current_turn.turn_id if self._current_turn else "",
                 tool_name=event.tool_name or "",
                 arguments=event.tool_args or {} if self._config.capture.tool_arguments else {},
             )
+            pending_key = event.tool_call_id or tool_execution.execution_id or str(uuid.uuid4())
+            self._pending_tools[pending_key] = tool_execution
+            self._pending_tool_order.append(pending_key)
             self._context.record_tool_call()
             await self._exporter.increment_tool_call(self._context.session_id)
 
         elif event.type == "tool_end":
             # Complete the tool execution
-            if self._pending_tool:
-                self._pending_tool.end(success=True)
+            pending_tool = self._pop_pending_tool(event.tool_call_id)
+            if pending_tool:
+                pending_tool.end(success=True)
                 if self._config.capture.tool_results:
-                    self._pending_tool.result = event.tool_result
-                await self._exporter.record_tool_execution(self._pending_tool)
-                self._pending_tool = None
+                    pending_tool.result = event.tool_result
+                await self._exporter.record_tool_execution(pending_tool)
 
         elif event.type == "tool_blocked":
             # Tool was blocked by user
-            if self._pending_tool:
-                self._pending_tool.end(success=False, error="Blocked by user")
-                await self._exporter.record_tool_execution(self._pending_tool)
-                self._pending_tool = None
+            pending_tool = self._pop_pending_tool(event.tool_call_id)
+            if pending_tool:
+                pending_tool.end(success=False, error="Blocked by user")
+                await self._exporter.record_tool_execution(pending_tool)
+
+        elif event.type == "api_call_complete":
+            if event.usage and self._current_turn:
+                input_tokens = event.usage.get("input_tokens", 0)
+                output_tokens = event.usage.get("output_tokens", 0)
+                reasoning_tokens = event.usage.get("reasoning_tokens", 0)
+
+                self._turn_input_tokens += input_tokens
+                self._turn_output_tokens += output_tokens
+                self._turn_reasoning_tokens += reasoning_tokens
+                self._context.record_tokens(input_tokens, output_tokens, reasoning_tokens)
+
+                # Latency isn't currently emitted by AgentEvent usage.
+                await self._exporter.record_model_call(
+                    self._current_turn.turn_id,
+                    input_tokens,
+                    output_tokens,
+                    latency_ms=0,
+                )
 
         elif event.type == "turn_complete":
             # Extract token usage
@@ -188,17 +212,20 @@ class ObservabilityProcessor:
                 total_output = event.usage.get("total_output_tokens", 0)
                 total_reasoning = event.usage.get("total_reasoning_tokens", 0)
 
-                # Calculate delta from session totals
-                delta_input = total_input - self._context.total_input_tokens
-                delta_output = total_output - self._context.total_output_tokens
-                delta_reasoning = total_reasoning - self._context.total_reasoning_tokens
+                # If turn_complete includes usage not captured in per-call events,
+                # add only the remainder to avoid double counting.
+                remainder_input = max(0, total_input - self._context.total_input_tokens)
+                remainder_output = max(0, total_output - self._context.total_output_tokens)
+                remainder_reasoning = max(0, total_reasoning - self._context.total_reasoning_tokens)
 
-                self._turn_input_tokens = delta_input
-                self._turn_output_tokens = delta_output
-                self._turn_reasoning_tokens = delta_reasoning
-
-                # Update session totals
-                self._context.record_tokens(delta_input, delta_output, delta_reasoning)
+                self._turn_input_tokens += remainder_input
+                self._turn_output_tokens += remainder_output
+                self._turn_reasoning_tokens += remainder_reasoning
+                self._context.record_tokens(
+                    remainder_input,
+                    remainder_output,
+                    remainder_reasoning,
+                )
 
                 # Extract context_size
                 context_size = event.usage.get("context_size", 0)
@@ -207,11 +234,40 @@ class ObservabilityProcessor:
                     self._current_turn.context_size = context_size
 
         elif event.type == "error":
-            # Record error in pending tool if any
-            if self._pending_tool:
-                self._pending_tool.end(success=False, error=event.content)
-                await self._exporter.record_tool_execution(self._pending_tool)
-                self._pending_tool = None
+            # Record error in all pending tools
+            pending_tools = self._drain_pending_tools()
+            for pending_tool in pending_tools:
+                pending_tool.end(success=False, error=event.content)
+                await self._exporter.record_tool_execution(pending_tool)
+
+    def _pop_pending_tool(self, tool_call_id: str | None) -> ToolExecutionContext | None:
+        """Pop a pending tool by call ID, falling back to FIFO order."""
+        if tool_call_id and tool_call_id in self._pending_tools:
+            tool = self._pending_tools.pop(tool_call_id)
+            if tool_call_id in self._pending_tool_order:
+                self._pending_tool_order.remove(tool_call_id)
+            return tool
+
+        while self._pending_tool_order:
+            key = self._pending_tool_order.pop(0)
+            tool = self._pending_tools.pop(key, None)
+            if tool:
+                return tool
+        return None
+
+    def _drain_pending_tools(self) -> list[ToolExecutionContext]:
+        """Drain and return all pending tools."""
+        pending: list[ToolExecutionContext] = []
+        while self._pending_tool_order:
+            key = self._pending_tool_order.pop(0)
+            tool = self._pending_tools.pop(key, None)
+            if tool:
+                pending.append(tool)
+        # Catch any keys not in order list.
+        if self._pending_tools:
+            pending.extend(self._pending_tools.values())
+            self._pending_tools = {}
+        return pending
 
 
 def create_processor(

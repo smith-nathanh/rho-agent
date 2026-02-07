@@ -4,7 +4,7 @@ Supports two modes:
 - RESTRICTED: Only allowlisted read-only commands (grep, cat, find, etc.)
 - UNRESTRICTED: Any command allowed (for sandboxed container environments)
 
-Output format matches Codex CLI's exec_command:
+Output format Codex-style JSON with stdout+stderr combined, exit code, and duration:
 {
   "output": "<stdout + stderr>",
   "metadata": {
@@ -283,7 +283,7 @@ class BashHandler(ToolHandler):
     def _format_output(
         self, output: str, exit_code: int, duration_seconds: float
     ) -> str:
-        """Format output as JSON matching Codex CLI exec_command format."""
+        """Format output as JSON"""
         return json.dumps(
             {
                 "output": output,
@@ -357,7 +357,7 @@ class BashHandler(ToolHandler):
                 process.kill()
                 await process.wait()
 
-                # Combine stdout/stderr (Codex uses aggregated_output)
+                # Combine stdout/stderr into a single output string
                 output = partial_stdout.decode("utf-8", errors="replace")
                 if partial_stderr:
                     stderr_text = partial_stderr.decode("utf-8", errors="replace")
@@ -383,7 +383,7 @@ class BashHandler(ToolHandler):
             stdout_str = stdout.decode("utf-8", errors="replace")
             stderr_str = stderr.decode("utf-8", errors="replace")
 
-            # Combine stdout/stderr into single output (Codex aggregated_output style)
+            # Combine stdout/stderr into single output
             if stdout_str and stderr_str:
                 output = f"{stdout_str}\n{stderr_str}"
             elif stdout_str:

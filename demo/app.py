@@ -179,6 +179,7 @@ def render_chat_tab() -> None:
                     await start_runtime(runtime)
 
                     async def on_event(event):
+                        nonlocal response_text, tool_calls, current_tool_placeholder
                         if event.type == "text" and event.content:
                             response_text += event.content
                             text_placeholder.markdown(response_text + "▌")

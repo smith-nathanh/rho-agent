@@ -116,7 +116,7 @@ class Session:
             for msg in recent_user_messages:
                 self.history.append({"role": "user", "content": msg})
 
-        # Add the summary as a user message (following Codex pattern)
+        # Add the summary as a user message
         self.history.append({"role": "user", "content": summary})
 
     def get_user_messages(self) -> list[str]:

@@ -90,7 +90,6 @@ class TrajectoryBuilder:
         self._total_reasoning_tokens: int = 0
         self._total_cost_usd: float = 0.0
         self._context_size: int = 0
-        self._pending_metrics: dict[str, Any] | None = None
 
     def add_user_step(self, message: str) -> None:
         """Add a user input as a step.
@@ -116,9 +115,15 @@ class TrajectoryBuilder:
         current_text = ""
         current_tool_calls: list[ToolCallEntry] = []
         pending_observations: list[ObservationEntry] = []
+        step_prompt_tokens = 0
+        step_completion_tokens = 0
+        step_cached_tokens = 0
+        step_cost_usd = 0.0
+        step_reasoning_tokens = 0
+        saw_api_call_metrics = False
 
-        # Map tool_start events to their call IDs for matching with tool_end
-        tool_call_ids: dict[str, str] = {}  # tool_name -> call_id (simplified)
+        # Map tool_start events to call IDs for matching with tool_end when IDs are absent.
+        tool_call_ids: dict[str, list[str]] = {}
 
         for event in events:
             if event.type == "text" and event.content:
@@ -126,9 +131,9 @@ class TrajectoryBuilder:
 
             elif event.type == "tool_start":
                 # Generate a call ID for this tool invocation
-                call_id = str(uuid.uuid4())[:8]
+                call_id = event.tool_call_id or str(uuid.uuid4())[:8]
                 tool_name = event.tool_name or "unknown"
-                tool_call_ids[tool_name] = call_id
+                tool_call_ids.setdefault(tool_name, []).append(call_id)
 
                 current_tool_calls.append(
                     ToolCallEntry(
@@ -140,8 +145,11 @@ class TrajectoryBuilder:
 
             elif event.type == "tool_end":
                 tool_name = event.tool_name or "unknown"
-                # Match with the most recent tool_start for this name
-                call_id = tool_call_ids.get(tool_name, str(uuid.uuid4())[:8])
+                # Prefer event call ID; otherwise match earliest queued start for this tool.
+                call_id = event.tool_call_id
+                if not call_id:
+                    queued_ids = tool_call_ids.get(tool_name, [])
+                    call_id = queued_ids.pop(0) if queued_ids else str(uuid.uuid4())[:8]
 
                 pending_observations.append(
                     ObservationEntry(
@@ -152,17 +160,14 @@ class TrajectoryBuilder:
                 )
 
             elif event.type == "api_call_complete":
-                # Capture per-call metrics for attachment to agent step
+                # Aggregate per-call metrics for attachment to the agent step.
                 if event.usage:
-                    self._pending_metrics = {
-                        "prompt_tokens": event.usage.get("input_tokens"),
-                        "completion_tokens": event.usage.get("output_tokens"),
-                        "cached_tokens": event.usage.get("cached_tokens"),
-                        "cost_usd": event.usage.get("cost_usd"),
-                    }
-                    reasoning = event.usage.get("reasoning_tokens", 0)
-                    if reasoning:
-                        self._pending_metrics["extra"] = {"reasoning_tokens": reasoning}
+                    saw_api_call_metrics = True
+                    step_prompt_tokens += event.usage.get("input_tokens", 0) or 0
+                    step_completion_tokens += event.usage.get("output_tokens", 0) or 0
+                    step_cached_tokens += event.usage.get("cached_tokens", 0) or 0
+                    step_cost_usd += event.usage.get("cost_usd", 0.0) or 0.0
+                    step_reasoning_tokens += event.usage.get("reasoning_tokens", 0) or 0
 
             elif event.type == "turn_complete":
                 # Extract metrics from turn_complete
@@ -176,15 +181,25 @@ class TrajectoryBuilder:
 
         # Create agent step(s) from accumulated content
         if current_text or current_tool_calls:
+            step_metrics: dict[str, Any] | None = None
+            if saw_api_call_metrics:
+                step_metrics = {
+                    "prompt_tokens": step_prompt_tokens,
+                    "completion_tokens": step_completion_tokens,
+                    "cached_tokens": step_cached_tokens,
+                    "cost_usd": step_cost_usd,
+                }
+                if step_reasoning_tokens:
+                    step_metrics["extra"] = {"reasoning_tokens": step_reasoning_tokens}
+
             step = Step(
                 source="agent",
                 message=current_text if current_text else None,
                 tool_calls=current_tool_calls,
                 observations=pending_observations,
-                metrics=self._pending_metrics,
+                metrics=step_metrics,
             )
             self._steps.append(step)
-            self._pending_metrics = None
 
     def to_trajectory(self) -> dict[str, Any]:
         """Export as ATIF-compliant dict.

@@ -31,7 +31,6 @@ COMPLETION_SIGNALS = [
     "is complete",
 ]
 
-# Compaction prompts (following Codex/Claude Code patterns)
 COMPACTION_SYSTEM_PROMPT = """\
 You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
 
@@ -75,6 +74,7 @@ class AgentEvent:
     type: str
     content: str | None = None
     tool_name: str | None = None
+    tool_call_id: str | None = None
     tool_args: dict[str, Any] | None = None
     tool_result: str | None = None
     tool_metadata: dict[str, Any] | None = None  # Metadata from tool output
@@ -318,6 +318,7 @@ class Agent:
                         yield AgentEvent(
                             type="tool_start",
                             tool_name=tc.name,
+                            tool_call_id=tc.id,
                             tool_args=tc.arguments,
                         )
                         # OpenAI format for tool calls
@@ -419,6 +420,7 @@ class Agent:
                         yield AgentEvent(
                             type="tool_blocked",
                             tool_name=tool_name,
+                            tool_call_id=tool_id,
                             tool_args=tool_args,
                         )
                         rejected = True
@@ -452,6 +454,7 @@ class Agent:
                 yield AgentEvent(
                     type="tool_end",
                     tool_name=tool_name,
+                    tool_call_id=tool_id,
                     tool_result=truncated_content,
                     tool_metadata=output.metadata,
                 )
