@@ -17,12 +17,9 @@ async def run_prompt(
     collected_text: list[str] = []
     collected_events = []
     usage: dict[str, int] = {}
-    started = False
 
     try:
         if runtime.observability:
-            await runtime.observability.start_session()
-            started = True
             events = runtime.observability.wrap_turn(events, prompt)
 
         async for event in events:
@@ -43,9 +40,6 @@ async def run_prompt(
     except Exception:
         status = "error"
         raise
-    finally:
-        if runtime.observability and started:
-            await runtime.observability.end_session(status)
 
     return RunResult(
         text="".join(collected_text),

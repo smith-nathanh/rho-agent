@@ -65,7 +65,13 @@ the package API in `rho_agent.runtime` instead of shelling out to CLI:
 
 ```python
 import asyncio
-from rho_agent import RuntimeOptions, create_runtime, run_prompt
+from rho_agent import (
+    RuntimeOptions,
+    close_runtime,
+    create_runtime,
+    run_prompt,
+    start_runtime,
+)
 
 
 async def main() -> None:
@@ -79,9 +85,15 @@ async def main() -> None:
             telemetry_metadata={"job_id": "job-123", "shard": "3"},
         ),
     )
-    result = await run_prompt(runtime, "Analyze recent failures and summarize root causes.")
-    print(result.text)
-    print(result.status, result.usage)
+    status = "completed"
+    await start_runtime(runtime)
+    try:
+        result = await run_prompt(runtime, "Analyze recent failures and summarize root causes.")
+        status = result.status
+        print(result.text)
+        print(result.status, result.usage)
+    finally:
+        await close_runtime(runtime, status)
 
 asyncio.run(main())
 ```

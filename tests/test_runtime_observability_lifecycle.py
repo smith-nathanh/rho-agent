@@ -9,6 +9,7 @@ from rho_agent.observability.config import ObservabilityConfig, TenantConfig
 from rho_agent.observability.context import TelemetryContext
 from rho_agent.observability.exporters.base import Exporter
 from rho_agent.observability.processor import ObservabilityProcessor
+from rho_agent.runtime.lifecycle import close_runtime, start_runtime
 from rho_agent.runtime.run import run_prompt
 from rho_agent.runtime.types import AgentRuntime
 
@@ -63,14 +64,11 @@ class DummyAgent:
         )
 
 
-@pytest.mark.asyncio
-async def test_run_prompt_reuses_observability_session_for_same_runtime() -> None:
-    exporter = CountingExporter()
+def _build_runtime(exporter: CountingExporter) -> AgentRuntime:
     config = ObservabilityConfig(enabled=True, tenant=TenantConfig("team", "project"))
     context = TelemetryContext.from_config(config, model="gpt-5-mini", profile="readonly")
     processor = ObservabilityProcessor(config, context, exporter=exporter)
-
-    runtime = AgentRuntime(
+    return AgentRuntime(
         agent=DummyAgent(),  # type: ignore[arg-type]
         session=object(),  # type: ignore[arg-type]
         registry=object(),  # type: ignore[arg-type]
@@ -80,10 +78,34 @@ async def test_run_prompt_reuses_observability_session_for_same_runtime() -> Non
         observability=processor,
     )
 
+
+@pytest.mark.asyncio
+async def test_run_prompt_does_not_manage_runtime_session_lifecycle() -> None:
+    exporter = CountingExporter()
+    runtime = _build_runtime(exporter)
+
     first = await run_prompt(runtime, "first")
     second = await run_prompt(runtime, "second")
 
     assert first.status == "completed"
     assert second.status == "completed"
+    assert exporter.start_session_calls == 0
+    assert exporter.end_session_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_start_and_close_runtime_are_idempotent() -> None:
+    exporter = CountingExporter()
+    runtime = _build_runtime(exporter)
+
+    await start_runtime(runtime)
+    await start_runtime(runtime)
+
+    await run_prompt(runtime, "first")
+    await run_prompt(runtime, "second")
+
+    await close_runtime(runtime, "completed")
+    await close_runtime(runtime, "completed")
+
     assert exporter.start_session_calls == 1
-    assert exporter.end_session_calls == 2
+    assert exporter.end_session_calls == 1

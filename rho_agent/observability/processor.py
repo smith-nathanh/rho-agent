@@ -57,6 +57,7 @@ class ObservabilityProcessor:
 
         # Session lifecycle state for idempotent runtime reuse.
         self._session_started = False
+        self._session_ended = False
 
     @property
     def context(self) -> TelemetryContext:
@@ -75,6 +76,8 @@ class ObservabilityProcessor:
         """
         if self._session_started:
             return
+        if self._session_ended:
+            return
         await self._exporter.start_session(self._context)
         self._session_started = True
 
@@ -86,8 +89,11 @@ class ObservabilityProcessor:
         """
         if not self._session_started:
             return
+        if self._session_ended:
+            return
         self._context.end_session(status)
         await self._exporter.end_session(self._context)
+        self._session_ended = True
 
     async def wrap_turn(
         self,

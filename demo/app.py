@@ -23,6 +23,7 @@ Environment:
 """
 
 import asyncio
+import os
 import sqlite3
 from pathlib import Path
 
@@ -34,14 +35,12 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 import pandas as pd
 import streamlit as st
 
-from rho_agent.client.model import ModelClient
-from rho_agent.core.agent import Agent, AgentEvent
-from rho_agent.core.session import Session
-from rho_agent.tools.handlers.sqlite import SqliteHandler
-from rho_agent.tools.registry import ToolRegistry
+from rho_agent.runtime import RuntimeOptions, close_runtime, create_runtime, run_prompt, start_runtime
+from rho_agent.runtime.types import AgentRuntime
 
 # Config
 DB_PATH = Path(__file__).parent / "sample_data.db"
+DB_CONFIG_PATH = Path(__file__).parent / ".demo-databases.yaml"
 SYSTEM_PROMPT = """\
 You are a helpful database assistant. You help users explore and understand the SQLite database.
 
@@ -63,6 +62,34 @@ def init_session_state() -> None:
         st.session_state.query_history = []
     if "pending_prompt" not in st.session_state:
         st.session_state.pending_prompt = None
+    if "runtime" not in st.session_state:
+        st.session_state.runtime = None
+
+
+def ensure_demo_db_config() -> None:
+    """Ensure runtime database config points sqlite tool at the demo DB."""
+    config_yaml = f"""databases:
+  demo:
+    type: sqlite
+    path: "{DB_PATH}"
+"""
+    DB_CONFIG_PATH.write_text(config_yaml, encoding="utf-8")
+    os.environ["RHO_AGENT_DB_CONFIG"] = str(DB_CONFIG_PATH)
+
+
+def get_runtime() -> AgentRuntime:
+    """Get or create the session runtime."""
+    runtime = st.session_state.runtime
+    if runtime is None:
+        runtime = create_runtime(
+            SYSTEM_PROMPT,
+            options=RuntimeOptions(
+                profile="readonly",
+                working_dir=str(Path(__file__).parent),
+            ),
+        )
+        st.session_state.runtime = runtime
+    return runtime
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -79,35 +106,6 @@ def execute_user_query(sql: str) -> tuple[pd.DataFrame | None, str | None]:
         return df, None
     except Exception as e:
         return None, str(e)
-
-
-async def run_agent_turn(user_input: str) -> list[AgentEvent]:
-    """Run one agent turn and collect events."""
-    # Create fresh session for each conversation (or restore from state)
-    session = Session(system_prompt=SYSTEM_PROMPT)
-
-    # Restore conversation history
-    for msg in st.session_state.messages:
-        if msg["role"] == "user":
-            session.add_user_message(msg["content"])
-        elif msg["role"] == "assistant":
-            session.add_assistant_message(msg["content"])
-
-    # Set up registry with SQLite handler
-    registry = ToolRegistry()
-    handler = SqliteHandler(db_path=str(DB_PATH), readonly=True)
-    registry.register(handler)
-
-    # Create agent
-    client = ModelClient()
-    agent = Agent(session=session, registry=registry, client=client)
-
-    # Collect events
-    events: list[AgentEvent] = []
-    async for event in agent.run_turn(user_input):
-        events.append(event)
-
-    return events
 
 
 def render_chat_tab() -> None:
@@ -177,22 +175,10 @@ def render_chat_tab() -> None:
 
                 async def stream_events():
                     nonlocal response_text, tool_calls, current_tool_placeholder
+                    runtime = get_runtime()
+                    await start_runtime(runtime)
 
-                    session = Session(system_prompt=SYSTEM_PROMPT)
-                    for msg in st.session_state.messages[:-1]:  # Exclude the pending user message we just added
-                        if msg["role"] == "user":
-                            session.add_user_message(msg["content"])
-                        elif msg["role"] == "assistant":
-                            session.add_assistant_message(msg["content"])
-
-                    registry = ToolRegistry()
-                    handler = SqliteHandler(db_path=str(DB_PATH), readonly=True)
-                    registry.register(handler)
-
-                    client = ModelClient()
-                    agent = Agent(session=session, registry=registry, client=client)
-
-                    async for event in agent.run_turn(pending_prompt):
+                    async def on_event(event):
                         if event.type == "text" and event.content:
                             response_text += event.content
                             text_placeholder.markdown(response_text + "▌")
@@ -217,7 +203,8 @@ def render_chat_tab() -> None:
                                 current_tool_placeholder.markdown(f"`{sig}`")
                                 current_tool_placeholder = None
 
-                    # Clear the cursor
+                    await run_prompt(runtime, pending_prompt, on_event=on_event)
+
                     if response_text:
                         text_placeholder.markdown(response_text)
                     status_placeholder.empty()
@@ -363,6 +350,7 @@ def main() -> None:
         st.info("Run `python demo/seed_database.py` to create the sample database.")
         return
 
+    ensure_demo_db_config()
     init_session_state()
 
     st.title("rho-agent SQL Demo")
@@ -393,6 +381,10 @@ def main() -> None:
         """)
 
         if st.button("Clear Conversation"):
+            runtime = st.session_state.get("runtime")
+            if runtime is not None:
+                asyncio.run(close_runtime(runtime, "completed"))
+                st.session_state.runtime = None
             st.session_state.messages = []
             st.rerun()
 

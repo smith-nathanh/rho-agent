@@ -8,9 +8,11 @@ from .runtime import (
     CancellationToken,
     RunResult,
     RuntimeOptions,
+    close_runtime,
     create_runtime,
     dispatch_prompt,
     run_prompt,
+    start_runtime,
 )
 
 __all__ = [
@@ -21,6 +23,8 @@ __all__ = [
     "RunResult",
     "CancellationToken",
     "create_runtime",
+    "start_runtime",
+    "close_runtime",
     "run_prompt",
     "dispatch_prompt",
 ]

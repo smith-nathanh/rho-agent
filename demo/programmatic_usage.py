@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Example: first-class programmatic usage via rho_agent.runtime.
+"""Example: programmatic usage via rho_agent.runtime.
 
 Example:
     uv run python demo/programmatic_usage.py ~/some/project "Summarize the error handling"
@@ -13,8 +13,10 @@ from dotenv import load_dotenv
 
 from rho_agent.runtime import (
     RuntimeOptions,
+    close_runtime,
     create_runtime,
     run_prompt,
+    start_runtime,
 )
 
 
@@ -44,7 +46,16 @@ async def run_agent_with_tools(
     runtime = create_runtime(system_prompt, options=options)
     tool_calls = []
 
-    result = await run_prompt(runtime, task)
+    status = "completed"
+    await start_runtime(runtime)
+    try:
+        result = await run_prompt(runtime, task)
+        status = result.status
+    except Exception:
+        status = "error"
+        raise
+    finally:
+        await close_runtime(runtime, status)
     for event in result.events:
         if event.type == "text" and event.content:
             print(event.content, end="", flush=True)

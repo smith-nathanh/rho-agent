@@ -34,24 +34,29 @@ from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 
-from .client.model import ModelClient
-from .core.agent import Agent, AgentEvent
-from .core.conversations import ConversationStore
-from .core.session import Session
-from .prompts import load_prompt, parse_vars, prepare_prompt
 from .capabilities import CapabilityProfile, ShellMode
-from .capabilities.factory import ToolFactory, load_profile
-from .tools.registry import ToolRegistry
-from .ui.theme import THEME
+from .capabilities.factory import load_profile
 from .cli_errors import (
-    MissingApiKeyError,
-    InvalidProfileError,
     InvalidModeError,
+    InvalidProfileError,
+    MissingApiKeyError,
     PromptLoadError,
 )
-from .observability.config import ObservabilityConfig, DEFAULT_TELEMETRY_DB
-from .observability.processor import ObservabilityProcessor
+from .core.agent import AgentEvent
+from .core.conversations import ConversationStore
+from .core.session import Session
+from .observability.config import DEFAULT_TELEMETRY_DB
+from .prompts import load_prompt, parse_vars, prepare_prompt
+from .runtime import (
+    ObservabilityInitializationError,
+    RuntimeOptions,
+    close_runtime,
+    create_runtime,
+    start_runtime,
+)
+from .runtime.types import AgentRuntime
 from .signals import AgentInfo, SignalManager
+from .ui.theme import THEME
 
 # Config directory for rho-agent data
 CONFIG_DIR = Path.home() / ".config" / "rho-agent"
@@ -93,6 +98,47 @@ def _markup(text: str, color: str) -> str:
 
 def _is_interactive_terminal() -> bool:
     return console.is_terminal and sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _format_observability_init_error(exc: ObservabilityInitializationError) -> str:
+    cause = exc.__cause__
+    if isinstance(cause, FileNotFoundError):
+        return (
+            f"Observability initialization failed: {cause}. "
+            "Fix --observability-config to point to an existing YAML file and retry."
+        )
+
+    if isinstance(cause, yaml.YAMLError):
+        config_location = exc.config_path or "the observability config file"
+        return (
+            f"Observability initialization failed: invalid YAML in {config_location}: "
+            f"{cause}. Fix the YAML syntax and retry."
+        )
+
+    if isinstance(cause, ValueError) and "tenant" in str(cause).lower():
+        return (
+            "Observability initialization failed: missing tenant information. "
+            "Set both --team-id and --project-id, or define "
+            "observability.tenant.team_id and observability.tenant.project_id in "
+            "the observability config."
+        )
+
+    guidance = []
+    if exc.config_path:
+        guidance.append("verify --observability-config points to a valid YAML file")
+    if exc.team_id and not exc.project_id:
+        guidance.append("provide --project-id")
+    if exc.project_id and not exc.team_id:
+        guidance.append("provide --team-id")
+    if not guidance:
+        guidance.append(
+            "set both --team-id and --project-id when observability is enabled"
+        )
+
+    return (
+        f"Observability initialization failed: {cause or exc}. "
+        f"To fix: {'; '.join(guidance)}."
+    )
 
 
 def _get_version() -> str:
@@ -228,26 +274,6 @@ def create_completer(working_dir: str | None = None) -> Completer:
     command_completer = WordCompleter(COMMANDS, ignore_case=True)
     path_completer = InlinePathCompleter(working_dir=working_dir)
     return merge_completers([command_completer, path_completer])
-
-
-def create_registry(
-    working_dir: str | None = None,
-    profile: CapabilityProfile | None = None,
-) -> ToolRegistry:
-    """Create and configure the tool registry.
-
-    Args:
-        working_dir: Working directory for shell commands.
-        profile: Capability profile to use. Defaults to readonly profile.
-
-    Returns:
-        Configured tool registry.
-    """
-    if profile is None:
-        profile = CapabilityProfile.readonly()
-
-    factory = ToolFactory(profile)
-    return factory.create_registry(working_dir=working_dir)
 
 
 class ApprovalHandler:
@@ -540,17 +566,13 @@ def handle_command(
 
 
 async def run_interactive(
-    agent: Agent,
+    runtime: AgentRuntime,
     approval_handler: ApprovalHandler,
-    session: Session,
-    model: str,
     mode_name: str,
-    registry: ToolRegistry,
     working_dir: str,
     conversation_store: ConversationStore,
     session_started: datetime,
     conversation_id: str | None = None,
-    observability: ObservabilityProcessor | None = None,
     signal_manager: SignalManager | None = None,
     session_id: str | None = None,
 ) -> None:
@@ -559,12 +581,11 @@ async def run_interactive(
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     # Start observability session if enabled
-    if observability:
-        await observability.start_session()
+    await start_runtime(runtime)
 
     token_status = TokenStatus(
-        input_tokens=session.total_input_tokens,
-        output_tokens=session.total_output_tokens,
+        input_tokens=runtime.session.total_input_tokens,
+        output_tokens=runtime.session.total_output_tokens,
     )
     interactive_tty = _is_interactive_terminal()
 
@@ -592,7 +613,7 @@ async def run_interactive(
     # Welcome message
     obs_status = (
         _markup("telemetry enabled", THEME.success)
-        if observability
+        if runtime.observability
         else _markup("telemetry off", THEME.muted)
     )
     version = _get_version()
@@ -600,7 +621,7 @@ async def run_interactive(
         Panel(
             f"[bold]{_markup('ρ rho-agent', THEME.primary)}[/bold] v{version}\n"
             f"Mode: {_markup(mode_name, THEME.accent)}\n"
-            f"Model: {_markup(model, THEME.accent)} {obs_status}\n"
+            f"Model: {_markup(runtime.model, THEME.accent)} {obs_status}\n"
             "Enter to send, Esc+Enter for newline, Ctrl+C to cancel.\n"
             "Type [bold]/help[/bold] for commands, [bold]exit[/bold] to quit.",
             border_style=THEME.border,
@@ -620,7 +641,7 @@ async def run_interactive(
             return
 
         parts = cmd.split()
-        has_write = "write" in registry
+        has_write = "write" in runtime.registry
 
         if len(parts) == 1:
             if has_write:
@@ -658,7 +679,7 @@ async def run_interactive(
                 return
             from .tools.handlers.write import WriteHandler
 
-            registry.register(WriteHandler(create_only=True, requires_approval=True))
+            runtime.registry.register(WriteHandler(create_only=True, requires_approval=True))
             console.print(
                 _markup(
                     "File write enabled for this session (create-only, approval required).",
@@ -671,7 +692,7 @@ async def run_interactive(
             if not has_write:
                 console.print(_markup("File write is already OFF.", THEME.muted))
                 return
-            registry.unregister("write")
+            runtime.registry.unregister("write")
             console.print(_markup("File write disabled for this session.", THEME.warning))
             return
 
@@ -773,10 +794,10 @@ async def run_interactive(
             )
             return
 
-        session.system_prompt = resumed.system_prompt
-        session.history = resumed.history.copy()
-        session.total_input_tokens = resumed.input_tokens
-        session.total_output_tokens = resumed.output_tokens
+        runtime.session.system_prompt = resumed.system_prompt
+        runtime.session.history = resumed.history.copy()
+        runtime.session.total_input_tokens = resumed.input_tokens
+        runtime.session.total_output_tokens = resumed.output_tokens
         token_status.context_size = 0
         token_status.total_input_tokens = resumed.input_tokens
         token_status.total_output_tokens = resumed.output_tokens
@@ -829,7 +850,7 @@ async def run_interactive(
                     if ":" in action:
                         instructions = action.split(":", 1)[1]
                     handle_event(AgentEvent(type="compact_start", content="manual"))
-                    result = await agent.compact(
+                    result = await runtime.agent.compact(
                         custom_instructions=instructions, trigger="manual"
                     )
                     handle_event(
@@ -845,7 +866,7 @@ async def run_interactive(
 
             def on_cancel():
                 console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
-                agent.request_cancel()
+                runtime.agent.request_cancel()
 
             # Register signal handler for this turn (Unix only)
             if platform.system() != "Windows":
@@ -853,9 +874,9 @@ async def run_interactive(
 
             try:
                 # Wrap event stream with observability if enabled
-                events = agent.run_turn(user_input)
-                if observability:
-                    events = observability.wrap_turn(events, user_input)
+                events = runtime.agent.run_turn(user_input)
+                if runtime.observability:
+                    events = runtime.observability.wrap_turn(events, user_input)
 
                 status_ctx = None
                 start = monotonic()
@@ -883,8 +904,8 @@ async def run_interactive(
                         # Check if this was an external kill signal
                         if signal_manager and session_id and signal_manager.is_cancelled(session_id):
                             session_status = "cancelled"
-                            if observability:
-                                observability.context.metadata["cancel_source"] = "kill_command"
+                            if runtime.observability:
+                                runtime.observability.context.metadata["cancel_source"] = "kill_command"
                             console.print(_markup("Killed by rho-agent kill", THEME.warning))
                         else:
                             console.print(_markup("Turn cancelled", THEME.muted))
@@ -905,17 +926,16 @@ async def run_interactive(
         raise
     finally:
         # End observability session
-        if observability:
-            await observability.end_session(session_status)
+        await close_runtime(runtime, session_status)
 
         # Save conversation on exit (only if there's history)
-        if session.history:
+        if runtime.session.history:
             saved_path = conversation_store.save(
-                model=model,
-                system_prompt=session.system_prompt,
-                history=session.history,
-                input_tokens=session.total_input_tokens,
-                output_tokens=session.total_output_tokens,
+                model=runtime.model,
+                system_prompt=runtime.session.system_prompt,
+                history=runtime.session.history,
+                input_tokens=runtime.session.total_input_tokens,
+                output_tokens=runtime.session.total_output_tokens,
                 started=session_started,
                 conversation_id=conversation_id,
             )
@@ -925,23 +945,21 @@ async def run_interactive(
 
 
 async def run_single(
-    agent: Agent,
+    runtime: AgentRuntime,
     prompt: str,
-    observability: ObservabilityProcessor | None = None,
     signal_manager: SignalManager | None = None,
     session_id: str | None = None,
 ) -> None:
     """Run a single prompt and exit."""
     # Start observability session if enabled
-    if observability:
-        await observability.start_session()
+    await start_runtime(runtime)
 
     loop = asyncio.get_event_loop()
     interactive_tty = _is_interactive_terminal()
 
     def on_cancel():
         console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
-        agent.request_cancel()
+        runtime.agent.request_cancel()
 
     if platform.system() != "Windows":
         loop.add_signal_handler(signal.SIGINT, on_cancel)
@@ -949,9 +967,9 @@ async def run_single(
     session_status = "completed"
     try:
         # Wrap event stream with observability if enabled
-        events = agent.run_turn(prompt)
-        if observability:
-            events = observability.wrap_turn(events, prompt)
+        events = runtime.agent.run_turn(prompt)
+        if runtime.observability:
+            events = runtime.observability.wrap_turn(events, prompt)
 
         status_ctx = None
         start = monotonic()
@@ -976,8 +994,8 @@ async def run_single(
             if event.type == "cancelled":
                 if signal_manager and session_id and signal_manager.is_cancelled(session_id):
                     session_status = "cancelled"
-                    if observability:
-                        observability.context.metadata["cancel_source"] = "kill_command"
+                    if runtime.observability:
+                        runtime.observability.context.metadata["cancel_source"] = "kill_command"
                     console.print(_markup("Killed by rho-agent kill", THEME.warning))
                 else:
                     console.print(_markup("Cancelled", THEME.muted))
@@ -991,15 +1009,13 @@ async def run_single(
     finally:
         if platform.system() != "Windows":
             loop.remove_signal_handler(signal.SIGINT)
-        if observability:
-            await observability.end_session(session_status)
+        await close_runtime(runtime, session_status)
 
 
 async def run_single_with_output(
-    agent: Agent,
+    runtime: AgentRuntime,
     prompt: str,
     output_path: str,
-    observability: ObservabilityProcessor | None = None,
     signal_manager: SignalManager | None = None,
     session_id: str | None = None,
 ) -> bool:
@@ -1021,8 +1037,7 @@ async def run_single_with_output(
         return False
 
     # Start observability session if enabled
-    if observability:
-        await observability.start_session()
+    await start_runtime(runtime)
 
     collected_text: list[str] = []
     cancelled = False
@@ -1032,7 +1047,7 @@ async def run_single_with_output(
 
     def on_cancel():
         console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
-        agent.request_cancel()
+        runtime.agent.request_cancel()
 
     if platform.system() != "Windows":
         loop.add_signal_handler(signal.SIGINT, on_cancel)
@@ -1040,9 +1055,9 @@ async def run_single_with_output(
     session_status = "completed"
     try:
         # Wrap event stream with observability if enabled
-        events = agent.run_turn(prompt)
-        if observability:
-            events = observability.wrap_turn(events, prompt)
+        events = runtime.agent.run_turn(prompt)
+        if runtime.observability:
+            events = runtime.observability.wrap_turn(events, prompt)
 
         status_ctx = None
         start = monotonic()
@@ -1067,8 +1082,8 @@ async def run_single_with_output(
             if event.type == "cancelled":
                 if signal_manager and session_id and signal_manager.is_cancelled(session_id):
                     session_status = "cancelled"
-                    if observability:
-                        observability.context.metadata["cancel_source"] = "kill_command"
+                    if runtime.observability:
+                        runtime.observability.context.metadata["cancel_source"] = "kill_command"
                     console.print(_markup("Killed by rho-agent kill", THEME.warning))
                 else:
                     console.print(_markup("Cancelled", THEME.muted))
@@ -1086,8 +1101,7 @@ async def run_single_with_output(
     finally:
         if platform.system() != "Windows":
             loop.remove_signal_handler(signal.SIGINT)
-        if observability:
-            await observability.end_session(session_status)
+        await close_runtime(runtime, session_status)
 
     if cancelled:
         return False
@@ -1427,48 +1441,32 @@ def main(
         console.print(_markup(str(MissingApiKeyError()), THEME.error))
         raise typer.Exit(1)
 
-
-    registry = create_registry(working_dir=resolved_working_dir, profile=capability_profile)
-    client = ModelClient(model=effective_model, base_url=base_url, reasoning_effort=reasoning_effort)
     approval_handler = ApprovalHandler(auto_approve=auto_approve)
-
-    agent = Agent(
-        session=session,
-        registry=registry,
-        client=client,
-        approval_callback=approval_handler.check_approval,
-        cancel_check=lambda: signal_manager.is_cancelled(session_id),
-    )
-
-    # Create observability processor if team_id and project_id provided
-    observability_processor: ObservabilityProcessor | None = None
-    if team_id and project_id:
-        try:
-            obs_config = ObservabilityConfig.load(
-                config_path=observability_config,
+    try:
+        runtime = create_runtime(
+            session.system_prompt,
+            options=RuntimeOptions(
+                model=effective_model,
+                base_url=base_url,
+                reasoning_effort=reasoning_effort,
+                working_dir=resolved_working_dir,
+                profile=capability_profile,
+                auto_approve=auto_approve,
                 team_id=team_id,
                 project_id=project_id,
-            )
-            if obs_config.enabled and obs_config.tenant:
-                from .observability.context import TelemetryContext
-                context = TelemetryContext.from_config(
-                    obs_config,
-                    model=effective_model,
-                    profile=capability_profile.name if hasattr(capability_profile, 'name') else str(capability_profile.shell.value),
-                )
-                # Use same session ID as signal manager for consistency
-                context.session_id = session_id
-                observability_processor = ObservabilityProcessor(obs_config, context)
-                console.print(
-                    f"[dim]Telemetry: {obs_config.tenant.team_id}/{obs_config.tenant.project_id}[/dim]"
-                )
-        except Exception as e:
-            console.print(
-                _markup(
-                    f"Warning: Failed to initialize observability: {e}",
-                    THEME.warning,
-                )
-            )
+                observability_config=observability_config,
+                session_id=session_id,
+            ),
+            session=session,
+            approval_callback=approval_handler.check_approval,
+            cancel_check=lambda: signal_manager.is_cancelled(session_id),
+        )
+    except ObservabilityInitializationError as exc:
+        console.print(_markup(_format_observability_init_error(exc), THEME.error))
+        raise typer.Exit(1) from exc
+    if runtime.observability and runtime.observability.context:
+        context = runtime.observability.context
+        console.print(f"[dim]Telemetry: {context.team_id}/{context.project_id}[/dim]")
 
     # Determine the prompt to run
     # Prompt precedence:
@@ -1490,7 +1488,7 @@ def main(
     agent_info = AgentInfo(
         session_id=session_id,
         pid=os.getpid(),
-        model=effective_model,
+        model=runtime.model,
         instruction_preview=(run_prompt or "interactive session")[:100],
         started_at=datetime.now(timezone.utc).isoformat(),
     )
@@ -1503,28 +1501,24 @@ def main(
             if output:
                 # Capture output to file
                 asyncio.run(run_single_with_output(
-                    agent, run_prompt, output, observability_processor,
+                    runtime, run_prompt, output,
                     signal_manager=signal_manager, session_id=session_id,
                 ))
             else:
                 asyncio.run(run_single(
-                    agent, run_prompt, observability_processor,
+                    runtime, run_prompt,
                     signal_manager=signal_manager, session_id=session_id,
                 ))
         else:
             asyncio.run(
                 run_interactive(
-                    agent,
+                    runtime,
                     approval_handler,
-                    session,
-                    effective_model,
                     mode_name,
-                    registry,
                     resolved_working_dir,
                     conversation_store,
                     session_started,
                     conversation_id,
-                    observability_processor,
                     signal_manager=signal_manager,
                     session_id=session_id,
                 )

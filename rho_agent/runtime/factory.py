@@ -16,6 +16,23 @@ from .options import RuntimeOptions
 from .types import AgentRuntime, ApprovalCallback
 
 
+class ObservabilityInitializationError(RuntimeError):
+    """Raised when observability cannot be initialized."""
+
+    def __init__(
+        self,
+        details: str,
+        *,
+        config_path: str | None,
+        team_id: str | None,
+        project_id: str | None,
+    ) -> None:
+        super().__init__(details)
+        self.config_path = config_path
+        self.team_id = team_id
+        self.project_id = project_id
+
+
 async def _auto_approve(_: str, __: dict[str, object]) -> bool:
     return True
 
@@ -40,20 +57,28 @@ def _build_observability(
     profile_name: str,
     session_id: str,
 ) -> ObservabilityProcessor | None:
-    config = ObservabilityConfig.load(
-        config_path=options.observability_config,
-        team_id=options.team_id,
-        project_id=options.project_id,
-    )
-    if not config.enabled or not config.tenant:
-        return None
+    try:
+        config = ObservabilityConfig.load(
+            config_path=options.observability_config,
+            team_id=options.team_id,
+            project_id=options.project_id,
+        )
+        if not config.enabled or not config.tenant:
+            return None
 
-    from ..observability.context import TelemetryContext
+        from ..observability.context import TelemetryContext
 
-    context = TelemetryContext.from_config(config, model=model, profile=profile_name)
-    context.session_id = session_id
-    context.metadata.update(options.telemetry_metadata)
-    return ObservabilityProcessor(config, context)
+        context = TelemetryContext.from_config(config, model=model, profile=profile_name)
+        context.session_id = session_id
+        context.metadata.update(options.telemetry_metadata)
+        return ObservabilityProcessor(config, context)
+    except Exception as exc:
+        raise ObservabilityInitializationError(
+            str(exc),
+            config_path=options.observability_config,
+            team_id=options.team_id,
+            project_id=options.project_id,
+        ) from exc
 
 
 def create_runtime(
