@@ -90,9 +90,7 @@ class ListHandler(ToolHandler):
         entries = []
         item_count = 0
 
-        for entry in sorted(
-            path.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())
-        ):
+        for entry in sorted(path.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())):
             if not show_hidden and entry.name.startswith("."):
                 continue
 
@@ -101,9 +99,7 @@ class ListHandler(ToolHandler):
             try:
                 stat_info = entry.stat()
                 size = stat_info.st_size
-                mtime = datetime.fromtimestamp(stat_info.st_mtime).strftime(
-                    "%Y-%m-%d %H:%M"
-                )
+                mtime = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M")
                 mode = stat.filemode(stat_info.st_mode)
 
                 if entry.is_dir():
@@ -148,9 +144,7 @@ class ListHandler(ToolHandler):
         item_count = 0
 
         try:
-            entries = sorted(
-                path.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())
-            )
+            entries = sorted(path.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
         except PermissionError:
             return f"{prefix}[permission denied]\n", 0
 
@@ -175,9 +169,7 @@ class ListHandler(ToolHandler):
                     if subtree:
                         lines.append(subtree.rstrip("\n"))
             else:
-                size_str = (
-                    self._format_size(entry.stat().st_size) if entry.exists() else "?"
-                )
+                size_str = self._format_size(entry.stat().st_size) if entry.exists() else "?"
                 lines.append(f"{prefix}{connector}{entry.name} ({size_str})")
 
             if len(lines) >= DEFAULT_MAX_ENTRIES:

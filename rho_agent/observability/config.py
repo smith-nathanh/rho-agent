@@ -90,9 +90,7 @@ class ObservabilityConfig:
                 sqlite_data = backend_data["sqlite"]
                 path = sqlite_data.get("path", str(DEFAULT_TELEMETRY_DB))
                 # Expand ~ in path
-                backend.sqlite = SqliteBackendConfig(
-                    path=str(Path(path).expanduser())
-                )
+                backend.sqlite = SqliteBackendConfig(path=str(Path(path).expanduser()))
 
             if "otlp" in backend_data:
                 otlp_data = backend_data["otlp"]
@@ -195,9 +193,7 @@ class ObservabilityConfig:
             # Override tenant if provided via CLI
             if team_id or project_id:
                 resolved_team_id = team_id or os.getenv("RHO_AGENT_TEAM_ID", "")
-                resolved_project_id = project_id or os.getenv(
-                    "RHO_AGENT_PROJECT_ID", ""
-                )
+                resolved_project_id = project_id or os.getenv("RHO_AGENT_PROJECT_ID", "")
                 if resolved_team_id and resolved_project_id:
                     config.tenant = TenantConfig(
                         team_id=resolved_team_id,

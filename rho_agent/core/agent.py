@@ -222,9 +222,7 @@ class Agent:
                 if msg.get("tool_calls"):
                     for tc in msg["tool_calls"]:
                         func = tc.get("function", {})
-                        parts.append(
-                            f"Assistant called tool: {func.get('name', 'unknown')}"
-                        )
+                        parts.append(f"Assistant called tool: {func.get('name', 'unknown')}")
             elif role == "tool":
                 # Summarize tool results briefly
                 result = content or ""
@@ -297,9 +295,7 @@ class Agent:
             # Track what we get in this turn
             text_content = ""
             tool_calls: list[dict[str, Any]] = []
-            pending_tool_calls: list[
-                tuple[str, str, dict[str, Any]]
-            ] = []  # (id, name, args)
+            pending_tool_calls: list[tuple[str, str, dict[str, Any]]] = []  # (id, name, args)
 
             # Stream response
             async for event in self._client.stream(prompt):
@@ -405,9 +401,7 @@ class Agent:
                     return
 
                 # Check approval if callback is set and tool requires it
-                if self._approval_callback and self._registry.requires_approval(
-                    tool_name
-                ):
+                if self._approval_callback and self._registry.requires_approval(tool_name):
                     approved = await self._approval_callback(tool_name, tool_args)
                     if not approved:
                         # Must add result to keep API happy, then end turn
@@ -426,8 +420,7 @@ class Agent:
                         rejected = True
                         # Add dummy results for remaining tool calls
                         for remaining_id, _, _ in pending_tool_calls[
-                            pending_tool_calls.index((tool_id, tool_name, tool_args))
-                            + 1 :
+                            pending_tool_calls.index((tool_id, tool_name, tool_args)) + 1 :
                         ]:
                             tool_results.append(
                                 ToolResult(

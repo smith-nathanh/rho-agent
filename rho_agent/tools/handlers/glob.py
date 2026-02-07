@@ -82,13 +82,20 @@ class GlobHandler(ToolHandler):
         cmd.extend(["--glob", glob_pattern])
 
         # Skip common non-content directories
-        cmd.extend([
-            "--glob", "!.git/",
-            "--glob", "!node_modules/",
-            "--glob", "!__pycache__/",
-            "--glob", "!.venv/",
-            "--glob", "!venv/",
-        ])
+        cmd.extend(
+            [
+                "--glob",
+                "!.git/",
+                "--glob",
+                "!node_modules/",
+                "--glob",
+                "!__pycache__/",
+                "--glob",
+                "!.venv/",
+                "--glob",
+                "!venv/",
+            ]
+        )
 
         # Search path
         cmd.append(str(path))

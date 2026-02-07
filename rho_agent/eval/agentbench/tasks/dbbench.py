@@ -45,9 +45,7 @@ class DBBenchTask(BaseTask):
         column_types = [col["type"] for col in self.table_info.columns]
 
         # Format column info
-        col_info = ", ".join(
-            f"{name} ({dtype})" for name, dtype in zip(column_names, column_types)
-        )
+        col_info = ", ".join(f"{name} ({dtype})" for name, dtype in zip(column_names, column_types))
 
         # Sample rows (first 3)
         sample_rows = self.table_info.rows[:3]

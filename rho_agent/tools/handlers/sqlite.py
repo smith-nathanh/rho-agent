@@ -45,7 +45,6 @@ class SqliteHandler(DatabaseHandler):
     def db_type(self) -> str:
         return "sqlite"
 
-
     def _get_connection(self, alias: str) -> sqlite3.Connection:
         """Get or create connection for the specified database alias."""
         # Check if existing connection is still valid
@@ -110,9 +109,7 @@ class SqliteHandler(DatabaseHandler):
             {},
         )
 
-    def _get_describe_sql(
-        self, table_name: str, schema: str | None
-    ) -> tuple[str, dict[str, Any]]:
+    def _get_describe_sql(self, table_name: str, schema: str | None) -> tuple[str, dict[str, Any]]:
         # SQLite's PRAGMA doesn't support parameterized table names,
         # so we quote the identifier for safety
         safe_name = _quote_pragma_arg(table_name)
@@ -136,9 +133,7 @@ class SqliteHandler(DatabaseHandler):
         safe_name = _quote_pragma_arg(table_name)
 
         # Primary key columns
-        cursor.execute(
-            f"SELECT name FROM pragma_table_info({safe_name}) WHERE pk > 0 ORDER BY pk"
-        )
+        cursor.execute(f"SELECT name FROM pragma_table_info({safe_name}) WHERE pk > 0 ORDER BY pk")
         pk_cols = [row[0] for row in cursor.fetchall()]
         if pk_cols:
             extra["primary_key"] = pk_cols

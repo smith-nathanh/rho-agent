@@ -100,7 +100,9 @@ def render_session_detail(detail: SessionDetail) -> None:
     with col2:
         st.metric("Model", detail.model)
     with col3:
-        st.metric("Total Tokens", format_tokens(detail.total_input_tokens + detail.total_output_tokens))
+        st.metric(
+            "Total Tokens", format_tokens(detail.total_input_tokens + detail.total_output_tokens)
+        )
     with col4:
         st.metric("Tool Calls", detail.total_tool_calls)
 
@@ -108,16 +110,18 @@ def render_session_detail(detail: SessionDetail) -> None:
 
     # Session info
     with st.expander("Session Information", expanded=False):
-        st.json({
-            "session_id": detail.session_id,
-            "team_id": detail.team_id,
-            "project_id": detail.project_id,
-            "environment": detail.environment,
-            "profile": detail.profile,
-            "started_at": detail.started_at.isoformat(),
-            "ended_at": detail.ended_at.isoformat() if detail.ended_at else None,
-            "duration": format_duration(detail.started_at, detail.ended_at),
-        })
+        st.json(
+            {
+                "session_id": detail.session_id,
+                "team_id": detail.team_id,
+                "project_id": detail.project_id,
+                "environment": detail.environment,
+                "profile": detail.profile,
+                "started_at": detail.started_at.isoformat(),
+                "ended_at": detail.ended_at.isoformat() if detail.ended_at else None,
+                "duration": format_duration(detail.started_at, detail.ended_at),
+            }
+        )
 
     # Turn timeline
     st.subheader("Turn Timeline")
@@ -125,8 +129,12 @@ def render_session_detail(detail: SessionDetail) -> None:
     for turn in detail.turns:
         with st.container():
             turn_header = f"**Turn {turn['turn_index']}**"
-            if turn['user_input']:
-                preview = turn['user_input'][:100] + "..." if len(turn['user_input']) > 100 else turn['user_input']
+            if turn["user_input"]:
+                preview = (
+                    turn["user_input"][:100] + "..."
+                    if len(turn["user_input"]) > 100
+                    else turn["user_input"]
+                )
                 turn_header += f" - {preview}"
 
             st.markdown(turn_header)
@@ -141,22 +149,28 @@ def render_session_detail(detail: SessionDetail) -> None:
                 st.caption(f"Tools: {len(turn['tool_executions'])}")
 
             # Tool executions
-            if turn['tool_executions']:
-                with st.expander(f"Tool Executions ({len(turn['tool_executions'])})", expanded=False):
-                    for tool in turn['tool_executions']:
-                        success_icon = "✅" if tool['success'] else "❌"
-                        st.markdown(f"{success_icon} **{tool['tool_name']}** ({tool['duration_ms']}ms)")
+            if turn["tool_executions"]:
+                with st.expander(
+                    f"Tool Executions ({len(turn['tool_executions'])})", expanded=False
+                ):
+                    for tool in turn["tool_executions"]:
+                        success_icon = "✅" if tool["success"] else "❌"
+                        st.markdown(
+                            f"{success_icon} **{tool['tool_name']}** ({tool['duration_ms']}ms)"
+                        )
 
-                        if tool['arguments']:
-                            st.code(str(tool['arguments']), language="json")
+                        if tool["arguments"]:
+                            st.code(str(tool["arguments"]), language="json")
 
-                        if tool['error']:
-                            st.error(tool['error'])
+                        if tool["error"]:
+                            st.error(tool["error"])
 
             st.divider()
 
 
-def render_analytics(storage: TelemetryStorage, team_id: str | None, project_id: str | None) -> None:
+def render_analytics(
+    storage: TelemetryStorage, team_id: str | None, project_id: str | None
+) -> None:
     """Render analytics view."""
     st.subheader("Token Usage by Project")
 
@@ -169,15 +183,17 @@ def render_analytics(storage: TelemetryStorage, team_id: str | None, project_id:
     # Token usage chart
     import pandas as pd
 
-    df = pd.DataFrame([
-        {
-            "Team/Project": f"{c.team_id}/{c.project_id}",
-            "Input Tokens": c.total_input_tokens,
-            "Output Tokens": c.total_output_tokens,
-            "Sessions": c.total_sessions,
-        }
-        for c in cost_summary
-    ])
+    df = pd.DataFrame(
+        [
+            {
+                "Team/Project": f"{c.team_id}/{c.project_id}",
+                "Input Tokens": c.total_input_tokens,
+                "Output Tokens": c.total_output_tokens,
+                "Sessions": c.total_sessions,
+            }
+            for c in cost_summary
+        ]
+    )
 
     st.bar_chart(df.set_index("Team/Project")[["Input Tokens", "Output Tokens"]])
 
@@ -190,15 +206,19 @@ def render_analytics(storage: TelemetryStorage, team_id: str | None, project_id:
     tool_stats = storage.get_tool_stats(team_id=team_id, project_id=project_id, days=30)
 
     if tool_stats:
-        tool_df = pd.DataFrame([
-            {
-                "Tool": t.tool_name,
-                "Calls": t.total_calls,
-                "Success Rate": f"{(t.success_count / t.total_calls * 100):.1f}%" if t.total_calls > 0 else "N/A",
-                "Avg Duration": f"{t.avg_duration_ms:.0f}ms",
-            }
-            for t in tool_stats
-        ])
+        tool_df = pd.DataFrame(
+            [
+                {
+                    "Tool": t.tool_name,
+                    "Calls": t.total_calls,
+                    "Success Rate": f"{(t.success_count / t.total_calls * 100):.1f}%"
+                    if t.total_calls > 0
+                    else "N/A",
+                    "Avg Duration": f"{t.avg_duration_ms:.0f}ms",
+                }
+                for t in tool_stats
+            ]
+        )
         st.dataframe(tool_df, use_container_width=True)
     else:
         st.info("No tool usage data available.")

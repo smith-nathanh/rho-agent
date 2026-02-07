@@ -40,13 +40,10 @@ class VerticaHandler(DatabaseHandler):
     def db_type(self) -> str:
         return "vertica"
 
-
     def _get_connection(self, alias: str) -> Any:
         """Get or create connection for the specified database alias."""
         if not VERTICA_AVAILABLE:
-            raise RuntimeError(
-                "vertica-python package not installed. Run: uv add vertica-python"
-            )
+            raise RuntimeError("vertica-python package not installed. Run: uv add vertica-python")
 
         # Check if existing connection is still valid
         if alias in self._connections:
@@ -66,9 +63,7 @@ class VerticaHandler(DatabaseHandler):
 
         config = self._get_config(alias)
         if not config.database:
-            raise RuntimeError(
-                f"No database name configured for Vertica '{alias}'"
-            )
+            raise RuntimeError(f"No database name configured for Vertica '{alias}'")
 
         conn = vertica_python.connect(
             host=config.host or "localhost",
@@ -118,9 +113,7 @@ class VerticaHandler(DatabaseHandler):
             {},
         )
 
-    def _get_describe_sql(
-        self, table_name: str, schema: str | None
-    ) -> tuple[str, dict[str, Any]]:
+    def _get_describe_sql(self, table_name: str, schema: str | None) -> tuple[str, dict[str, Any]]:
         if schema:
             return (
                 """

@@ -124,7 +124,10 @@ class EvalRunner:
         if self._is_cerebras():
             print(f"[DEBUG] Using CerebrasClient for model={config.model}", file=sys.stderr)
         else:
-            print(f"[DEBUG] Using ModelClient for model={config.model} base_url={config.base_url}", file=sys.stderr)
+            print(
+                f"[DEBUG] Using ModelClient for model={config.model} base_url={config.base_url}",
+                file=sys.stderr,
+            )
 
     async def _ensure_mysql(self) -> MySQLContainer:
         """Lazily start MySQL container on first use."""
@@ -135,10 +138,7 @@ class EvalRunner:
 
     def _needs_mysql(self, task: DBBenchTask) -> bool:
         """Check if task requires MySQL for proper evaluation."""
-        return (
-            task.query_type in ("INSERT", "UPDATE", "DELETE")
-            and task.answer_md5 is not None
-        )
+        return task.query_type in ("INSERT", "UPDATE", "DELETE") and task.answer_md5 is not None
 
     def _is_cerebras(self) -> bool:
         """Check if we're using Cerebras based on base_url."""
@@ -241,7 +241,10 @@ class EvalRunner:
                             # First turn with the task prompt
                             async for event in agent.run_turn(prompt):
                                 if event.type == "error":
-                                    print(f"[Task {task.index}] API Error: {event.content}", file=sys.stderr)
+                                    print(
+                                        f"[Task {task.index}] API Error: {event.content}",
+                                        file=sys.stderr,
+                                    )
                                 # Stop agent loop immediately when answer is submitted
                                 if event.type == "tool_end" and submit_handler.is_submitted:
                                     agent.request_cancel()
@@ -250,7 +253,10 @@ class EvalRunner:
                             # Subsequent turns - prompt agent to continue
                             async for event in agent.run_turn("Continue working on the task."):
                                 if event.type == "error":
-                                    print(f"[Task {task.index}] API Error: {event.content}", file=sys.stderr)
+                                    print(
+                                        f"[Task {task.index}] API Error: {event.content}",
+                                        file=sys.stderr,
+                                    )
                                 # Stop agent loop immediately when answer is submitted
                                 if event.type == "tool_end" and submit_handler.is_submitted:
                                     agent.request_cancel()
@@ -265,7 +271,10 @@ class EvalRunner:
 
                 except TimeoutError:
                     consecutive_timeouts += 1
-                    print(f"[Task {task.index}] Turn {turn} timed out ({consecutive_timeouts}/3)", file=sys.stderr)
+                    print(
+                        f"[Task {task.index}] Turn {turn} timed out ({consecutive_timeouts}/3)",
+                        file=sys.stderr,
+                    )
                     if consecutive_timeouts >= 3:
                         raise EvalAbortedError(
                             f"Aborting: 3 consecutive turn timeouts. API may be unresponsive.",
@@ -393,7 +402,10 @@ class EvalRunner:
                         if turn == 0:
                             async for event in agent.run_turn(prompt):
                                 if event.type == "error":
-                                    print(f"[Task {task.index}] API Error: {event.content}", file=sys.stderr)
+                                    print(
+                                        f"[Task {task.index}] API Error: {event.content}",
+                                        file=sys.stderr,
+                                    )
                                 # Stop agent loop immediately when answer is submitted
                                 if event.type == "tool_end" and submit_handler.is_submitted:
                                     agent.request_cancel()
@@ -401,7 +413,10 @@ class EvalRunner:
                         else:
                             async for event in agent.run_turn("Continue working on the task."):
                                 if event.type == "error":
-                                    print(f"[Task {task.index}] API Error: {event.content}", file=sys.stderr)
+                                    print(
+                                        f"[Task {task.index}] API Error: {event.content}",
+                                        file=sys.stderr,
+                                    )
                                 # Stop agent loop immediately when answer is submitted
                                 if event.type == "tool_end" and submit_handler.is_submitted:
                                     agent.request_cancel()
@@ -414,7 +429,10 @@ class EvalRunner:
 
                 except TimeoutError:
                     consecutive_timeouts += 1
-                    print(f"[Task {task.index}] Turn {turn} timed out ({consecutive_timeouts}/3)", file=sys.stderr)
+                    print(
+                        f"[Task {task.index}] Turn {turn} timed out ({consecutive_timeouts}/3)",
+                        file=sys.stderr,
+                    )
                     if consecutive_timeouts >= 3:
                         raise EvalAbortedError(
                             f"Aborting: 3 consecutive turn timeouts. API may be unresponsive.",
@@ -485,11 +503,13 @@ class EvalRunner:
 
         create_sql = f"CREATE TABLE `{task.table_name}` ({', '.join(col_defs)})"
 
-        await handler.handle(ToolInvocation(
-            call_id="init_create",
-            tool_name="execute_sql",
-            arguments={"sql": create_sql},
-        ))
+        await handler.handle(
+            ToolInvocation(
+                call_id="init_create",
+                tool_name="execute_sql",
+                arguments={"sql": create_sql},
+            )
+        )
 
         # Insert rows in batches via docker exec
         if task.table_info.rows:
@@ -514,13 +534,17 @@ class EvalRunner:
                             escaped_values.append(f"'{escaped}'")
                     values_list.append(f"({', '.join(escaped_values)})")
 
-                insert_sql = f"INSERT INTO `{task.table_name}` ({col_names}) VALUES {', '.join(values_list)}"
+                insert_sql = (
+                    f"INSERT INTO `{task.table_name}` ({col_names}) VALUES {', '.join(values_list)}"
+                )
 
-                await handler.handle(ToolInvocation(
-                    call_id=f"init_insert_{i}",
-                    tool_name="execute_sql",
-                    arguments={"sql": insert_sql},
-                ))
+                await handler.handle(
+                    ToolInvocation(
+                        call_id=f"init_insert_{i}",
+                        tool_name="execute_sql",
+                        arguments={"sql": insert_sql},
+                    )
+                )
 
     async def run_os_task(self, task: OSTask) -> TaskResult:
         """Run a single OS Interaction task.
@@ -608,17 +632,27 @@ class EvalRunner:
                         if turn == 0:
                             async for event in agent.run_turn(prompt):
                                 if event.type == "error":
-                                    print(f"[Task {task.index}] API Error: {event.content}", file=sys.stderr)
+                                    print(
+                                        f"[Task {task.index}] API Error: {event.content}",
+                                        file=sys.stderr,
+                                    )
                                 # Stop agent loop immediately when task is done
-                                if event.type == "tool_end" and (answer_handler.is_submitted or finish_handler.is_finished):
+                                if event.type == "tool_end" and (
+                                    answer_handler.is_submitted or finish_handler.is_finished
+                                ):
                                     agent.request_cancel()
                                     break
                         else:
                             async for event in agent.run_turn("Continue working on the task."):
                                 if event.type == "error":
-                                    print(f"[Task {task.index}] API Error: {event.content}", file=sys.stderr)
+                                    print(
+                                        f"[Task {task.index}] API Error: {event.content}",
+                                        file=sys.stderr,
+                                    )
                                 # Stop agent loop immediately when task is done
-                                if event.type == "tool_end" and (answer_handler.is_submitted or finish_handler.is_finished):
+                                if event.type == "tool_end" and (
+                                    answer_handler.is_submitted or finish_handler.is_finished
+                                ):
                                     agent.request_cancel()
                                     break
 
@@ -629,7 +663,10 @@ class EvalRunner:
 
                 except TimeoutError:
                     consecutive_timeouts += 1
-                    print(f"[Task {task.index}] Turn {turn} timed out ({consecutive_timeouts}/3)", file=sys.stderr)
+                    print(
+                        f"[Task {task.index}] Turn {turn} timed out ({consecutive_timeouts}/3)",
+                        file=sys.stderr,
+                    )
                     if consecutive_timeouts >= 3:
                         raise EvalAbortedError(
                             f"Aborting: 3 consecutive turn timeouts. API may be unresponsive.",
@@ -865,11 +902,7 @@ class EvalRunner:
                 # Save incrementally
                 append_result(result, output_dir)
 
-                is_correct = (
-                    result.result.result
-                    if isinstance(result.result, OSResult)
-                    else False
-                )
+                is_correct = result.result.result if isinstance(result.result, OSResult) else False
                 metrics.add_result(result, is_correct)
                 update_overall(metrics, output_dir)
 
@@ -886,11 +919,7 @@ class EvalRunner:
                 # Save incrementally
                 append_result(result, output_dir)
 
-                is_correct = (
-                    result.result.result
-                    if isinstance(result.result, OSResult)
-                    else False
-                )
+                is_correct = result.result.result if isinstance(result.result, OSResult) else False
                 metrics.add_result(result, is_correct)
                 update_overall(metrics, output_dir)
 

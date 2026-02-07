@@ -122,6 +122,7 @@ def create_exporter(config: ObservabilityConfig) -> Exporter:
         # For now, fall back to SQLite
         try:
             from .otlp import OTLPExporter
+
             return OTLPExporter(config=config)
         except ImportError:
             # OTLP dependencies not installed, fall back to SQLite

@@ -17,9 +17,7 @@ DEFAULT_MAX_OUTPUT = 800  # AgentBench truncates at 800 chars
 class ContainerProtocol(Protocol):
     """Protocol for container implementations."""
 
-    async def execute(
-        self, command: str, timeout: int
-    ) -> tuple[int, str, str]:
+    async def execute(self, command: str, timeout: int) -> tuple[int, str, str]:
         """Execute command in container. Returns (exit_code, stdout, stderr)."""
         ...
 
@@ -91,7 +89,7 @@ class ContainerBashHandler(ToolHandler, ABC):
     def _truncate_output(self, output: str) -> str:
         """Truncate output to max_output chars with message."""
         if len(output) > self._max_output:
-            return output[:self._max_output - 50] + "\n[truncated because the output is too long]"
+            return output[: self._max_output - 50] + "\n[truncated because the output is too long]"
         return output
 
     def _format_output(self, stdout: str, stderr: str) -> str:
@@ -114,9 +112,7 @@ class ContainerBashHandler(ToolHandler, ABC):
 
         try:
             container = self._get_container()
-            exit_code, stdout, stderr = await container.execute(
-                command, timeout=self._timeout
-            )
+            exit_code, stdout, stderr = await container.execute(command, timeout=self._timeout)
 
             content = self._format_output(stdout, stderr)
 

@@ -114,9 +114,7 @@ class EditHandler(ToolHandler):
         except Exception as e:
             return ToolOutput(content=f"Error writing file: {e}", success=False)
 
-    def _apply_edit(
-        self, content: str, old_string: str, new_string: str
-    ) -> tuple[str | None, str]:
+    def _apply_edit(self, content: str, old_string: str, new_string: str) -> tuple[str | None, str]:
         """Apply the edit with fuzzy matching.
 
         Returns:
@@ -168,9 +166,7 @@ class EditHandler(ToolHandler):
         if len(matches) == 1:
             _idx, matched = matches[0]
             # Preserve the original indentation when replacing
-            new_content = content.replace(
-                matched, self._reindent(new_string, matched), 1
-            )
+            new_content = content.replace(matched, self._reindent(new_string, matched), 1)
             return new_content, "indentation-flexible match"
         elif len(matches) > 1:
             return (

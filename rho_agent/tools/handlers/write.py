@@ -12,9 +12,18 @@ from ..base import ToolHandler, ToolInvocation, ToolOutput
 
 # Sensitive paths blocked in CREATE_ONLY mode
 SENSITIVE_PATTERNS = [
-    ".bashrc", ".zshrc", ".profile", ".bash_profile",
-    ".ssh/", ".gnupg/", ".aws/", ".config/",
-    "/etc/", "/usr/", "/bin/", "/sbin/",
+    ".bashrc",
+    ".zshrc",
+    ".profile",
+    ".bash_profile",
+    ".ssh/",
+    ".gnupg/",
+    ".aws/",
+    ".config/",
+    "/etc/",
+    "/usr/",
+    "/bin/",
+    "/sbin/",
 ]
 
 
@@ -44,7 +53,9 @@ class WriteHandler(ToolHandler):
                               Defaults to True for create_only, False otherwise.
         """
         self._create_only = create_only
-        self._requires_approval = requires_approval if requires_approval is not None else create_only
+        self._requires_approval = (
+            requires_approval if requires_approval is not None else create_only
+        )
 
     @property
     def name(self) -> str:
@@ -127,9 +138,7 @@ class WriteHandler(ToolHandler):
 
             # Report success with file info
             size = len(content.encode("utf-8"))
-            lines = content.count("\n") + (
-                1 if content and not content.endswith("\n") else 0
-            )
+            lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
 
             if self._create_only:
                 action = "Created"

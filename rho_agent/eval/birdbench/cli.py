@@ -164,20 +164,23 @@ def bird(
 
     # Save run config
     if not resume:
-        save_run_config({
-            "model": model,
-            "base_url": base_url,
-            "max_turns": max_turns,
-            "parallel": parallel,
-            "data_file": data_file,
-            "db_dir": db_dir,
-            "difficulty": difficulty,
-            "no_evidence": no_evidence,
-            "system_prompt": system_prompt,
-            "offset": offset,
-            "limit": limit,
-            "service_tier": service_tier,
-        }, run_dir)
+        save_run_config(
+            {
+                "model": model,
+                "base_url": base_url,
+                "max_turns": max_turns,
+                "parallel": parallel,
+                "data_file": data_file,
+                "db_dir": db_dir,
+                "difficulty": difficulty,
+                "no_evidence": no_evidence,
+                "system_prompt": system_prompt,
+                "offset": offset,
+                "limit": limit,
+                "service_tier": service_tier,
+            },
+            run_dir,
+        )
 
     # Run
     runner = BirdRunner(config)

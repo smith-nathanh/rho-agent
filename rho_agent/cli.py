@@ -80,8 +80,8 @@ app = typer.Typer(
     epilog=(
         "Examples:\n"
         "  rho-agent\n"
-        "  rho-agent \"What errors are in app.log?\"\n"
-        "  rho-agent --prompt \"Investigate why CI is failing\"\n"
+        '  rho-agent "What errors are in app.log?"\n'
+        '  rho-agent --prompt "Investigate why CI is failing"\n'
         "  rho-agent --profile readonly\n"
         "  rho-agent --profile developer\n"
         "  rho-agent -r latest\n"
@@ -132,14 +132,9 @@ def _format_observability_init_error(exc: ObservabilityInitializationError) -> s
     if exc.project_id and not exc.team_id:
         guidance.append("provide --team-id")
     if not guidance:
-        guidance.append(
-            "set both --team-id and --project-id when observability is enabled"
-        )
+        guidance.append("set both --team-id and --project-id when observability is enabled")
 
-    return (
-        f"Observability initialization failed: {cause or exc}. "
-        f"To fix: {'; '.join(guidance)}."
-    )
+    return f"Observability initialization failed: {cause or exc}. To fix: {'; '.join(guidance)}."
 
 
 def _get_version() -> str:
@@ -161,12 +156,8 @@ class TokenStatus:
         if not usage:
             return
         self.context_size = usage.get("context_size", self.context_size)
-        self.total_input_tokens = usage.get(
-            "total_input_tokens", self.total_input_tokens
-        )
-        self.total_output_tokens = usage.get(
-            "total_output_tokens", self.total_output_tokens
-        )
+        self.total_input_tokens = usage.get("total_input_tokens", self.total_input_tokens)
+        self.total_output_tokens = usage.get("total_output_tokens", self.total_output_tokens)
 
     def render(self) -> str:
         return (
@@ -181,6 +172,7 @@ def _sync_token_status_from_session(token_status: TokenStatus, session: Session)
     token_status.context_size = session.last_input_tokens
     token_status.total_input_tokens = session.total_input_tokens
     token_status.total_output_tokens = session.total_output_tokens
+
 
 # Commands the user can type during the session
 COMMANDS = [
@@ -206,9 +198,7 @@ class InlinePathCompleter(Completer):
     def __init__(self, working_dir: str | None = None) -> None:
         self.working_dir = Path(working_dir).expanduser() if working_dir else Path.cwd()
 
-    def get_completions(
-        self, document: Document, complete_event: Any
-    ) -> Iterable[Completion]:
+    def get_completions(self, document: Document, complete_event: Any) -> Iterable[Completion]:
         text_before_cursor = document.text_before_cursor
 
         match = PATH_PATTERN.search(text_before_cursor)
@@ -259,9 +249,7 @@ class InlinePathCompleter(Completer):
                     if expanded.endswith("/"):
                         completion_text = path_text + name
                     else:
-                        completion_text = (
-                            str(path.parent / name) if "/" in path_text else name
-                        )
+                        completion_text = str(path.parent / name) if "/" in path_text else name
 
                 display = name + "/" if entry.is_dir() else name
                 if entry.is_dir():
@@ -476,9 +464,7 @@ def handle_event(
 
     elif event.type == "tool_end":
         # Show a brief summary of what the tool found
-        summary = _format_tool_summary(
-            event.tool_name, event.tool_metadata, event.tool_result
-        )
+        summary = _format_tool_summary(event.tool_name, event.tool_metadata, event.tool_result)
         preview = _format_tool_preview(event.tool_result, event.tool_name)
         body_lines: list[str] = []
         if summary:
@@ -500,9 +486,7 @@ def handle_event(
     elif event.type == "compact_start":
         trigger = event.content or "manual"
         if trigger == "auto":
-            console.print(
-                _markup("Context limit approaching, auto-compacting...", THEME.warning)
-            )
+            console.print(_markup("Context limit approaching, auto-compacting...", THEME.warning))
         else:
             console.print(_markup("Compacting conversation...", THEME.warning))
 
@@ -563,6 +547,7 @@ def handle_command(
         return "resume"
 
     if cmd == "/help":
+
         def line(lhs: str, rhs: str) -> str:
             # Pad using visible text width, then escape for Rich markup safety.
             safe_lhs = escape(lhs.ljust(28))
@@ -830,9 +815,7 @@ async def run_interactive(
 
         resumed = conversation_store.load(selected_id)
         if not resumed:
-            console.print(
-                _markup(f"Conversation not found: {selected_id}", THEME.error)
-            )
+            console.print(_markup(f"Conversation not found: {selected_id}", THEME.error))
             return
 
         runtime.session.system_prompt = resumed.system_prompt
@@ -848,9 +831,7 @@ async def run_interactive(
         except ValueError:
             session_started = datetime.now()
 
-        console.print(
-            _markup(f"Resumed conversation: {resumed.id}", THEME.success)
-        )
+        console.print(_markup(f"Resumed conversation: {resumed.id}", THEME.success))
         console.print(
             _markup(
                 f"Messages: {len(resumed.history)}  "
@@ -933,9 +914,7 @@ async def run_interactive(
                 async for event in events:
                     if status_ctx and not saw_model_output:
                         elapsed = int(monotonic() - start)
-                        status_ctx.update(
-                            f"⠋ working ({elapsed}s • Ctrl+C: cancel)"
-                        )
+                        status_ctx.update(f"⠋ working ({elapsed}s • Ctrl+C: cancel)")
                     if event.type in ("text", "tool_start", "error", "cancelled"):
                         saw_model_output = True
                         if status_ctx:
@@ -944,10 +923,16 @@ async def run_interactive(
                     if event.type == "cancelled":
                         # Check if this was an external kill signal
                         _sync_token_status_from_session(token_status, runtime.session)
-                        if signal_manager and session_id and signal_manager.is_cancelled(session_id):
+                        if (
+                            signal_manager
+                            and session_id
+                            and signal_manager.is_cancelled(session_id)
+                        ):
                             session_status = "cancelled"
                             if runtime.observability:
-                                runtime.observability.context.metadata["cancel_source"] = "kill_command"
+                                runtime.observability.context.metadata["cancel_source"] = (
+                                    "kill_command"
+                                )
                             console.print(_markup("Killed by rho-agent kill", THEME.warning))
                         else:
                             console.print(_markup("Turn cancelled", THEME.muted))
@@ -1224,9 +1209,7 @@ def main(
     ] = None,
     working_dir: Annotated[
         Optional[str],
-        typer.Option(
-            "--working-dir", "-w", help="Working directory for shell commands"
-        ),
+        typer.Option("--working-dir", "-w", help="Working directory for shell commands"),
     ] = None,
     auto_approve: Annotated[
         bool,
@@ -1246,9 +1229,7 @@ def main(
     ] = False,
     preview_lines: Annotated[
         int,
-        typer.Option(
-            "--preview-lines", help="Lines of tool output to show (0 to disable)"
-        ),
+        typer.Option("--preview-lines", help="Lines of tool output to show (0 to disable)"),
     ] = int(os.getenv("RHO_AGENT_PREVIEW_LINES", "6")),
     profile: Annotated[
         Optional[str],
@@ -1310,8 +1291,7 @@ def main(
             except ValueError:
                 time_str = conv.id
             console.print(
-                f"{_markup(conv.id, THEME.accent)}  {time_str}  "
-                f"{_markup(conv.model, THEME.muted)}"
+                f"{_markup(conv.id, THEME.accent)}  {time_str}  {_markup(conv.model, THEME.muted)}"
             )
             console.print(f"  {conv.display_preview}")
             console.print()
@@ -1331,9 +1311,7 @@ def main(
 
         resumed_conversation = conversation_store.load(conversation_id)
         if not resumed_conversation:
-            console.print(
-                _markup(f"Conversation not found: {conversation_id}", THEME.error)
-            )
+            console.print(_markup(f"Conversation not found: {conversation_id}", THEME.error))
             console.print(_markup("Use --list to see saved conversations.", THEME.muted))
             raise typer.Exit(1)
 
@@ -1367,11 +1345,7 @@ def main(
         except ValueError:
             console.print(
                 _markup(
-                    str(
-                        InvalidModeError(
-                            "shell mode", shell_mode, "restricted, unrestricted"
-                        )
-                    ),
+                    str(InvalidModeError("shell mode", shell_mode, "restricted, unrestricted")),
                     THEME.error,
                 )
             )
@@ -1467,9 +1441,7 @@ def main(
         try:
             system_prompt, initial_prompt = prepare_prompt(loaded_prompt, prompt_vars)
         except ValueError as exc:
-            console.print(
-                _markup(f"Prompt error: {PromptLoadError(str(exc))}", THEME.error)
-            )
+            console.print(_markup(f"Prompt error: {PromptLoadError(str(exc))}", THEME.error))
             raise typer.Exit(1) from exc
 
     # Set up components - use resumed conversation if available
@@ -1486,9 +1458,7 @@ def main(
         )
         # Parse the original start time
         session_started = datetime.fromisoformat(resumed_conversation.started)
-        console.print(
-            _markup(f"Resuming conversation: {conversation_id}", THEME.success)
-        )
+        console.print(_markup(f"Resuming conversation: {conversation_id}", THEME.success))
     else:
         session = Session(system_prompt=system_prompt)
         effective_model = model
@@ -1556,15 +1526,24 @@ def main(
             # Single prompt mode (from --prompt text, positional arg, or template initial_prompt)
             if output:
                 # Capture output to file
-                asyncio.run(run_single_with_output(
-                    runtime, run_prompt, output,
-                    signal_manager=signal_manager, session_id=session_id,
-                ))
+                asyncio.run(
+                    run_single_with_output(
+                        runtime,
+                        run_prompt,
+                        output,
+                        signal_manager=signal_manager,
+                        session_id=session_id,
+                    )
+                )
             else:
-                asyncio.run(run_single(
-                    runtime, run_prompt,
-                    signal_manager=signal_manager, session_id=session_id,
-                ))
+                asyncio.run(
+                    run_single(
+                        runtime,
+                        run_prompt,
+                        signal_manager=signal_manager,
+                        session_id=session_id,
+                    )
+                )
         else:
             asyncio.run(
                 run_interactive(
@@ -1617,10 +1596,15 @@ def dashboard(
     try:
         subprocess.run(
             [
-                sys.executable, "-m", "streamlit", "run",
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
                 str(dashboard_path),
-                "--server.port", str(port),
-                "--server.headless", "true",
+                "--server.port",
+                str(port),
+                "--server.headless",
+                "true",
             ],
             env=env,
             check=True,
@@ -1699,19 +1683,13 @@ def kill(
         if cancelled:
             for sid in cancelled:
                 console.print(_markup(f"Cancelled: {sid[:8]}", THEME.warning))
-            console.print(
-                _markup(
-                    f"Sent cancel signal to {len(cancelled)} agents", THEME.success
-                )
-            )
+            console.print(_markup(f"Sent cancel signal to {len(cancelled)} agents", THEME.success))
         else:
             console.print("[dim]No running agents to kill[/dim]")
         return
 
     if not prefix:
-        console.print(
-            _markup("Provide a session ID prefix, or use --all", THEME.error)
-        )
+        console.print(_markup("Provide a session ID prefix, or use --all", THEME.error))
         raise typer.Exit(1)
 
     cancelled = sm.cancel_by_prefix(prefix)
@@ -1719,9 +1697,7 @@ def kill(
         for sid in cancelled:
             console.print(_markup(f"Cancelled: {sid[:8]}", THEME.warning))
     else:
-        console.print(
-            _markup(f"No running agents matching prefix '{prefix}'", THEME.error)
-        )
+        console.print(_markup(f"No running agents matching prefix '{prefix}'", THEME.error))
         raise typer.Exit(1)
 
 

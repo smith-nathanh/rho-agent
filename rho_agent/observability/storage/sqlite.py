@@ -312,7 +312,9 @@ class TelemetryStorage:
                 WHERE turn_id = ?
                 """,
                 (
-                    turn.ended_at.isoformat() if turn.ended_at else datetime.now(timezone.utc).isoformat(),
+                    turn.ended_at.isoformat()
+                    if turn.ended_at
+                    else datetime.now(timezone.utc).isoformat(),
                     turn.input_tokens,
                     turn.output_tokens,
                     turn.reasoning_tokens,
@@ -401,7 +403,8 @@ class TelemetryStorage:
                         team_id=row["team_id"],
                         project_id=row["project_id"],
                         model=row["model"],
-                        started_at=self._parse_timestamp(row["started_at"]) or datetime.now(timezone.utc),
+                        started_at=self._parse_timestamp(row["started_at"])
+                        or datetime.now(timezone.utc),
                         ended_at=self._parse_timestamp(row["ended_at"]),
                         status=row["status"],
                         total_input_tokens=row["total_input_tokens"] or 0,
@@ -486,7 +489,8 @@ class TelemetryStorage:
                 environment=session_row["environment"],
                 profile=session_row["profile"],
                 model=session_row["model"],
-                started_at=self._parse_timestamp(session_row["started_at"]) or datetime.now(timezone.utc),
+                started_at=self._parse_timestamp(session_row["started_at"])
+                or datetime.now(timezone.utc),
                 ended_at=self._parse_timestamp(session_row["ended_at"]),
                 status=session_row["status"],
                 total_input_tokens=session_row["total_input_tokens"] or 0,
@@ -506,7 +510,7 @@ class TelemetryStorage:
     ) -> list[ToolStats]:
         """Get tool usage statistics."""
         with self._connection() as conn:
-            conditions = ["s.started_at >= datetime('now', ?)" ]
+            conditions = ["s.started_at >= datetime('now', ?)"]
             params: list[Any] = [f"-{days} days"]
 
             if team_id:

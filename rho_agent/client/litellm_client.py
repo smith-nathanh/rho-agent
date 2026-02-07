@@ -58,6 +58,7 @@ class LiteLLMClient:
         """
         try:
             import litellm
+
             self._litellm = litellm
         except ImportError:
             raise ImportError(
@@ -257,9 +258,7 @@ class LiteLLMClient:
             except StopAsyncIteration:
                 break
 
-    async def complete(
-        self, messages: list[dict[str, Any]]
-    ) -> tuple[str, dict[str, Any]]:
+    async def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         """Non-streaming completion for simple requests.
 
         Returns (content, usage_dict) where usage_dict may include cost_usd.

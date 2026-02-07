@@ -88,7 +88,9 @@ class TestEvalSqliteHandler:
         invocation = ToolInvocation(
             call_id="1",
             tool_name="execute_sql",
-            arguments={"sql": "INSERT INTO users (name, email) VALUES ('Charlie', 'charlie@example.com')"},
+            arguments={
+                "sql": "INSERT INTO users (name, email) VALUES ('Charlie', 'charlie@example.com')"
+            },
         )
 
         result = await handler.handle(invocation)
@@ -254,6 +256,7 @@ class TestFactoryFunctions:
         db_handler = EvalSqliteHandler(db_path=db_path)
 
         captured = None
+
         def on_answer(answer: str) -> None:
             nonlocal captured
             captured = answer
@@ -288,6 +291,7 @@ class TestBackwardsCompatibility:
         from rho_agent.eval.agentbench.tools import UnrestrictedSqliteHandler
 
         import sqlite3
+
         db_file = tmp_path / "test.db"
         conn = sqlite3.connect(str(db_file))
         conn.execute("CREATE TABLE t (x INT)")

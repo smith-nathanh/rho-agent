@@ -28,7 +28,9 @@ async def run_agent_with_tools(
     project_id: str | None = None,
 ) -> str:
     """Run the agent autonomously with profile-based tools."""
-    system_prompt = "You are a research assistant. Investigate thoroughly using the available tools."
+    system_prompt = (
+        "You are a research assistant. Investigate thoroughly using the available tools."
+    )
     if working_dir:
         system_prompt += f"\n\nWorking directory context: {working_dir}"
 
@@ -68,7 +70,9 @@ async def run_agent_with_tools(
         elif event.type == "error":
             print(f"\nError: {event.content}", flush=True)
     usage = result.usage
-    print(f"\n\n[{usage.get('total_input_tokens', 0)} in, {usage.get('total_output_tokens', 0)} out]")
+    print(
+        f"\n\n[{usage.get('total_input_tokens', 0)} in, {usage.get('total_output_tokens', 0)} out]"
+    )
     print(f"[{len(tool_calls)} tool calls: {', '.join(tool_calls)}]")
     print(f"[status: {result.status}]")
     if runtime.observability and runtime.observability.context:
@@ -85,7 +89,9 @@ if __name__ == "__main__":
     load_dotenv()  # Load OPENAI_API_KEY from .env
 
     target_dir = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
-    task = sys.argv[2] if len(sys.argv) > 2 else "What does this project do? Give me a brief summary."
+    task = (
+        sys.argv[2] if len(sys.argv) > 2 else "What does this project do? Give me a brief summary."
+    )
     team_id = os.environ.get("RHO_AGENT_TEAM_ID")
     project_id = os.environ.get("RHO_AGENT_PROJECT_ID")
 

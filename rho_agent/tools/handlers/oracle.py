@@ -40,7 +40,6 @@ class OracleHandler(DatabaseHandler):
     def db_type(self) -> str:
         return "oracle"
 
-
     def _get_connection(self, alias: str) -> Any:
         """Get or create connection for the specified database alias."""
         if not ORACLEDB_AVAILABLE:
@@ -110,9 +109,7 @@ class OracleHandler(DatabaseHandler):
             {},
         )
 
-    def _get_describe_sql(
-        self, table_name: str, schema: str | None
-    ) -> tuple[str, dict[str, Any]]:
+    def _get_describe_sql(self, table_name: str, schema: str | None) -> tuple[str, dict[str, Any]]:
         if schema:
             return (
                 """

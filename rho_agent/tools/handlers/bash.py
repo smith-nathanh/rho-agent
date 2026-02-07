@@ -235,7 +235,9 @@ class BashHandler(ToolHandler):
         )
         # Default approval: not required for restricted (allowlist protects),
         # required for unrestricted outside sandboxes (but factory overrides for eval)
-        self._requires_approval = requires_approval if requires_approval is not None else (not restricted)
+        self._requires_approval = (
+            requires_approval if requires_approval is not None else (not restricted)
+        )
 
     @property
     def name(self) -> str:
@@ -280,9 +282,7 @@ class BashHandler(ToolHandler):
             "required": ["command"],
         }
 
-    def _format_output(
-        self, output: str, exit_code: int, duration_seconds: float
-    ) -> str:
+    def _format_output(self, output: str, exit_code: int, duration_seconds: float) -> str:
         """Format output as JSON"""
         return json.dumps(
             {

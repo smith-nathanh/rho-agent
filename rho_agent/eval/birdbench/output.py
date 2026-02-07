@@ -99,15 +99,17 @@ def format_summary(metrics: BirdMetrics) -> str:
         acc = p / t if t > 0 else 0.0
         lines.append(f"  {db:30s}  {p:>3d}/{t:<3d} ({acc:.1%})")
 
-    lines.extend([
-        "",
-        "Status Breakdown:",
-        f"  Completed:           {metrics.completed}",
-        f"  Context limit:       {metrics.context_limit}",
-        f"  Turn limit reached:  {metrics.task_limit_reached}",
-        f"  Task error:          {metrics.task_error}",
-        "=" * 55,
-    ])
+    lines.extend(
+        [
+            "",
+            "Status Breakdown:",
+            f"  Completed:           {metrics.completed}",
+            f"  Context limit:       {metrics.context_limit}",
+            f"  Turn limit reached:  {metrics.task_limit_reached}",
+            f"  Task error:          {metrics.task_error}",
+            "=" * 55,
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -149,7 +151,9 @@ def rebuild_metrics_from_runs(output_dir: Path | str) -> BirdMetrics:
             # Difficulty
             metrics.difficulty_total[difficulty] = metrics.difficulty_total.get(difficulty, 0) + 1
             if is_correct:
-                metrics.difficulty_passed[difficulty] = metrics.difficulty_passed.get(difficulty, 0) + 1
+                metrics.difficulty_passed[difficulty] = (
+                    metrics.difficulty_passed.get(difficulty, 0) + 1
+                )
 
             # Database
             metrics.db_total[db_id] = metrics.db_total.get(db_id, 0) + 1

@@ -49,18 +49,16 @@ class DBBenchEvaluator:
                     return True
 
                 # Float comparison with tolerance
-                if DBBenchEvaluator._is_float(ans_val) and DBBenchEvaluator._is_float(
-                    gt_val
-                ):
+                if DBBenchEvaluator._is_float(ans_val) and DBBenchEvaluator._is_float(gt_val):
                     return DBBenchEvaluator._float_equal(ans_val, gt_val)
 
                 # String comparison
                 return ans_val == gt_val
             else:
                 # Multiple values - check if all floats
-                if all(
-                    DBBenchEvaluator._is_float(x) for x in processed_answer
-                ) and all(DBBenchEvaluator._is_float(x) for x in processed_ground_truth):
+                if all(DBBenchEvaluator._is_float(x) for x in processed_answer) and all(
+                    DBBenchEvaluator._is_float(x) for x in processed_ground_truth
+                ):
                     if len(processed_answer) != len(processed_ground_truth):
                         return False
 
@@ -69,9 +67,7 @@ class DBBenchEvaluator:
                     for ans in processed_answer:
                         matched = False
                         for i, gt in enumerate(processed_ground_truth):
-                            if not matched_gt[i] and DBBenchEvaluator._float_equal(
-                                ans, gt
-                            ):
+                            if not matched_gt[i] and DBBenchEvaluator._float_equal(ans, gt):
                                 matched_gt[i] = True
                                 matched = True
                                 break
@@ -109,14 +105,10 @@ class DBBenchEvaluator:
                         for item in parsed:
                             if isinstance(item, tuple) and len(item) == 1:
                                 value = str(item[0]).strip().strip("'\"")
-                                result.append(
-                                    DBBenchEvaluator._normalize_value(value)
-                                )
+                                result.append(DBBenchEvaluator._normalize_value(value))
                             else:
                                 value = str(item).strip().strip("'\"")
-                                result.append(
-                                    DBBenchEvaluator._normalize_value(value)
-                                )
+                                result.append(DBBenchEvaluator._normalize_value(value))
                         return result
                 except Exception:
                     # Manual parsing
@@ -130,25 +122,19 @@ class DBBenchEvaluator:
                         elif char == "," and not in_quotes:
                             if current:
                                 items.append(
-                                    DBBenchEvaluator._normalize_value(
-                                        current.strip().strip("'\"")
-                                    )
+                                    DBBenchEvaluator._normalize_value(current.strip().strip("'\""))
                                 )
                                 current = ""
                         else:
                             current += char
                     if current:
                         items.append(
-                            DBBenchEvaluator._normalize_value(
-                                current.strip().strip("'\"")
-                            )
+                            DBBenchEvaluator._normalize_value(current.strip().strip("'\""))
                         )
                     return items
             else:
                 # Single value
-                return [
-                    DBBenchEvaluator._normalize_value(answer.strip().strip("'\""))
-                ]
+                return [DBBenchEvaluator._normalize_value(answer.strip().strip("'\""))]
 
         elif isinstance(answer, (list, tuple)):
             result = []
@@ -161,23 +147,15 @@ class DBBenchEvaluator:
                     result.append(DBBenchEvaluator._normalize_value(value))
             return result
         else:
-            return [
-                DBBenchEvaluator._normalize_value(str(answer).strip().strip("'\""))
-            ]
+            return [DBBenchEvaluator._normalize_value(str(answer).strip().strip("'\""))]
 
     @staticmethod
     def _clean_mysql_result(result: Any) -> list[str] | None:
         """Handle MySQL result format [(value,)]."""
-        if (
-            isinstance(result, str)
-            and result.startswith("[")
-            and result.endswith("]")
-        ):
+        if isinstance(result, str) and result.startswith("[") and result.endswith("]"):
             try:
                 parsed = ast.literal_eval(result)
-                if isinstance(parsed, list) and all(
-                    isinstance(item, tuple) for item in parsed
-                ):
+                if isinstance(parsed, list) and all(isinstance(item, tuple) for item in parsed):
                     values = []
                     for item in parsed:
                         if len(item) == 1:
@@ -215,11 +193,7 @@ class DBBenchEvaluator:
             str_value = str_value[:-1].strip()
 
         # Handle thousand separators
-        if (
-            "," in str_value
-            and not str_value.startswith("[")
-            and not str_value.endswith("]")
-        ):
+        if "," in str_value and not str_value.startswith("[") and not str_value.endswith("]"):
             str_value = str_value.replace(",", "")
 
         # Map special values

@@ -140,9 +140,7 @@ class BirdMetrics:
 
     def to_dict(self) -> dict[str, Any]:
         avg_history = (
-            sum(self.history_lengths) / len(self.history_lengths)
-            if self.history_lengths
-            else 0.0
+            sum(self.history_lengths) / len(self.history_lengths) if self.history_lengths else 0.0
         )
 
         # Difficulty breakdown

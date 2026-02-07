@@ -179,18 +179,12 @@ class EvalMetrics:
             "total": self.total,
             "validation": {
                 "completed": self.completed / self.total if self.total > 0 else 0,
-                "agent context limit": self.context_limit / self.total
-                if self.total > 0
-                else 0,
+                "agent context limit": self.context_limit / self.total if self.total > 0 else 0,
                 "agent validation failed": self.validation_failed / self.total
                 if self.total > 0
                 else 0,
-                "agent invalid action": self.invalid_action / self.total
-                if self.total > 0
-                else 0,
-                "task limit reached": self.task_limit_reached / self.total
-                if self.total > 0
-                else 0,
+                "agent invalid action": self.invalid_action / self.total if self.total > 0 else 0,
+                "task limit reached": self.task_limit_reached / self.total if self.total > 0 else 0,
                 "task error": self.task_error / self.total if self.total > 0 else 0,
                 "unknown": self.unknown / self.total if self.total > 0 else 0,
                 "average_history_length": self.average_history_length,

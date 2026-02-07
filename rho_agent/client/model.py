@@ -76,7 +76,10 @@ class ModelClient:
         if timeout is None:
             timeout = 900.0 if service_tier == "flex" else 60.0
         self._client = AsyncOpenAI(
-            base_url=base_url, api_key=api_key, timeout=timeout, max_retries=8,
+            base_url=base_url,
+            api_key=api_key,
+            timeout=timeout,
+            max_retries=8,
         )
         self._model = model
         self._service_tier = service_tier
@@ -168,9 +171,7 @@ class ModelClient:
                                 tool_calls_in_progress[idx]["id"] = tc.id
                             if tc.function:
                                 if tc.function.name:
-                                    tool_calls_in_progress[idx]["name"] = (
-                                        tc.function.name
-                                    )
+                                    tool_calls_in_progress[idx]["name"] = tc.function.name
                                 if tc.function.arguments:
                                     tool_calls_in_progress[idx]["arguments"] += (
                                         tc.function.arguments
@@ -182,9 +183,7 @@ class ModelClient:
                         for tc_data in tool_calls_in_progress.values():
                             try:
                                 args = (
-                                    json.loads(tc_data["arguments"])
-                                    if tc_data["arguments"]
-                                    else {}
+                                    json.loads(tc_data["arguments"]) if tc_data["arguments"] else {}
                                 )
                             except json.JSONDecodeError:
                                 args = {}
@@ -271,9 +270,7 @@ class ModelClient:
         except Exception as e:
             yield StreamEvent(type="error", content=str(e))
 
-    async def complete(
-        self, messages: list[dict[str, Any]]
-    ) -> tuple[str, dict[str, Any]]:
+    async def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         """Non-streaming completion for simple requests like summarization.
 
         Returns (content, usage_dict).
@@ -296,9 +293,7 @@ class ModelClient:
             content = response.choices[0].message.content or ""
             usage = {
                 "input_tokens": response.usage.prompt_tokens if response.usage else 0,
-                "output_tokens": response.usage.completion_tokens
-                if response.usage
-                else 0,
+                "output_tokens": response.usage.completion_tokens if response.usage else 0,
                 "cost_usd": 0.0,
             }
             return content, usage

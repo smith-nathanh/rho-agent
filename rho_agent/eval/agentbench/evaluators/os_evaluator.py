@@ -54,9 +54,7 @@ class OSEvaluator:
         else:
             return False
 
-    def _evaluate_match(
-        self, answer: str, eval_config: "EvaluationConfig"
-    ) -> bool:
+    def _evaluate_match(self, answer: str, eval_config: "EvaluationConfig") -> bool:
         """Evaluate using match criteria (exact or regex)."""
         import re
 
@@ -111,9 +109,7 @@ class OSEvaluator:
             # If check_script.file is empty, use example_script (AgentBench's null behavior)
             if not check_script.file:
                 if eval_config.example_script and container:
-                    stdout = await self._run_example_script(
-                        eval_config.example_script, container
-                    )
+                    stdout = await self._run_example_script(eval_config.example_script, container)
                     if stdout is None:
                         return False
                     params.append(stdout)
@@ -135,9 +131,7 @@ class OSEvaluator:
 
         return True
 
-    async def _run_example_script(
-        self, example_config: dict, container
-    ) -> str | None:
+    async def _run_example_script(self, example_config: dict, container) -> str | None:
         """Run an example script to get expected value."""
         if not example_config:
             return None
@@ -192,9 +186,7 @@ class OSEvaluator:
         if scripts_dir:
             local_script = scripts_dir / script_path
             if local_script.exists():
-                return await self._run_check_in_container_chained(
-                    params, local_script, container
-                )
+                return await self._run_check_in_container_chained(params, local_script, container)
 
         # Fallback to builtin checks (for common scripts)
         # These expect (answer, expected) format

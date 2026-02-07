@@ -83,14 +83,10 @@ def _validate_config(alias: str, db_type: str, config: dict[str, Any]) -> None:
     if db_type == "sqlite":
         sqlite_path = Path(config["path"]).expanduser()
         if not sqlite_path.exists():
-            raise ValueError(
-                f"Database '{alias}' (sqlite) path does not exist: {config['path']}"
-            )
+            raise ValueError(f"Database '{alias}' (sqlite) path does not exist: {config['path']}")
 
 
-def _parse_database_entry(
-    alias: str, entry: dict[str, Any], env: dict[str, str]
-) -> DatabaseConfig:
+def _parse_database_entry(alias: str, entry: dict[str, Any], env: dict[str, str]) -> DatabaseConfig:
     """Parse a single database entry from config."""
     db_type = entry.get("type", "").lower()
     if not db_type:

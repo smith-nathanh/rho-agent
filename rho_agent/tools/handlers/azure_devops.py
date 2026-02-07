@@ -51,7 +51,8 @@ class AzureDevOpsHandler(ToolHandler):
         mode_desc = "read-only" if self._readonly else "full"
         mutation_ops = (
             "'create' (new work item), 'add_comment', 'update', 'link' (connect work items), "
-            if not self._readonly else ""
+            if not self._readonly
+            else ""
         )
         return (
             f"Interact with Azure DevOps work items ({org_info}). "
@@ -101,7 +102,7 @@ class AzureDevOpsHandler(ToolHandler):
                 },
                 "fields": {
                     "type": "object",
-                    "description": "Fields for 'create' or 'update' operation. Example: {\"System.State\": \"Resolved\", \"System.AssignedTo\": \"user@example.com\"}",
+                    "description": 'Fields for \'create\' or \'update\' operation. Example: {"System.State": "Resolved", "System.AssignedTo": "user@example.com"}',
                 },
                 "target_work_item_id": {
                     "type": "integer",
@@ -127,9 +128,7 @@ class AzureDevOpsHandler(ToolHandler):
     def _get_auth_header(self) -> str:
         """Get Basic auth header value from PAT."""
         if not self._pat:
-            raise RuntimeError(
-                "No Azure DevOps PAT configured. Set AZURE_DEVOPS_PAT env var."
-            )
+            raise RuntimeError("No Azure DevOps PAT configured. Set AZURE_DEVOPS_PAT env var.")
         # Azure DevOps uses empty username with PAT as password
         credentials = base64.b64encode(f":{self._pat}".encode()).decode()
         return f"Basic {credentials}"
@@ -175,9 +174,7 @@ class AzureDevOpsHandler(ToolHandler):
         content_type: str = "application/json",
     ) -> dict[str, Any]:
         """Make an async HTTP request to Azure DevOps API."""
-        return await asyncio.to_thread(
-            self._make_request_sync, method, url, data, content_type
-        )
+        return await asyncio.to_thread(self._make_request_sync, method, url, data, content_type)
 
     def _api_url(
         self,
@@ -259,9 +256,7 @@ class AzureDevOpsHandler(ToolHandler):
         ids = [str(wi["id"]) for wi in work_items[:top]]
         ids_param = ",".join(ids)
 
-        details_url = self._api_url(
-            "wit/workitems", project, {"ids": ids_param, "$expand": "None"}
-        )
+        details_url = self._api_url("wit/workitems", project, {"ids": ids_param, "$expand": "None"})
         details = await self._make_request("GET", details_url)
 
         # Format results
@@ -273,7 +268,11 @@ class AzureDevOpsHandler(ToolHandler):
             state = fields.get("System.State", "Unknown")
             wi_type = fields.get("System.WorkItemType", "Item")
             assigned = fields.get("System.AssignedTo", {})
-            assigned_name = assigned.get("displayName", "Unassigned") if isinstance(assigned, dict) else "Unassigned"
+            assigned_name = (
+                assigned.get("displayName", "Unassigned")
+                if isinstance(assigned, dict)
+                else "Unassigned"
+            )
 
             lines.append(f"  [{wi_id}] {wi_type}: {title}")
             lines.append(f"      State: {state} | Assigned: {assigned_name}")
@@ -399,9 +398,7 @@ class AzureDevOpsHandler(ToolHandler):
             for field, value in fields.items()
         ]
 
-        result = await self._make_request(
-            "PATCH", url, patch_ops, "application/json-patch+json"
-        )
+        result = await self._make_request("PATCH", url, patch_ops, "application/json-patch+json")
 
         return ToolOutput(
             content=f"Work item #{wi_id} updated successfully. New revision: {result.get('rev')}",
@@ -442,9 +439,7 @@ class AzureDevOpsHandler(ToolHandler):
         top = args.get("top", 50)
 
         # Get all revisions
-        url = self._api_url(
-            f"wit/workitems/{wi_id}/revisions", project, {"$top": str(top)}
-        )
+        url = self._api_url(f"wit/workitems/{wi_id}/revisions", project, {"$top": str(top)})
         result = await self._make_request("GET", url)
 
         revisions = result.get("value", [])
@@ -487,8 +482,12 @@ class AzureDevOpsHandler(ToolHandler):
 
                 # Normalize AssignedTo for comparison
                 if field == "System.AssignedTo":
-                    curr_val = curr_val.get("displayName") if isinstance(curr_val, dict) else curr_val
-                    prev_val = prev_val.get("displayName") if isinstance(prev_val, dict) else prev_val
+                    curr_val = (
+                        curr_val.get("displayName") if isinstance(curr_val, dict) else curr_val
+                    )
+                    prev_val = (
+                        prev_val.get("displayName") if isinstance(prev_val, dict) else prev_val
+                    )
 
                 if curr_val != prev_val:
                     field_name = field.split(".")[-1]
@@ -545,9 +544,7 @@ class AzureDevOpsHandler(ToolHandler):
         # URL includes the work item type
         url = self._api_url(f"wit/workitems/${quote(wi_type)}", project)
 
-        result = await self._make_request(
-            "POST", url, patch_ops, "application/json-patch+json"
-        )
+        result = await self._make_request("POST", url, patch_ops, "application/json-patch+json")
 
         new_id = result.get("id")
         return ToolOutput(

@@ -109,19 +109,19 @@ class ToolFactory:
         create_only = self.profile.file_write == FileWriteMode.CREATE_ONLY
         requires_write_approval = self.profile.requires_tool_approval("write")
 
-        registry.register(WriteHandler(
-            create_only=create_only,
-            requires_approval=requires_write_approval,
-        ))
+        registry.register(
+            WriteHandler(
+                create_only=create_only,
+                requires_approval=requires_write_approval,
+            )
+        )
 
         # Edit tool only available in FULL mode
         if self.profile.file_write == FileWriteMode.FULL:
             requires_edit_approval = self.profile.requires_tool_approval("edit")
             registry.register(EditHandler(requires_approval=requires_edit_approval))
 
-    def _register_database_tools(
-        self, registry: ToolRegistry, env: dict[str, str]
-    ) -> None:
+    def _register_database_tools(self, registry: ToolRegistry, env: dict[str, str]) -> None:
         """Register database tools from config file."""
         readonly = self.profile.database == DatabaseMode.READONLY
         db_configs = self._load_database_configs(env)
@@ -129,9 +129,7 @@ class ToolFactory:
         for db_type, configs in db_configs.items():
             self._register_db_handler(registry, db_type, configs, readonly)
 
-    def _load_database_configs(
-        self, env: dict[str, str]
-    ) -> dict[str, list[DatabaseConfig]]:
+    def _load_database_configs(self, env: dict[str, str]) -> dict[str, list[DatabaseConfig]]:
         """Load multi-database configuration if available.
 
         Raises:
@@ -151,6 +149,7 @@ class ToolFactory:
 
         if db_type == "sqlite":
             from ..tools.handlers.sqlite import SqliteHandler
+
             handler = SqliteHandler(
                 configs=configs, readonly=readonly, requires_approval=requires_approval
             )
@@ -158,6 +157,7 @@ class ToolFactory:
         elif db_type == "postgres":
             try:
                 from ..tools.handlers.postgres import PostgresHandler
+
                 handler = PostgresHandler(
                     configs=configs, readonly=readonly, requires_approval=requires_approval
                 )
@@ -167,6 +167,7 @@ class ToolFactory:
         elif db_type == "mysql":
             try:
                 from ..tools.handlers.mysql import MysqlHandler
+
                 handler = MysqlHandler(
                     configs=configs, readonly=readonly, requires_approval=requires_approval
                 )
@@ -176,6 +177,7 @@ class ToolFactory:
         elif db_type == "oracle":
             try:
                 from ..tools.handlers.oracle import OracleHandler
+
                 handler = OracleHandler(
                     configs=configs, readonly=readonly, requires_approval=requires_approval
                 )
@@ -185,6 +187,7 @@ class ToolFactory:
         elif db_type == "vertica":
             try:
                 from ..tools.handlers.vertica import VerticaHandler
+
                 handler = VerticaHandler(
                     configs=configs, readonly=readonly, requires_approval=requires_approval
                 )
@@ -192,9 +195,7 @@ class ToolFactory:
             except ImportError:
                 pass
 
-    def _register_external_services(
-        self, registry: ToolRegistry, env: dict[str, str]
-    ) -> None:
+    def _register_external_services(self, registry: ToolRegistry, env: dict[str, str]) -> None:
         """Register external service tools that are configured via environment."""
         # Azure DevOps - writable by default since agent needs to post findings
         # Set AZURE_DEVOPS_READONLY=true to disable mutations
@@ -205,6 +206,7 @@ class ToolFactory:
     def _register_azure_devops(self, registry: ToolRegistry, readonly: bool) -> None:
         """Register Azure DevOps handler."""
         from ..tools.handlers.azure_devops import AzureDevOpsHandler
+
         requires_approval = self.profile.requires_tool_approval("azure_devops")
         handler = AzureDevOpsHandler(readonly=readonly, requires_approval=requires_approval)
         registry.register(handler)

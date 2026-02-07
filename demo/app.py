@@ -35,7 +35,13 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 import pandas as pd
 import streamlit as st
 
-from rho_agent.runtime import RuntimeOptions, close_runtime, create_runtime, run_prompt, start_runtime
+from rho_agent.runtime import (
+    RuntimeOptions,
+    close_runtime,
+    create_runtime,
+    run_prompt,
+    start_runtime,
+)
 from rho_agent.runtime.types import AgentRuntime
 
 # Config
@@ -128,7 +134,10 @@ def render_chat_tab() -> None:
                         # Format signature like terminal: sqlite(action='describe', table='employees')
                         args = tc.get("args", {})
                         if args:
-                            arg_parts = [f"{k}='{v}'" if isinstance(v, str) else f"{k}={v}" for k, v in args.items()]
+                            arg_parts = [
+                                f"{k}='{v}'" if isinstance(v, str) else f"{k}={v}"
+                                for k, v in args.items()
+                            ]
                             sig = f"{tc['name']}({', '.join(arg_parts)})"
                         else:
                             sig = f"{tc['name']}()"
@@ -186,13 +195,18 @@ def render_chat_tab() -> None:
                         elif event.type == "tool_start":
                             status_placeholder.empty()
                             args = event.tool_args or {}
-                            arg_parts = [f"{k}='{v}'" if isinstance(v, str) else f"{k}={v}" for k, v in args.items()]
+                            arg_parts = [
+                                f"{k}='{v}'" if isinstance(v, str) else f"{k}={v}"
+                                for k, v in args.items()
+                            ]
                             sig = f"{event.tool_name}({', '.join(arg_parts)})"
-                            tool_calls.append({
-                                "name": event.tool_name,
-                                "args": args,
-                                "sig": sig,
-                            })
+                            tool_calls.append(
+                                {
+                                    "name": event.tool_name,
+                                    "args": args,
+                                    "sig": sig,
+                                }
+                            )
                             with tool_container:
                                 current_tool_placeholder = st.empty()
                                 current_tool_placeholder.markdown(f"`{sig}` ...")
@@ -217,11 +231,13 @@ def render_chat_tab() -> None:
                 asyncio.run(stream_events())
 
             # Save response to history
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response_text,
-                "tool_calls": tool_calls,
-            })
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": response_text,
+                    "tool_calls": tool_calls,
+                }
+            )
 
             # Clear pending prompt and rerun to show the final response
             st.session_state.pending_prompt = None
@@ -282,7 +298,11 @@ def render_sql_tab() -> None:
             selected = st.selectbox(
                 "Query History",
                 options=[""] + st.session_state.query_history[-10:],
-                format_func=lambda x: x[:50] + "..." if len(x) > 50 else x if x else "Select previous query...",
+                format_func=lambda x: x[:50] + "..."
+                if len(x) > 50
+                else x
+                if x
+                else "Select previous query...",
             )
             if selected:
                 st.session_state.sql_editor = selected
@@ -328,8 +348,7 @@ def render_sql_tab() -> None:
             cursor.execute(f"PRAGMA table_info({table})")
             columns = cursor.fetchall()
             schema_df = pd.DataFrame(
-                columns,
-                columns=["cid", "name", "type", "notnull", "default", "pk"]
+                columns, columns=["cid", "name", "type", "notnull", "default", "pk"]
             )[["name", "type", "pk"]]
             schema_df["pk"] = schema_df["pk"].apply(lambda x: "PK" if x else "")
             st.dataframe(schema_df, width="stretch", hide_index=True)

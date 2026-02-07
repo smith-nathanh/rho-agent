@@ -50,13 +50,10 @@ class PostgresHandler(DatabaseHandler):
     def db_type(self) -> str:
         return "postgres"
 
-
     def _get_connection(self, alias: str) -> Any:
         """Get or create connection for the specified database alias."""
         if psycopg is None:
-            raise RuntimeError(
-                "PostgreSQL driver not available. Install psycopg: uv add psycopg"
-            )
+            raise RuntimeError("PostgreSQL driver not available. Install psycopg: uv add psycopg")
 
         # Check if existing connection is still valid
         if alias in self._connections:
@@ -76,9 +73,7 @@ class PostgresHandler(DatabaseHandler):
 
         config = self._get_config(alias)
         if not config.database:
-            raise RuntimeError(
-                f"No database name configured for PostgreSQL '{alias}'"
-            )
+            raise RuntimeError(f"No database name configured for PostgreSQL '{alias}'")
 
         if PSYCOPG_VERSION == 3:
             # psycopg3 connection
@@ -154,9 +149,7 @@ class PostgresHandler(DatabaseHandler):
                 {},
             )
 
-    def _get_describe_sql(
-        self, table_name: str, schema: str | None
-    ) -> tuple[str, dict[str, Any]]:
+    def _get_describe_sql(self, table_name: str, schema: str | None) -> tuple[str, dict[str, Any]]:
         if schema:
             return (
                 """

@@ -46,7 +46,6 @@ class MysqlHandler(DatabaseHandler):
     def db_type(self) -> str:
         return "mysql"
 
-
     def _get_connection(self, alias: str) -> Any:
         """Get or create connection for the specified database alias."""
         if not MYSQL_AVAILABLE:
@@ -64,9 +63,7 @@ class MysqlHandler(DatabaseHandler):
 
         config = self._get_config(alias)
         if not config.database:
-            raise RuntimeError(
-                f"No database name configured for MySQL '{alias}'"
-            )
+            raise RuntimeError(f"No database name configured for MySQL '{alias}'")
 
         conn = mysql.connector.connect(
             host=config.host or "localhost",
@@ -132,9 +129,7 @@ class MysqlHandler(DatabaseHandler):
                 {},
             )
 
-    def _get_describe_sql(
-        self, table_name: str, schema: str | None
-    ) -> tuple[str, dict[str, Any]]:
+    def _get_describe_sql(self, table_name: str, schema: str | None) -> tuple[str, dict[str, Any]]:
         if schema:
             return (
                 """

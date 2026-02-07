@@ -167,13 +167,15 @@ class EvalMySQLHandler(ToolHandler):
 
         # Build output
         lines = []
-        lines.append(" | ".join(col.ljust(widths[i])[:widths[i]] for i, col in enumerate(columns)))
+        lines.append(" | ".join(col.ljust(widths[i])[: widths[i]] for i, col in enumerate(columns)))
         lines.append("-+-".join("-" * w for w in widths))
         for row in display_rows:
-            lines.append(" | ".join(
-                str(v).ljust(widths[i])[:widths[i]] if i < len(widths) else str(v)
-                for i, v in enumerate(row)
-            ))
+            lines.append(
+                " | ".join(
+                    str(v).ljust(widths[i])[: widths[i]] if i < len(widths) else str(v)
+                    for i, v in enumerate(row)
+                )
+            )
 
         if truncated:
             lines.append(f"... ({len(rows) - self._row_limit} more rows)")
@@ -191,7 +193,8 @@ class EvalMySQLHandler(ToolHandler):
 
         # Filter out password warning from stderr
         stderr_filtered = "\n".join(
-            line for line in stderr.split("\n")
+            line
+            for line in stderr.split("\n")
             if "Using a password on the command line" not in line
         ).strip()
 

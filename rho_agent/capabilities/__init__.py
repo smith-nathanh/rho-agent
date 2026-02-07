@@ -66,7 +66,9 @@ class ApprovalMode(Enum):
 
 
 # Default tools that require approval in DANGEROUS mode
-DEFAULT_DANGEROUS_TOOLS = frozenset({"bash", "write", "edit", "oracle", "mysql", "sqlite", "vertica", "postgres"})
+DEFAULT_DANGEROUS_TOOLS = frozenset(
+    {"bash", "write", "edit", "oracle", "mysql", "sqlite", "vertica", "postgres"}
+)
 
 # Default patterns that always require approval regardless of mode
 DEFAULT_DANGEROUS_PATTERNS = (
@@ -187,7 +189,9 @@ class CapabilityProfile:
             if file_write_config is False:
                 file_write_mode = FileWriteMode.OFF
             else:
-                file_write_mode = FileWriteMode(file_write_config) if file_write_config else FileWriteMode.OFF
+                file_write_mode = (
+                    FileWriteMode(file_write_config) if file_write_config else FileWriteMode.OFF
+                )
 
         # Extract database settings
         db_config = data.get("database", {})
@@ -200,10 +204,14 @@ class CapabilityProfile:
         approval_config = data.get("approval", {})
         if isinstance(approval_config, dict):
             approval_mode = ApprovalMode(approval_config.get("mode", "dangerous"))
-            required_tools = frozenset(approval_config.get("required_tools", DEFAULT_DANGEROUS_TOOLS))
+            required_tools = frozenset(
+                approval_config.get("required_tools", DEFAULT_DANGEROUS_TOOLS)
+            )
             patterns = tuple(approval_config.get("dangerous_patterns", DEFAULT_DANGEROUS_PATTERNS))
         else:
-            approval_mode = ApprovalMode(approval_config) if approval_config else ApprovalMode.DANGEROUS
+            approval_mode = (
+                ApprovalMode(approval_config) if approval_config else ApprovalMode.DANGEROUS
+            )
             required_tools = DEFAULT_DANGEROUS_TOOLS
             patterns = DEFAULT_DANGEROUS_PATTERNS
 

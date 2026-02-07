@@ -122,7 +122,11 @@ class CerebrasClient:
             kwargs["parallel_tool_calls"] = False  # Force sequential
             # Debug: confirm we're using strict tools
             import sys
-            print(f"[CerebrasClient] Using {len(prompt.tools)} strict tools, parallel_tool_calls=False", file=sys.stderr)
+
+            print(
+                f"[CerebrasClient] Using {len(prompt.tools)} strict tools, parallel_tool_calls=False",
+                file=sys.stderr,
+            )
 
         try:
             response = await self._client.chat.completions.create(**kwargs)
@@ -159,9 +163,7 @@ class CerebrasClient:
         except Exception as e:
             yield StreamEvent(type="error", content=str(e))
 
-    async def complete(
-        self, messages: list[dict[str, Any]]
-    ) -> tuple[str, dict[str, int]]:
+    async def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, int]]:
         """Non-streaming completion for simple requests like summarization."""
         try:
             response = await self._client.chat.completions.create(

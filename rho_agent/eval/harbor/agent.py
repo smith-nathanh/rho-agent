@@ -129,11 +129,10 @@ class RhoAgent(BaseInstalledAgent):
 
         try:
             import sqlite3
+
             conn = sqlite3.connect(telemetry_path)
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT total_input_tokens, total_output_tokens FROM sessions LIMIT 1"
-            )
+            cursor.execute("SELECT total_input_tokens, total_output_tokens FROM sessions LIMIT 1")
             row = cursor.fetchone()
             conn.close()
 
@@ -151,7 +150,12 @@ class RhoAgent(BaseInstalledAgent):
         """Create commands to run rho-agent on the task."""
         # Build environment variables
         # Strip provider prefix from model name (e.g., "openai/gpt-5-mini" -> "gpt-5-mini")
-        model = os.environ.get("RHO_AGENT_MODEL") or os.environ.get("OPENAI_MODEL") or self.model_name or "gpt-5-mini"
+        model = (
+            os.environ.get("RHO_AGENT_MODEL")
+            or os.environ.get("OPENAI_MODEL")
+            or self.model_name
+            or "gpt-5-mini"
+        )
         if "/" in model:
             model = model.split("/", 1)[1]
 
@@ -211,10 +215,10 @@ class RhoAgent(BaseInstalledAgent):
         # Note: .env may not exist (gitignored), so use || true to prevent chain failure
         bash_only_flag = " --bash-only" if self._bash_only else ""
         cmd = (
-            f'set -a; [ -f /rho-agent/.env ] && source /rho-agent/.env || true; set +a; '
+            f"set -a; [ -f /rho-agent/.env ] && source /rho-agent/.env || true; set +a; "
             f'export PATH="$HOME/.local/bin:$PATH"; '
             f'/rho-agent/.venv/bin/python -B -m rho_agent.eval.harbor.runner {escaped} "$(pwd)"{bash_only_flag} '
-            f'2>&1 | tee /logs/agent/stdout.txt'
+            f"2>&1 | tee /logs/agent/stdout.txt"
         )
 
         return [

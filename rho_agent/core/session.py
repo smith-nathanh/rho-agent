@@ -121,11 +121,7 @@ class Session:
 
     def get_user_messages(self) -> list[str]:
         """Extract all user messages from history."""
-        return [
-            m["content"]
-            for m in self.history
-            if m.get("role") == "user" and m.get("content")
-        ]
+        return [m["content"] for m in self.history if m.get("role") == "user" and m.get("content")]
 
     def estimate_tokens(self) -> int:
         """Rough estimate of tokens in history (4 chars ≈ 1 token)."""

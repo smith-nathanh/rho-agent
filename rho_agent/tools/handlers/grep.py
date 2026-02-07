@@ -121,13 +121,20 @@ class GrepHandler(ToolHandler):
             cmd.extend(["--glob", glob_pattern])
 
         # Skip common non-content directories
-        cmd.extend([
-            "--glob", "!.git/",
-            "--glob", "!node_modules/",
-            "--glob", "!__pycache__/",
-            "--glob", "!.venv/",
-            "--glob", "!venv/",
-        ])
+        cmd.extend(
+            [
+                "--glob",
+                "!.git/",
+                "--glob",
+                "!node_modules/",
+                "--glob",
+                "!__pycache__/",
+                "--glob",
+                "!.venv/",
+                "--glob",
+                "!venv/",
+            ]
+        )
 
         # The pattern and path
         cmd.append(pattern)
@@ -235,7 +242,7 @@ class GrepHandler(ToolHandler):
             return True  # Not a standard rg line
 
         # After filename, look for linenum separator
-        rest = line[first_colon + 1:]
+        rest = line[first_colon + 1 :]
 
         # Find where the line number ends
         dash_pos = rest.find("-")

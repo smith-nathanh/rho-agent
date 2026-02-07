@@ -13,19 +13,65 @@ MAX_LINE_LENGTH = 500
 # Binary file extensions to reject
 BINARY_EXTENSIONS = {
     # Images
-    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".ico",
+    ".webp",
+    ".svg",
+    ".tiff",
+    ".tif",
     # Audio/Video
-    ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv", ".flac", ".ogg", ".webm",
+    ".mp3",
+    ".mp4",
+    ".wav",
+    ".avi",
+    ".mov",
+    ".mkv",
+    ".flac",
+    ".ogg",
+    ".webm",
     # Archives
-    ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".bz2",
+    ".xz",
+    ".7z",
+    ".rar",
     # Compiled/Binary
-    ".exe", ".dll", ".so", ".dylib", ".o", ".a", ".pyc", ".pyo", ".class", ".wasm",
+    ".exe",
+    ".dll",
+    ".so",
+    ".dylib",
+    ".o",
+    ".a",
+    ".pyc",
+    ".pyo",
+    ".class",
+    ".wasm",
     # Documents (binary formats)
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
     # Fonts
-    ".ttf", ".otf", ".woff", ".woff2", ".eot",
+    ".ttf",
+    ".otf",
+    ".woff",
+    ".woff2",
+    ".eot",
     # Other binary
-    ".bin", ".dat", ".db", ".sqlite", ".sqlite3",
+    ".bin",
+    ".dat",
+    ".db",
+    ".sqlite",
+    ".sqlite3",
 }
 
 
@@ -126,9 +172,7 @@ class ReadHandler(ToolHandler):
 
             # Add metadata about truncation
             if end_idx < total_lines:
-                content += (
-                    f"\n\n[Showing lines {start_line}-{end_idx} of {total_lines}]"
-                )
+                content += f"\n\n[Showing lines {start_line}-{end_idx} of {total_lines}]"
 
             return ToolOutput(
                 content=content,

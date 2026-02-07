@@ -17,6 +17,7 @@ def _default_output_dir(model: str, task_type: str) -> Path:
     safe_model = model.replace("/", "-")
     return Path("results") / f"{safe_model}-{task_type}"
 
+
 import typer  # noqa: E402
 from rich.console import Console  # noqa: E402
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn  # noqa: E402
@@ -95,7 +96,9 @@ def dbbench(
     ] = False,
     service_tier: Annotated[
         Optional[str],
-        typer.Option("--service-tier", help="OpenAI service tier: 'flex' for 50% cost savings (slower)"),
+        typer.Option(
+            "--service-tier", help="OpenAI service tier: 'flex' for 50% cost savings (slower)"
+        ),
     ] = None,
 ) -> None:
     """Run DBBench evaluation tasks."""
@@ -108,7 +111,9 @@ def dbbench(
     if select_only:
         original_count = len(tasks)
         tasks = [t for t in tasks if t.query_type == "SELECT"]
-        console.print(f"Filtered to {len(tasks)} SELECT queries (skipped {original_count - len(tasks)} mutation tasks)")
+        console.print(
+            f"Filtered to {len(tasks)} SELECT queries (skipped {original_count - len(tasks)} mutation tasks)"
+        )
 
     # Apply offset and limit
     if offset > 0:
@@ -153,18 +158,21 @@ def dbbench(
 
     # Save run config (only for new runs)
     if not resume:
-        save_run_config({
-            "model": model,
-            "base_url": base_url,
-            "max_turns": max_turns,
-            "parallel": parallel,
-            "data_file": data_file,
-            "system_prompt": system_prompt,
-            "select_only": select_only,
-            "offset": offset,
-            "limit": limit,
-            "service_tier": service_tier,
-        }, run_dir)
+        save_run_config(
+            {
+                "model": model,
+                "base_url": base_url,
+                "max_turns": max_turns,
+                "parallel": parallel,
+                "data_file": data_file,
+                "system_prompt": system_prompt,
+                "select_only": select_only,
+                "offset": offset,
+                "limit": limit,
+                "service_tier": service_tier,
+            },
+            run_dir,
+        )
 
     # Create runner
     runner = EvalRunner(config)
@@ -186,7 +194,9 @@ def dbbench(
         # Run evaluation (results saved incrementally)
         try:
             results, metrics = asyncio.run(
-                runner.run_dbbench_tasks(tasks, output_dir=run_dir, progress_callback=update_progress)
+                runner.run_dbbench_tasks(
+                    tasks, output_dir=run_dir, progress_callback=update_progress
+                )
             )
         except EvalAbortedError as e:
             console.print()
@@ -213,7 +223,9 @@ def os_interaction(
     ],
     scripts: Annotated[
         Optional[str],
-        typer.Option("--scripts", "-s", help="Path to check scripts directory (for single file mode)"),
+        typer.Option(
+            "--scripts", "-s", help="Path to check scripts directory (for single file mode)"
+        ),
     ] = None,
     model: Annotated[
         str,
@@ -257,7 +269,9 @@ def os_interaction(
     ] = False,
     service_tier: Annotated[
         Optional[str],
-        typer.Option("--service-tier", help="OpenAI service tier: 'flex' for 50% cost savings (slower)"),
+        typer.Option(
+            "--service-tier", help="OpenAI service tier: 'flex' for 50% cost savings (slower)"
+        ),
     ] = None,
 ) -> None:
     """Run OS Interaction evaluation tasks.
@@ -331,18 +345,21 @@ def os_interaction(
 
     # Save run config (only for new runs)
     if not resume:
-        save_run_config({
-            "model": model,
-            "base_url": base_url,
-            "max_turns": max_turns,
-            "parallel": parallel,
-            "data_path": data_path,
-            "scripts": scripts,
-            "system_prompt": system_prompt,
-            "offset": offset,
-            "limit": limit,
-            "service_tier": service_tier,
-        }, run_dir)
+        save_run_config(
+            {
+                "model": model,
+                "base_url": base_url,
+                "max_turns": max_turns,
+                "parallel": parallel,
+                "data_path": data_path,
+                "scripts": scripts,
+                "system_prompt": system_prompt,
+                "offset": offset,
+                "limit": limit,
+                "service_tier": service_tier,
+            },
+            run_dir,
+        )
 
     # Create runner
     runner = EvalRunner(config, scripts_dir=scripts)

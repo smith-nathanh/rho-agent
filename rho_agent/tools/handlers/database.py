@@ -63,9 +63,7 @@ def format_rows(columns: list[str], rows: list[tuple], max_rows: int) -> str:
     widths = [min(w, 50) for w in widths]
 
     # Build header
-    header = " | ".join(
-        str(col).ljust(widths[i])[: widths[i]] for i, col in enumerate(columns)
-    )
+    header = " | ".join(str(col).ljust(widths[i])[: widths[i]] for i, col in enumerate(columns))
     separator = "-+-".join("-" * w for w in widths)
 
     # Build rows
@@ -226,9 +224,7 @@ class DatabaseHandler(ToolHandler):
         """Get config for a database alias."""
         if alias not in self._configs:
             available = ", ".join(sorted(self._configs.keys())) or "none"
-            raise ValueError(
-                f"Unknown database '{alias}'. Available: {available}"
-            )
+            raise ValueError(f"Unknown database '{alias}'. Available: {available}")
         return self._configs[alias]
 
     @abstractmethod
@@ -249,9 +245,7 @@ class DatabaseHandler(ToolHandler):
         ...
 
     @abstractmethod
-    def _get_describe_sql(
-        self, table_name: str, schema: str | None
-    ) -> tuple[str, dict[str, Any]]:
+    def _get_describe_sql(self, table_name: str, schema: str | None) -> tuple[str, dict[str, Any]]:
         """Return (SQL, params) for describing a table's columns."""
         ...
 
@@ -329,9 +323,7 @@ class DatabaseHandler(ToolHandler):
                     success=False,
                 )
         except Exception as e:
-            return ToolOutput(
-                content=f"{self.db_type.title()} error: {e}", success=False
-            )
+            return ToolOutput(content=f"{self.db_type.title()} error: {e}", success=False)
 
     async def _handle_query(
         self, invocation: ToolInvocation, db_alias: str, row_limit: int
@@ -394,9 +386,7 @@ class DatabaseHandler(ToolHandler):
             metadata={"table_count": min(len(rows), row_limit)},
         )
 
-    async def _handle_describe(
-        self, invocation: ToolInvocation, db_alias: str
-    ) -> ToolOutput:
+    async def _handle_describe(self, invocation: ToolInvocation, db_alias: str) -> ToolOutput:
         """Get detailed schema for a table."""
         table_name = invocation.arguments.get("table_name", "")
         schema = invocation.arguments.get("schema")
@@ -424,9 +414,7 @@ class DatabaseHandler(ToolHandler):
             },
         )
 
-    async def _handle_export_query(
-        self, invocation: ToolInvocation, db_alias: str
-    ) -> ToolOutput:
+    async def _handle_export_query(self, invocation: ToolInvocation, db_alias: str) -> ToolOutput:
         """Export query results directly to a CSV file (streaming, memory-efficient)."""
         sql = invocation.arguments.get("sql", "")
         export_path = invocation.arguments.get("export_path", "")
@@ -443,9 +431,18 @@ class DatabaseHandler(ToolHandler):
 
         # Safety check: don't write to sensitive locations
         sensitive_patterns = [
-            ".bashrc", ".zshrc", ".profile", ".bash_profile",
-            ".ssh/", ".gnupg/", ".aws/", ".config/",
-            "/etc/", "/usr/", "/bin/", "/sbin/",
+            ".bashrc",
+            ".zshrc",
+            ".profile",
+            ".bash_profile",
+            ".ssh/",
+            ".gnupg/",
+            ".aws/",
+            ".config/",
+            "/etc/",
+            "/usr/",
+            "/bin/",
+            "/sbin/",
         ]
         path_str_lower = str(path).lower()
         for pattern in sensitive_patterns:

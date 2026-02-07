@@ -41,7 +41,12 @@ from rho_agent.client.litellm_client import LiteLLMClient
 from rho_agent.core.agent import Agent, AgentEvent
 from rho_agent.core.session import Session
 from rho_agent.eval.harbor.trajectory import TrajectoryBuilder
-from rho_agent.observability import ObservabilityConfig, CaptureConfig, TenantConfig, create_processor
+from rho_agent.observability import (
+    ObservabilityConfig,
+    CaptureConfig,
+    TenantConfig,
+    create_processor,
+)
 from rho_agent.prompts import load_prompt, prepare_prompt
 
 # Load .env file - try multiple locations
@@ -125,10 +130,13 @@ async def run_reviewer_phase(
         formatted_trace = format_event_trace(event_trace)
 
         # Build review prompt from template
-        review_content, _ = prepare_prompt(reviewer_prompt, {
-            "task_instruction": instruction,
-            "agent_trace": formatted_trace,
-        })
+        review_content, _ = prepare_prompt(
+            reviewer_prompt,
+            {
+                "task_instruction": instruction,
+                "agent_trace": formatted_trace,
+            },
+        )
 
         # Create reviewer session (text-only, no tools)
         reviewer_session = Session(system_prompt=_REVIEWER_SYSTEM)
@@ -164,8 +172,7 @@ async def run_reviewer_phase(
         # Run revision with actor
         print(f"[Revision needed: {feedback[:100]}...]", file=sys.stderr)
         revision_prompt = (
-            f"A reviewer found issues with your work:\n\n{feedback}\n\n"
-            f"Please address these issues."
+            f"A reviewer found issues with your work:\n\n{feedback}\n\nPlease address these issues."
         )
 
         # Run actor revision turn and collect events for next review
@@ -193,11 +200,14 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     """
     # Load and render eval prompt template
     prompt = load_prompt(_EVAL_PROMPT)
-    system_prompt, _ = prepare_prompt(prompt, {
-        "platform": "Linux",
-        "home_dir": str(Path.home()),
-        "working_dir": working_dir,
-    })
+    system_prompt, _ = prepare_prompt(
+        prompt,
+        {
+            "platform": "Linux",
+            "home_dir": str(Path.home()),
+            "working_dir": working_dir,
+        },
+    )
     session = Session(system_prompt=system_prompt)
 
     # Use eval profile - unrestricted, no approval required
@@ -214,7 +224,11 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     # LiteLLM uses model names like "openai/gpt-5-mini" or "anthropic/claude-3-5-sonnet"
     model = os.environ.get("RHO_AGENT_MODEL") or os.environ.get("OPENAI_MODEL", "openai/gpt-5-mini")
     api_key = os.environ.get("OPENAI_API_KEY")
-    temperature = float(os.environ["RHO_AGENT_TEMPERATURE"]) if "RHO_AGENT_TEMPERATURE" in os.environ else None
+    temperature = (
+        float(os.environ["RHO_AGENT_TEMPERATURE"])
+        if "RHO_AGENT_TEMPERATURE" in os.environ
+        else None
+    )
     reasoning_effort = os.environ.get("RHO_AGENT_REASONING_EFFORT")
     chunk_timeout = float(os.environ.get("RHO_AGENT_CHUNK_TIMEOUT", "180.0"))
     initial_timeout = float(os.environ.get("RHO_AGENT_INITIAL_TIMEOUT", "600.0"))
@@ -299,7 +313,9 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                     text_content += event.content
                     print(event.content, end="", flush=True)
                 elif event.type == "tool_start":
-                    print(f"\n{format_tool_call(event.tool_name, event.tool_args)}", file=sys.stderr)
+                    print(
+                        f"\n{format_tool_call(event.tool_name, event.tool_args)}", file=sys.stderr
+                    )
                 elif event.type == "tool_end":
                     if os.environ.get("RHO_AGENT_DEBUG"):
                         result_preview = (
@@ -309,14 +325,18 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                         )
                         print(f"[Result: {result_preview}]", file=sys.stderr)
                     # Write tokens incrementally after each tool (survives timeout)
-                    Path("/logs/agent/tokens.json").write_text(json.dumps({
-                        "input": session.total_input_tokens,
-                        "output": session.total_output_tokens,
-                        "cached": session.total_cached_tokens,
-                        "reasoning": session.total_reasoning_tokens,
-                        "cost_usd": session.total_cost_usd,
-                        "context_size": session.last_input_tokens,
-                    }))
+                    Path("/logs/agent/tokens.json").write_text(
+                        json.dumps(
+                            {
+                                "input": session.total_input_tokens,
+                                "output": session.total_output_tokens,
+                                "cached": session.total_cached_tokens,
+                                "reasoning": session.total_reasoning_tokens,
+                                "cost_usd": session.total_cost_usd,
+                                "context_size": session.last_input_tokens,
+                            }
+                        )
+                    )
                 elif event.type == "api_call_complete":
                     if os.environ.get("RHO_AGENT_DEBUG"):
                         usage = event.usage or {}
@@ -335,8 +355,8 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                     print(f"\nError: {event.content}", file=sys.stderr)
                 elif event.type == "turn_complete":
                     if event.usage:
-                        cost = event.usage.get('total_cost_usd', 0.0)
-                        reasoning = event.usage.get('total_reasoning_tokens', 0)
+                        cost = event.usage.get("total_cost_usd", 0.0)
+                        reasoning = event.usage.get("total_reasoning_tokens", 0)
                         reasoning_str = f", reasoning={reasoning}" if reasoning else ""
                         print(
                             f"\n[Tokens: in={event.usage.get('total_input_tokens', 0)}, "
@@ -345,14 +365,18 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                             file=sys.stderr,
                         )
                     # Write tokens/cost incrementally to mounted path (survives process kill)
-                    Path("/logs/agent/tokens.json").write_text(json.dumps({
-                        "input": session.total_input_tokens,
-                        "output": session.total_output_tokens,
-                        "cached": session.total_cached_tokens,
-                        "reasoning": session.total_reasoning_tokens,
-                        "cost_usd": session.total_cost_usd,
-                        "context_size": session.last_input_tokens,
-                    }))
+                    Path("/logs/agent/tokens.json").write_text(
+                        json.dumps(
+                            {
+                                "input": session.total_input_tokens,
+                                "output": session.total_output_tokens,
+                                "cached": session.total_cached_tokens,
+                                "reasoning": session.total_reasoning_tokens,
+                                "cost_usd": session.total_cost_usd,
+                                "context_size": session.last_input_tokens,
+                            }
+                        )
+                    )
 
             # Build trajectory from this turn's events
             trajectory_builder.build_from_events(turn_events, user_input=prompt_text)

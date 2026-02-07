@@ -209,19 +209,13 @@ def _compare_results(
     as equal to each other.
     """
     # Normalize values in both result sets
-    pred_normalized = [
-        tuple(_normalize_value(v) for v in row) for row in predicted
-    ]
-    gold_normalized = [
-        tuple(_normalize_value(v) for v in row) for row in gold
-    ]
+    pred_normalized = [tuple(_normalize_value(v) for v in row) for row in predicted]
+    gold_normalized = [tuple(_normalize_value(v) for v in row) for row in gold]
 
     # Compare as multisets (sorted lists of tuples)
     # Use a key function that handles None comparison
     def sort_key(row):
-        return tuple(
-            (0, "") if v is None else (1, v) for v in row
-        )
+        return tuple((0, "") if v is None else (1, v) for v in row)
 
     try:
         pred_sorted = sorted(pred_normalized, key=sort_key)
