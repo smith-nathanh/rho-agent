@@ -55,6 +55,9 @@ class ObservabilityProcessor:
         self._turn_output_tokens = 0
         self._turn_reasoning_tokens = 0
 
+        # Session lifecycle state for idempotent runtime reuse.
+        self._session_started = False
+
     @property
     def context(self) -> TelemetryContext:
         """Get the telemetry context."""
@@ -66,8 +69,14 @@ class ObservabilityProcessor:
         return self._exporter
 
     async def start_session(self) -> None:
-        """Start the telemetry session."""
+        """Start the telemetry session.
+
+        This call is idempotent for a processor instance.
+        """
+        if self._session_started:
+            return
         await self._exporter.start_session(self._context)
+        self._session_started = True
 
     async def end_session(self, status: str = "completed") -> None:
         """End the telemetry session.
@@ -75,9 +84,10 @@ class ObservabilityProcessor:
         Args:
             status: Final session status ('completed', 'error', 'cancelled').
         """
+        if not self._session_started:
+            return
         self._context.end_session(status)
         await self._exporter.end_session(self._context)
-        await self._exporter.close()
 
     async def wrap_turn(
         self,

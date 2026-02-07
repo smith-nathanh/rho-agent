@@ -19,6 +19,16 @@ uv sync
 uv tool install .
 ```
 
+## Testing
+
+```bash
+# Install dev dependencies (pytest, pytest-asyncio, ruff)
+uv sync --group dev
+
+# Run all tests
+uv run --group dev python -m pytest
+```
+
 ## Running the Agent
 
 ### Interactive CLI
@@ -47,6 +57,38 @@ uv run rho-agent main --prompt examples/job-failure.md \
 ```
 
 Prompt templates use YAML frontmatter and Jinja2 variables. See [Prompt Files](#prompt-files) for details.
+
+### Programmatic API (First-Class)
+
+For dispatching many agents from Python (services, workers, batch jobs), use
+the package API in `rho_agent.runtime` instead of shelling out to CLI:
+
+```python
+import asyncio
+from rho_agent import RuntimeOptions, create_runtime, run_prompt
+
+
+async def main() -> None:
+    runtime = create_runtime(
+        "You are a research assistant.",
+        options=RuntimeOptions(
+            profile="developer",
+            working_dir="/tmp/work",
+            team_id="acme",
+            project_id="incident-response",
+            telemetry_metadata={"job_id": "job-123", "shard": "3"},
+        ),
+    )
+    result = await run_prompt(runtime, "Analyze recent failures and summarize root causes.")
+    print(result.text)
+    print(result.status, result.usage)
+
+asyncio.run(main())
+```
+
+`RuntimeOptions` supports the same observability fields as CLI (`team_id`,
+`project_id`, `observability_config`) plus `telemetry_metadata` and
+`session_id` to make high-volume dispatch traceable.
 
 ### Web UI
 
