@@ -17,6 +17,7 @@ Output format Codex-style JSON with stdout+stderr combined, exit code, and durat
 import asyncio
 import json
 import os
+import re
 import time
 from typing import Any
 
@@ -117,16 +118,16 @@ ALLOWED_COMMANDS = {
 }
 
 # Patterns that indicate write operations (blocked in RESTRICTED mode)
-DANGEROUS_PATTERNS = [
-    ">",  # Redirect (overwrite)
+DANGEROUS_SUBSTRINGS = [
     ">>",  # Redirect (append)
-    "rm ",
-    "rm\t",
+    ">",  # Redirect (overwrite)
+]
+
+DANGEROUS_COMMAND_WORDS = {
+    "rm",
     "rmdir",
-    "mv ",
-    "mv\t",
-    "cp ",  # Could overwrite
-    "cp\t",
+    "mv",
+    "cp",
     "chmod",
     "chown",
     "chgrp",
@@ -134,8 +135,7 @@ DANGEROUS_PATTERNS = [
     "touch",
     "truncate",
     "shred",
-    "dd ",
-    "dd\t",
+    "dd",
     "mkfs",
     "mount",
     "umount",
@@ -151,16 +151,48 @@ DANGEROUS_PATTERNS = [
     "apt",
     "yum",
     "dnf",
-    "brew ",
-    "pip ",
-    "npm ",
-    "yarn ",
-    "cargo ",
+    "brew",
+    "pip",
+    "npm",
+    "yarn",
+    "cargo",
     "sudo",
-    "su ",
-    "su\t",
+    "su",
     "doas",
-]
+}
+
+
+def _strip_heredoc_bodies(command: str) -> str:
+    """Remove heredoc body text so safety checks only inspect executed shell syntax."""
+    lines = command.splitlines()
+    if not lines:
+        return command
+
+    result: list[str] = []
+    active_delimiter: str | None = None
+
+    for line in lines:
+        if active_delimiter is not None:
+            if line.strip() == active_delimiter:
+                active_delimiter = None
+            continue
+
+        result.append(line)
+        match = re.search(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1", line)
+        if match:
+            active_delimiter = match.group(2)
+
+    return "\n".join(result)
+
+
+def _contains_dangerous_word(command: str) -> str | None:
+    """Return first dangerous command word matched as a standalone token."""
+    lowered = command.lower()
+    for word in sorted(DANGEROUS_COMMAND_WORDS, key=len, reverse=True):
+        pattern = rf"(^|[\s;&|()]){re.escape(word)}(?=$|[\s;&|()])"
+        if re.search(pattern, lowered):
+            return word
+    return None
 
 
 def extract_base_command(command: str) -> str | None:
@@ -185,13 +217,19 @@ def extract_base_command(command: str) -> str | None:
 
 def is_command_allowed(command: str) -> tuple[bool, str]:
     """Check if a command is allowed in RESTRICTED mode. Returns (allowed, reason)."""
+    command_for_checks = _strip_heredoc_bodies(command)
+
     # Check for dangerous patterns first
-    for pattern in DANGEROUS_PATTERNS:
-        if pattern in command:
-            return False, f"Command contains dangerous pattern: {pattern.strip()}"
+    for pattern in DANGEROUS_SUBSTRINGS:
+        if pattern in command_for_checks:
+            return False, f"Command contains dangerous pattern: {pattern}"
+
+    dangerous_word = _contains_dangerous_word(command_for_checks)
+    if dangerous_word:
+        return False, f"Command contains dangerous pattern: {dangerous_word}"
 
     # Extract base command
-    base_cmd = extract_base_command(command)
+    base_cmd = extract_base_command(command_for_checks)
     if not base_cmd:
         return False, "Could not parse command"
 

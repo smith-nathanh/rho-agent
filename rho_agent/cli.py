@@ -32,11 +32,13 @@ from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.markup import escape
 from rich.panel import Panel
+from rich.theme import Theme
 
 from .capabilities import CapabilityProfile, ShellMode
-from .capabilities.factory import load_profile
+from .capabilities.factory import ToolFactory, load_profile
 from .cli_errors import (
     InvalidModeError,
     InvalidProfileError,
@@ -70,8 +72,37 @@ BUILTIN_PROMPT_FILE = Path(__file__).parent / "prompts" / "default.md"
 # Tool output preview lines (0 to disable)
 TOOL_PREVIEW_LINES = int(os.getenv("RHO_AGENT_PREVIEW_LINES", "6"))
 
+# Render assistant output as markdown in interactive TTY sessions
+RENDER_MARKDOWN = os.getenv("RHO_AGENT_RENDER_MARKDOWN", "1").lower() not in (
+    "0",
+    "false",
+    "no",
+)
+
 # Rich console for all output
 console = Console()
+
+MARKDOWN_THEME = Theme(
+    {
+        "markdown": THEME.primary,
+        "markdown.paragraph": THEME.primary,
+        "markdown.text": THEME.primary,
+        "markdown.item": THEME.primary,
+        "markdown.item.bullet": THEME.primary,
+        "markdown.code": THEME.primary,
+        "markdown.code_block": THEME.primary,
+        "markdown.block_quote": THEME.muted,
+        "markdown.h1": f"bold {THEME.primary}",
+        "markdown.h2": f"bold {THEME.primary}",
+        "markdown.h3": f"bold {THEME.primary}",
+        "markdown.h4": f"bold {THEME.primary}",
+        "markdown.h5": f"bold {THEME.primary}",
+        "markdown.h6": f"bold {THEME.primary}",
+        "markdown.link": THEME.accent,
+        "markdown.em": f"italic {THEME.primary}",
+        "markdown.strong": f"bold {THEME.primary}",
+    }
+)
 
 # Typer app
 app = typer.Typer(
@@ -178,6 +209,7 @@ def _sync_token_status_from_session(token_status: TokenStatus, session: Session)
 COMMANDS = [
     "/approve",
     "/compact",
+    "/mode",
     "/write",
     "/resume",
     "/help",
@@ -443,11 +475,50 @@ def handle_event(
     *,
     show_turn_usage: bool = True,
     token_status: TokenStatus | None = None,
+    render_markdown: bool = False,
+    pending_text_chunks: list[str] | None = None,
 ) -> None:
     """Handle an agent event by printing to console."""
+
+    def flush_markdown() -> None:
+        if not render_markdown or pending_text_chunks is None:
+            return
+        combined = "".join(pending_text_chunks).strip()
+        if not combined:
+            pending_text_chunks.clear()
+            return
+        try:
+            with console.use_theme(MARKDOWN_THEME):
+                console.print(
+                    Markdown(
+                        combined,
+                        style=THEME.primary,
+                        code_theme="bw",
+                        inline_code_theme="bw",
+                    )
+                )
+        except Exception:
+            print(combined, flush=True)
+        pending_text_chunks.clear()
+
+    if event.type in (
+        "tool_start",
+        "tool_end",
+        "tool_blocked",
+        "compact_start",
+        "compact_end",
+        "turn_complete",
+        "error",
+        "cancelled",
+    ):
+        flush_markdown()
+
     if event.type == "text":
-        # Stream text immediately as it arrives
-        print(event.content or "", end="", flush=True)
+        if render_markdown and pending_text_chunks is not None:
+            pending_text_chunks.append(event.content or "")
+        else:
+            # Stream text immediately as it arrives
+            print(event.content or "", end="", flush=True)
 
     elif event.type == "tool_start":
         # Show compact tool signature (like Claude Code)
@@ -457,6 +528,7 @@ def handle_event(
             Panel(
                 _markup(sig, THEME.tool_call),
                 title=_markup("tool", THEME.secondary),
+                title_align="left",
                 border_style=THEME.secondary,
                 padding=(0, 1),
             )
@@ -502,7 +574,8 @@ def handle_event(
 
     elif event.type == "turn_complete":
         # Ensure we end on a new line after streamed text
-        print()
+        if not render_markdown:
+            print()
         if token_status:
             token_status.update(event.usage)
         if show_turn_usage:
@@ -542,6 +615,10 @@ def handle_command(
         # Handled in run_interactive (needs registry/profile context)
         return "write"
 
+    if cmd.startswith("/mode"):
+        # Handled in run_interactive (needs runtime/profile context)
+        return "mode"
+
     if cmd.startswith("/resume"):
         # Handled in run_interactive (needs conversation store/session context)
         return "resume"
@@ -559,6 +636,7 @@ def handle_command(
                 "[bold]Commands:[/bold]",
                 line("/approve", "Enable auto-approve for all tool calls"),
                 line("/compact [guidance]", "Compact conversation history"),
+                line("/mode [name|path|status]", "Switch or show active capability mode"),
                 line("/write [on|off|status]", "Toggle create-only write tool (readonly mode)"),
                 line("/resume [latest|id]", "Resume a saved conversation"),
                 line("/help", "Show this help"),
@@ -579,6 +657,7 @@ def handle_command(
             Panel(
                 help_text,
                 title="Help",
+                title_align="left",
                 border_style=THEME.border,
             )
         )
@@ -589,6 +668,29 @@ def handle_command(
         return None
 
     return None
+
+
+def switch_runtime_profile(
+    runtime: AgentRuntime,
+    profile_name_or_path: str,
+    *,
+    working_dir: str,
+) -> CapabilityProfile:
+    """Switch runtime capabilities to a new profile for the active session."""
+    try:
+        capability_profile = load_profile(profile_name_or_path)
+    except (ValueError, FileNotFoundError) as e:
+        raise InvalidProfileError(str(e)) from e
+
+    registry = ToolFactory(capability_profile).create_registry(working_dir=working_dir)
+    runtime.registry = registry
+    runtime.agent.set_registry(registry)
+    runtime.profile_name = capability_profile.name
+
+    if runtime.observability and runtime.observability.context:
+        runtime.observability.context.profile = capability_profile.name
+
+    return capability_profile
 
 
 async def run_interactive(
@@ -840,6 +942,47 @@ async def run_interactive(
             )
         )
 
+    def handle_mode_switch(cmd: str) -> None:
+        nonlocal mode_name
+
+        parts = cmd.split(maxsplit=1)
+        if len(parts) == 1 or parts[1].strip().lower() in ("status", "current"):
+            console.print(_markup(f"Current mode: {mode_name}", THEME.accent))
+            console.print(
+                _markup(
+                    "Usage: /mode <readonly|developer|eval|profile-path>",
+                    THEME.muted,
+                )
+            )
+            return
+
+        target = parts[1].strip()
+        try:
+            capability_profile = switch_runtime_profile(
+                runtime,
+                target,
+                working_dir=working_dir,
+            )
+        except InvalidProfileError as e:
+            console.print(_markup(str(e), THEME.error))
+            return
+
+        mode_name = capability_profile.name
+        console.print(_markup(f"Switched mode to {mode_name}", THEME.success))
+        console.print(
+            _markup(
+                (
+                    "shell="
+                    f"{capability_profile.shell.value}, "
+                    "file_write="
+                    f"{capability_profile.file_write.value}, "
+                    "database="
+                    f"{capability_profile.database.value}"
+                ),
+                THEME.muted,
+            )
+        )
+
     try:
         while True:
             try:
@@ -860,6 +1003,9 @@ async def run_interactive(
             if user_input.startswith("/"):
                 if user_input.startswith("/write"):
                     handle_file_write_toggle(user_input)
+                    continue
+                if user_input.startswith("/mode"):
+                    handle_mode_switch(user_input)
                     continue
                 if user_input.startswith("/resume"):
                     handle_resume(user_input)
@@ -910,6 +1056,7 @@ async def run_interactive(
                     )
                     status_ctx.__enter__()
                 saw_model_output = False
+                pending_text_chunks: list[str] = []
 
                 async for event in events:
                     if status_ctx and not saw_model_output:
@@ -939,7 +1086,13 @@ async def run_interactive(
                         break
                     if event.type == "error":
                         _sync_token_status_from_session(token_status, runtime.session)
-                    handle_event(event, show_turn_usage=False, token_status=token_status)
+                    handle_event(
+                        event,
+                        show_turn_usage=False,
+                        token_status=token_status,
+                        render_markdown=interactive_tty and RENDER_MARKDOWN,
+                        pending_text_chunks=pending_text_chunks,
+                    )
                 if status_ctx:
                     status_ctx.__exit__(None, None, None)
             finally:
@@ -1010,6 +1163,7 @@ async def run_single(
             )
             status_ctx.__enter__()
         saw_model_output = False
+        pending_text_chunks: list[str] = []
 
         async for event in events:
             if status_ctx and not saw_model_output:
@@ -1022,7 +1176,11 @@ async def run_single(
                     status_ctx = None
             if event.type == "error":
                 session_status = "error"
-                handle_event(event)
+                handle_event(
+                    event,
+                    render_markdown=interactive_tty and RENDER_MARKDOWN,
+                    pending_text_chunks=pending_text_chunks,
+                )
                 break
             if event.type == "cancelled":
                 if signal_manager and session_id and signal_manager.is_cancelled(session_id):
@@ -1033,7 +1191,11 @@ async def run_single(
                 else:
                     console.print(_markup("Cancelled", THEME.muted))
                 break
-            handle_event(event)
+            handle_event(
+                event,
+                render_markdown=interactive_tty and RENDER_MARKDOWN,
+                pending_text_chunks=pending_text_chunks,
+            )
         if status_ctx:
             status_ctx.__exit__(None, None, None)
     except Exception:
@@ -1103,6 +1265,7 @@ async def run_single_with_output(
             )
             status_ctx.__enter__()
         saw_model_output = False
+        pending_text_chunks: list[str] = []
 
         async for event in events:
             if status_ctx and not saw_model_output:
@@ -1116,7 +1279,11 @@ async def run_single_with_output(
             if event.type == "error":
                 session_status = "error"
                 had_error = True
-                handle_event(event)
+                handle_event(
+                    event,
+                    render_markdown=interactive_tty and RENDER_MARKDOWN,
+                    pending_text_chunks=pending_text_chunks,
+                )
                 break
             if event.type == "cancelled":
                 if signal_manager and session_id and signal_manager.is_cancelled(session_id):
@@ -1128,7 +1295,11 @@ async def run_single_with_output(
                     console.print(_markup("Cancelled", THEME.muted))
                 cancelled = True
                 break
-            handle_event(event)
+            handle_event(
+                event,
+                render_markdown=interactive_tty and RENDER_MARKDOWN,
+                pending_text_chunks=pending_text_chunks,
+            )
             # Collect text for output file
             if event.type == "text" and event.content:
                 collected_text.append(event.content)

@@ -129,6 +129,10 @@ class Agent:
         """Request cancellation of the current turn."""
         self._cancel_requested = True
 
+    def set_registry(self, registry: ToolRegistry) -> None:
+        """Swap the active tool registry for subsequent model calls."""
+        self._registry = registry
+
     def _reset_cancel(self) -> None:
         """Reset cancellation state for a new turn."""
         self._cancel_requested = False
