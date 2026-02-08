@@ -17,6 +17,8 @@ wheels/
 !README.md
 !ARCHITECTURE.md
 !rho_agent/prompts/*.md
+!docs/site/
+!docs/site/**/*.md
 plans
 
 .rho_agent_history

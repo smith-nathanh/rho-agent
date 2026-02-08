@@ -103,7 +103,6 @@ MARKDOWN_THEME = Theme(
         "markdown.strong": f"bold {THEME.primary}",
     }
 )
-
 # Typer app
 app = typer.Typer(
     name="rho-agent",
@@ -493,8 +492,8 @@ def handle_event(
                     Markdown(
                         combined,
                         style=THEME.primary,
-                        code_theme="bw",
-                        inline_code_theme="bw",
+                        code_theme="ansi_dark",
+                        inline_code_theme="ansi_dark",
                     )
                 )
         except Exception:

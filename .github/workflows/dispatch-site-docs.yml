@@ -1,0 +1,22 @@
+name: Dispatch Site Docs Update
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/site/**
+  workflow_dispatch:
+
+jobs:
+  notify-rho-site:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch rho-site rebuild
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.RHO_SITE_REPO_TOKEN }}
+          repository: smith-nathanh/rho-site
+          event-type: rho-agent-docs-updated
+          client-payload: >-
+            {"source_repo":"${{ github.repository }}","source_sha":"${{ github.sha }}","ref":"${{ github.ref_name }}"}
