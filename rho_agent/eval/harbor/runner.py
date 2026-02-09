@@ -230,6 +230,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
         ),
         approval_callback=auto_approve,
         cancel_check=None,
+        parent_agent_cancel_check=None,
     )
 
     # Log available tools for debugging

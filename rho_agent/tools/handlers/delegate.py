@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import replace
+from time import monotonic
 from typing import Any
 
 from ...core.session import Session
@@ -23,12 +24,14 @@ class DelegateHandler(ToolHandler):
         parent_options: RuntimeOptions,
         parent_approval_callback: ApprovalCallback | None,
         parent_cancel_check: Callable[[], bool] | None,
+        parent_agent_cancel_check: Callable[[], bool] | None,
         requires_approval: bool,
     ) -> None:
         self._parent_session = parent_session
         self._parent_options = parent_options
         self._parent_approval_callback = parent_approval_callback
         self._parent_cancel_check = parent_cancel_check
+        self._parent_agent_cancel_check = parent_agent_cancel_check
         self._requires_approval = requires_approval
 
     @property
@@ -93,15 +96,28 @@ class DelegateHandler(ToolHandler):
         from ...runtime.lifecycle import close_runtime, start_runtime
         from ...runtime.run import run_prompt
 
+        child_cancel_check: Callable[[], bool] | None = None
+        if self._parent_cancel_check is not None or self._parent_agent_cancel_check is not None:
+            def _child_cancel_check() -> bool:
+                if self._parent_agent_cancel_check is not None and self._parent_agent_cancel_check():
+                    return True
+                if self._parent_cancel_check is not None and self._parent_cancel_check():
+                    return True
+                return False
+
+            child_cancel_check = _child_cancel_check
+
         child_runtime = create_runtime(
             child_session.system_prompt,
             options=child_options,
             session=child_session,
             approval_callback=self._parent_approval_callback,
-            cancel_check=self._parent_cancel_check,
+            cancel_check=child_cancel_check,
         )
+        child_session_id = getattr(child_runtime, "session_id", None)
 
         status = "error"
+        started = monotonic()
         try:
             await start_runtime(child_runtime)
             result = await run_prompt(child_runtime, instruction)
@@ -109,9 +125,22 @@ class DelegateHandler(ToolHandler):
             return ToolOutput(
                 content=result.text,
                 success=result.status == "completed",
-                metadata={"child_usage": result.usage},
+                metadata={
+                    "child_usage": result.usage,
+                    "child_status": result.status,
+                    "child_session_id": child_session_id,
+                    "duration_seconds": round(monotonic() - started, 2),
+                },
             )
         except Exception as exc:
-            return ToolOutput(content=f"Delegate child failed: {type(exc).__name__}: {exc}", success=False)
+            return ToolOutput(
+                content=f"Delegate child failed: {type(exc).__name__}: {exc}",
+                success=False,
+                metadata={
+                    "child_status": "error",
+                    "child_session_id": child_session_id,
+                    "duration_seconds": round(monotonic() - started, 2),
+                },
+            )
         finally:
             await close_runtime(child_runtime, status=status)

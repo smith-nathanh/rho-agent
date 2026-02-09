@@ -118,20 +118,20 @@ def create_runtime(
     else:
         resolved_approval_callback = _reject_all
 
-    register_runtime_tools(
-        registry,
-        runtime_session=runtime_session,
-        runtime_options=options,
-        approval_callback=resolved_approval_callback,
-        cancel_check=cancel_check,
-    )
-
     agent = Agent(
         session=runtime_session,
         registry=registry,
         client=client,
         approval_callback=resolved_approval_callback,
         cancel_check=cancel_check,
+    )
+    register_runtime_tools(
+        registry,
+        runtime_session=runtime_session,
+        runtime_options=options,
+        approval_callback=resolved_approval_callback,
+        cancel_check=cancel_check,
+        parent_agent_cancel_check=agent.is_cancelled,
     )
     observability = _build_observability(
         options=options,

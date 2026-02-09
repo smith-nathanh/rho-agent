@@ -463,6 +463,18 @@ def _format_tool_summary(
                     return f"Command failed (exit {exit_code}, {duration}s)"
                 return f"Command failed (exit {exit_code})"
 
+        # delegate tool
+        if tool_name == "delegate":
+            child_status = metadata.get("child_status")
+            duration = metadata.get("duration_seconds")
+            if isinstance(child_status, str) and duration is not None:
+                return f"Sub-agent {child_status} ({duration}s)"
+            if isinstance(child_status, str):
+                return f"Sub-agent {child_status}"
+            if duration is not None:
+                return f"Sub-agent finished ({duration}s)"
+            return "Sub-agent finished"
+
     # Fallback: count lines in result
     if result:
         lines = result.count("\n") + 1
@@ -570,6 +582,8 @@ def handle_event(
                 padding=(0, 1),
             )
         )
+        if event.tool_name == "delegate":
+            console.print(_markup("Sub-agent running... waiting for child result.", THEME.muted))
 
     elif event.type == "tool_end":
         # Show a brief summary of what the tool found

@@ -18,6 +18,7 @@ def register_runtime_tools(
     runtime_options: RuntimeOptions,
     approval_callback: ApprovalCallback | None,
     cancel_check: Callable[[], bool] | None,
+    parent_agent_cancel_check: Callable[[], bool] | None = None,
 ) -> None:
     """Register tools that require runtime context rather than static profile config."""
     if not runtime_options.enable_delegate:
@@ -35,6 +36,7 @@ def register_runtime_tools(
             parent_options=runtime_options,
             parent_approval_callback=approval_callback,
             parent_cancel_check=cancel_check,
+            parent_agent_cancel_check=parent_agent_cancel_check,
             requires_approval=profile.requires_tool_approval("delegate"),
         )
     )

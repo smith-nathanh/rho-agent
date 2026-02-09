@@ -32,12 +32,16 @@ def reconfigure_runtime(
     )
 
     registry = ToolFactory(capability_profile).create_registry(working_dir=updated_options.working_dir)
+    parent_agent_cancel_check = getattr(runtime.agent, "is_cancelled", None)
+    if not callable(parent_agent_cancel_check):
+        parent_agent_cancel_check = None
     register_runtime_tools(
         registry,
         runtime_session=runtime.session,
         runtime_options=updated_options,
         approval_callback=runtime.approval_callback,
         cancel_check=runtime.cancel_check,
+        parent_agent_cancel_check=parent_agent_cancel_check,
     )
 
     runtime.registry = registry
