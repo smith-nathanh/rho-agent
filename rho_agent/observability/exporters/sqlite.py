@@ -1,6 +1,8 @@
 """SQLite exporter for telemetry data."""
 
 import asyncio
+import logging
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +10,10 @@ from .base import Exporter
 from ..config import ObservabilityConfig, DEFAULT_TELEMETRY_DB
 from ..context import TelemetryContext, TurnContext, ToolExecutionContext
 from ..storage.sqlite import TelemetryStorage
+
+logger = logging.getLogger(__name__)
+MAX_WRITE_RETRIES = 3
+BASE_RETRY_DELAY_S = 0.05
 
 
 class SQLiteExporter(Exporter):
@@ -46,21 +52,20 @@ class SQLiteExporter(Exporter):
     async def start_session(self, context: TelemetryContext) -> None:
         """Create a new session record."""
         self._current_context = context
-        # Run in thread pool since SQLite is sync
-        await asyncio.to_thread(self._storage.create_session, context)
+        await self._run_write("create_session", self._storage.create_session, context)
 
     async def end_session(self, context: TelemetryContext) -> None:
         """Update session with final state."""
-        await asyncio.to_thread(self._storage.update_session, context)
+        await self._run_write("update_session", self._storage.update_session, context)
         self._current_context = None
 
     async def start_turn(self, turn: TurnContext, user_input: str = "") -> None:
         """Create a new turn record."""
-        await asyncio.to_thread(self._storage.create_turn, turn, user_input)
+        await self._run_write("create_turn", self._storage.create_turn, turn, user_input)
 
     async def end_turn(self, turn: TurnContext) -> None:
         """Update turn with final token counts."""
-        await asyncio.to_thread(self._storage.end_turn, turn)
+        await self._run_write("end_turn", self._storage.end_turn, turn)
 
     async def record_model_call(
         self,
@@ -82,11 +87,15 @@ class SQLiteExporter(Exporter):
         execution: ToolExecutionContext,
     ) -> None:
         """Record a tool execution."""
-        await asyncio.to_thread(self._storage.record_tool_execution, execution)
+        await self._run_write("record_tool_execution", self._storage.record_tool_execution, execution)
 
     async def increment_tool_call(self, session_id: str) -> None:
         """Increment session tool call counter."""
-        await asyncio.to_thread(self._storage.increment_session_tool_calls, session_id)
+        await self._run_write(
+            "increment_session_tool_calls",
+            self._storage.increment_session_tool_calls,
+            session_id,
+        )
 
     async def flush(self) -> None:
         """SQLite auto-commits, so flush is a no-op."""
@@ -96,6 +105,45 @@ class SQLiteExporter(Exporter):
         """Clean up resources."""
         # SQLite connections are created per-operation, so nothing to close
         pass
+
+    async def _run_write(self, op_name: str, func: Any, *args: Any) -> None:
+        """Run a storage write as best-effort telemetry."""
+        attempts = 0
+        while True:
+            try:
+                # Run in thread pool since SQLite is sync.
+                await asyncio.to_thread(func, *args)
+                return
+            except sqlite3.OperationalError as exc:
+                if attempts < MAX_WRITE_RETRIES and self._is_lock_error(exc):
+                    attempts += 1
+                    self._record_retry()
+                    await asyncio.sleep(BASE_RETRY_DELAY_S * attempts)
+                    continue
+                self._record_write_error(op_name, exc)
+                return
+            except Exception as exc:
+                self._record_write_error(op_name, exc)
+                return
+
+    @staticmethod
+    def _is_lock_error(exc: sqlite3.OperationalError) -> bool:
+        message = str(exc).lower()
+        return "database is locked" in message or "database is busy" in message
+
+    def _record_retry(self) -> None:
+        if not self._current_context:
+            return
+        metadata = self._current_context.metadata
+        metadata["telemetry_degraded"] = True
+        metadata["telemetry_write_retries"] = metadata.get("telemetry_write_retries", 0) + 1
+
+    def _record_write_error(self, op_name: str, exc: Exception) -> None:
+        if self._current_context:
+            metadata = self._current_context.metadata
+            metadata["telemetry_degraded"] = True
+            metadata["telemetry_write_errors"] = metadata.get("telemetry_write_errors", 0) + 1
+        logger.warning("Telemetry write skipped for %s: %s", op_name, exc)
 
 
 def create_exporter(config: ObservabilityConfig) -> Exporter:

@@ -27,6 +27,7 @@ uv run rho-agent main [PROMPT]
 
 ```bash
 uv run rho-agent dashboard
+uv run rho-agent monitor
 uv run rho-agent ps
 uv run rho-agent kill --all
 ```

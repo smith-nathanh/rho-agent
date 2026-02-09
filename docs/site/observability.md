@@ -16,6 +16,7 @@ Telemetry is optional and typically enabled with `team_id` and `project_id`.
 
 ```bash
 uv run rho-agent dashboard
+uv run rho-agent monitor
 ```
 
 Use this to inspect aggregate activity, usage, and tool behavior across runs.

@@ -6,6 +6,9 @@ Protocol:
 - Agent starts -> writes <session_id>.running (JSON: pid, model, instruction preview, started_at)
 - Agent ends -> deletes .running + .cancel files
 - Kill command -> writes <session_id>.cancel
+- Pause command -> writes <session_id>.pause
+- Resume command -> deletes <session_id>.pause
+- Directive command -> appends JSON lines to <session_id>.directive
 - Agent checks is_cancelled() -> stat() for .cancel file
 """
 
@@ -14,6 +17,11 @@ import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None  # type: ignore[assignment]
 
 
 def _signal_dir() -> Path:
@@ -55,13 +63,24 @@ class SignalManager:
     def _cancel_path(self, session_id: str) -> Path:
         return self._dir / f"{session_id}.cancel"
 
+    def _pause_path(self, session_id: str) -> Path:
+        return self._dir / f"{session_id}.pause"
+
+    def _directive_path(self, session_id: str) -> Path:
+        return self._dir / f"{session_id}.directive"
+
     def register(self, info: AgentInfo) -> None:
         """Write a .running file for this agent session."""
         self._running_path(info.session_id).write_text(info.to_json(), encoding="utf-8")
 
     def deregister(self, session_id: str) -> None:
-        """Remove .running and .cancel files for this session."""
-        for path in (self._running_path(session_id), self._cancel_path(session_id)):
+        """Remove signal files for this session."""
+        for path in (
+            self._running_path(session_id),
+            self._cancel_path(session_id),
+            self._pause_path(session_id),
+            self._directive_path(session_id),
+        ):
             try:
                 path.unlink()
             except FileNotFoundError:
@@ -81,6 +100,35 @@ class SignalManager:
         self._cancel_path(session_id).write_text("", encoding="utf-8")
         return True
 
+    def is_paused(self, session_id: str) -> bool:
+        """Check if a .pause file exists."""
+        return self._pause_path(session_id).exists()
+
+    def pause(self, session_id: str) -> bool:
+        """Pause a specific session.
+
+        Returns True if the session was found and pause signal written.
+        """
+        if not self._running_path(session_id).exists():
+            return False
+        self._pause_path(session_id).write_text("", encoding="utf-8")
+        return True
+
+    def resume(self, session_id: str) -> bool:
+        """Resume a specific paused session.
+
+        Returns True if the session exists (running or paused metadata).
+        """
+        running_exists = self._running_path(session_id).exists()
+        pause_path = self._pause_path(session_id)
+        if not running_exists and not pause_path.exists():
+            return False
+        try:
+            pause_path.unlink()
+        except FileNotFoundError:
+            pass
+        return True
+
     def cancel_by_prefix(self, prefix: str) -> list[str]:
         """Cancel all sessions whose ID starts with the given prefix.
 
@@ -93,6 +141,24 @@ class SignalManager:
                 cancelled.append(info.session_id)
         return cancelled
 
+    def pause_by_prefix(self, prefix: str) -> list[str]:
+        """Pause all sessions whose ID starts with the given prefix."""
+        paused = []
+        for info in self.list_running():
+            if info.session_id.startswith(prefix):
+                self._pause_path(info.session_id).write_text("", encoding="utf-8")
+                paused.append(info.session_id)
+        return paused
+
+    def resume_by_prefix(self, prefix: str) -> list[str]:
+        """Resume all sessions whose ID starts with the given prefix."""
+        resumed = []
+        for info in self.list_running():
+            if info.session_id.startswith(prefix):
+                self.resume(info.session_id)
+                resumed.append(info.session_id)
+        return resumed
+
     def cancel_all(self) -> list[str]:
         """Cancel all running sessions.
 
@@ -103,6 +169,65 @@ class SignalManager:
             self._cancel_path(info.session_id).write_text("", encoding="utf-8")
             cancelled.append(info.session_id)
         return cancelled
+
+    def queue_directive(self, session_id: str, directive: str) -> bool:
+        """Queue an out-of-band directive for a running session."""
+        if not self._running_path(session_id).exists():
+            return False
+        payload = {
+            "directive": directive,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with self._directive_path(session_id).open("a+", encoding="utf-8") as f:
+            self._lock_file(f)
+            try:
+                f.write(json.dumps(payload))
+                f.write("\n")
+                f.flush()
+            finally:
+                self._unlock_file(f)
+        return True
+
+    def consume_directives(self, session_id: str) -> list[str]:
+        """Read and clear queued directives for a session."""
+        path = self._directive_path(session_id)
+        if not path.exists():
+            return []
+
+        try:
+            with path.open("a+", encoding="utf-8") as f:
+                self._lock_file(f)
+                try:
+                    f.seek(0)
+                    lines = f.read().splitlines()
+                    f.seek(0)
+                    f.truncate(0)
+                    f.flush()
+                finally:
+                    self._unlock_file(f)
+        except OSError:
+            return []
+
+        directives: list[str] = []
+        for line in lines:
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            directive = payload.get("directive")
+            if isinstance(directive, str) and directive.strip():
+                directives.append(directive.strip())
+        return directives
+
+    def _lock_file(self, file_obj: object) -> None:
+        if fcntl is None:
+            return
+        fcntl.flock(file_obj.fileno(), fcntl.LOCK_EX)  # type: ignore[union-attr]
+
+    def _unlock_file(self, file_obj: object) -> None:
+        if fcntl is None:
+            return
+        fcntl.flock(file_obj.fileno(), fcntl.LOCK_UN)  # type: ignore[union-attr]
 
     def list_running(self) -> list[AgentInfo]:
         """List all agents with .running files."""

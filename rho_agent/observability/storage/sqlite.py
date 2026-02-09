@@ -7,8 +7,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
+from urllib.parse import quote
 
 from ..context import TelemetryContext, TurnContext, ToolExecutionContext
+
+SQLITE_BUSY_TIMEOUT_MS = 5000
 
 
 SCHEMA_SQL = """
@@ -139,20 +142,34 @@ class CostSummary:
 class TelemetryStorage:
     """SQLite storage for telemetry data."""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, read_only: bool = False) -> None:
         """Initialize storage with database path.
 
         Args:
             db_path: Path to SQLite database file.
+            read_only: Open database in query-only mode without schema initialization.
         """
         self.db_path = Path(db_path).expanduser()
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        self.read_only = read_only
+        if self.read_only:
+            if not self.db_path.exists():
+                raise FileNotFoundError(f"Telemetry database not found: {self.db_path}")
+        else:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._init_schema()
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
         """Get a database connection."""
-        conn = sqlite3.connect(str(self.db_path))
+        if self.read_only:
+            uri = f"file:{quote(str(self.db_path))}?mode=ro"
+            conn = sqlite3.connect(uri, uri=True, timeout=SQLITE_BUSY_TIMEOUT_MS / 1000)
+        else:
+            conn = sqlite3.connect(str(self.db_path), timeout=SQLITE_BUSY_TIMEOUT_MS / 1000)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+        conn.execute("PRAGMA foreign_keys=ON")
         conn.row_factory = sqlite3.Row
         try:
             yield conn

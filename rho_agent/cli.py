@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import signal
 import sys
 import uuid
@@ -35,6 +36,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape
 from rich.panel import Panel
+from rich.table import Table
 from rich.theme import Theme
 
 from .capabilities import CapabilityProfile, ShellMode
@@ -49,6 +51,7 @@ from .core.agent import AgentEvent
 from .core.conversations import ConversationStore
 from .core.session import Session
 from .observability.config import DEFAULT_TELEMETRY_DB
+from .observability.storage.sqlite import TelemetryStorage
 from .prompts import load_prompt, parse_vars, prepare_prompt
 from .runtime import (
     ObservabilityInitializationError,
@@ -202,6 +205,40 @@ def _sync_token_status_from_session(token_status: TokenStatus, session: Session)
     token_status.context_size = session.last_input_tokens
     token_status.total_input_tokens = session.total_input_tokens
     token_status.total_output_tokens = session.total_output_tokens
+
+
+def _format_token_count(tokens: int) -> str:
+    if tokens >= 1_000_000:
+        return f"{tokens / 1_000_000:.1f}M"
+    if tokens >= 1_000:
+        return f"{tokens / 1_000:.1f}K"
+    return str(tokens)
+
+
+def _format_elapsed(started_at: datetime, ended_at: datetime | None = None) -> str:
+    end = ended_at or datetime.now(timezone.utc)
+    elapsed = end - started_at
+    secs = int(elapsed.total_seconds())
+    if secs < 60:
+        return f"{secs}s"
+    if secs < 3600:
+        return f"{secs // 60}m{secs % 60}s"
+    return f"{secs // 3600}h{(secs % 3600) // 60}m"
+
+
+async def _wait_while_paused(signal_manager: SignalManager, session_id: str) -> bool:
+    """Block at a turn boundary while paused; return False if externally cancelled."""
+    announced = False
+    while signal_manager.is_paused(session_id):
+        if signal_manager.is_cancelled(session_id):
+            return False
+        if not announced:
+            console.print(_markup("Paused by rho-agent monitor; waiting for resume...", THEME.warning))
+            announced = True
+        await asyncio.sleep(0.5)
+    if announced:
+        console.print(_markup("Resumed by rho-agent monitor", THEME.success))
+    return True
 
 
 # Commands the user can type during the session
@@ -982,8 +1019,89 @@ async def run_interactive(
             )
         )
 
+    async def execute_turn(user_input: str) -> None:
+        nonlocal session_status
+
+        loop = asyncio.get_event_loop()
+
+        def on_cancel():
+            console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
+            runtime.agent.request_cancel()
+
+        # Register signal handler for this turn (Unix only)
+        if platform.system() != "Windows":
+            loop.add_signal_handler(signal.SIGINT, on_cancel)
+
+        try:
+            events = runtime.agent.run_turn(user_input)
+            if runtime.observability:
+                events = runtime.observability.wrap_turn(events, user_input)
+
+            status_ctx = None
+            start = monotonic()
+            if interactive_tty:
+                status_ctx = console.status(
+                    "⠋ working (0s)",
+                    spinner="dots",
+                    spinner_style=THEME.accent,
+                )
+                status_ctx.__enter__()
+            saw_model_output = False
+            pending_text_chunks: list[str] = []
+
+            async for event in events:
+                if status_ctx and not saw_model_output:
+                    elapsed = int(monotonic() - start)
+                    status_ctx.update(f"⠋ working ({elapsed}s • Ctrl+C: cancel)")
+                if event.type in ("text", "tool_start", "error", "cancelled"):
+                    saw_model_output = True
+                    if status_ctx:
+                        status_ctx.__exit__(None, None, None)
+                        status_ctx = None
+                if event.type == "cancelled":
+                    _sync_token_status_from_session(token_status, runtime.session)
+                    if signal_manager and session_id and signal_manager.is_cancelled(session_id):
+                        session_status = "cancelled"
+                        if runtime.observability:
+                            runtime.observability.context.metadata["cancel_source"] = "kill_command"
+                        console.print(_markup("Killed by rho-agent kill", THEME.warning))
+                    else:
+                        console.print(_markup("Turn cancelled", THEME.muted))
+                    break
+                if event.type == "error":
+                    _sync_token_status_from_session(token_status, runtime.session)
+                handle_event(
+                    event,
+                    show_turn_usage=False,
+                    token_status=token_status,
+                    render_markdown=interactive_tty and RENDER_MARKDOWN,
+                    pending_text_chunks=pending_text_chunks,
+                )
+            if status_ctx:
+                status_ctx.__exit__(None, None, None)
+        finally:
+            if platform.system() != "Windows":
+                loop.remove_signal_handler(signal.SIGINT)
+
     try:
         while True:
+            if signal_manager and session_id:
+                if not await _wait_while_paused(signal_manager, session_id):
+                    session_status = "cancelled"
+                    if runtime.observability:
+                        runtime.observability.context.metadata["cancel_source"] = "kill_command"
+                    console.print(_markup("Killed by rho-agent kill", THEME.warning))
+                    break
+
+                directives = signal_manager.consume_directives(session_id)
+                for directive in directives:
+                    console.print(_markup(f"Directive received: {directive}", THEME.secondary))
+                    await execute_turn(directive)
+                    if session_status == "cancelled":
+                        break
+                if session_status == "cancelled":
+                    break
+
             try:
                 console.print()
                 user_input = await prompt_session.prompt_async(
@@ -1028,78 +1146,7 @@ async def run_interactive(
                     )
                 continue
 
-            # Run the turn and handle events with cancellation support
-            loop = asyncio.get_event_loop()
-
-            def on_cancel():
-                console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
-                runtime.agent.request_cancel()
-
-            # Register signal handler for this turn (Unix only)
-            if platform.system() != "Windows":
-                loop.add_signal_handler(signal.SIGINT, on_cancel)
-
-            try:
-                # Wrap event stream with observability if enabled
-                events = runtime.agent.run_turn(user_input)
-                if runtime.observability:
-                    events = runtime.observability.wrap_turn(events, user_input)
-
-                status_ctx = None
-                start = monotonic()
-                if interactive_tty:
-                    status_ctx = console.status(
-                        "⠋ working (0s)",
-                        spinner="dots",
-                        spinner_style=THEME.accent,
-                    )
-                    status_ctx.__enter__()
-                saw_model_output = False
-                pending_text_chunks: list[str] = []
-
-                async for event in events:
-                    if status_ctx and not saw_model_output:
-                        elapsed = int(monotonic() - start)
-                        status_ctx.update(f"⠋ working ({elapsed}s • Ctrl+C: cancel)")
-                    if event.type in ("text", "tool_start", "error", "cancelled"):
-                        saw_model_output = True
-                        if status_ctx:
-                            status_ctx.__exit__(None, None, None)
-                            status_ctx = None
-                    if event.type == "cancelled":
-                        # Check if this was an external kill signal
-                        _sync_token_status_from_session(token_status, runtime.session)
-                        if (
-                            signal_manager
-                            and session_id
-                            and signal_manager.is_cancelled(session_id)
-                        ):
-                            session_status = "cancelled"
-                            if runtime.observability:
-                                runtime.observability.context.metadata["cancel_source"] = (
-                                    "kill_command"
-                                )
-                            console.print(_markup("Killed by rho-agent kill", THEME.warning))
-                        else:
-                            console.print(_markup("Turn cancelled", THEME.muted))
-                        break
-                    if event.type == "error":
-                        _sync_token_status_from_session(token_status, runtime.session)
-                    handle_event(
-                        event,
-                        show_turn_usage=False,
-                        token_status=token_status,
-                        render_markdown=interactive_tty and RENDER_MARKDOWN,
-                        pending_text_chunks=pending_text_chunks,
-                    )
-                if status_ctx:
-                    status_ctx.__exit__(None, None, None)
-            finally:
-                # Remove signal handler after turn
-                if platform.system() != "Windows":
-                    loop.remove_signal_handler(signal.SIGINT)
-
-            # Exit session if killed externally
+            await execute_turn(user_input)
             if session_status == "cancelled":
                 break
     except Exception:
@@ -1147,6 +1194,22 @@ async def run_single(
 
     session_status = "completed"
     try:
+        if signal_manager and session_id:
+            if not await _wait_while_paused(signal_manager, session_id):
+                session_status = "cancelled"
+                if runtime.observability:
+                    runtime.observability.context.metadata["cancel_source"] = "kill_command"
+                console.print(_markup("Killed by rho-agent kill", THEME.warning))
+                return
+            directives = signal_manager.consume_directives(session_id)
+            if directives:
+                console.print(
+                    _markup(
+                        "Ignoring queued directives in single-prompt mode.",
+                        THEME.muted,
+                    )
+                )
+
         # Wrap event stream with observability if enabled
         events = runtime.agent.run_turn(prompt)
         if runtime.observability:
@@ -1249,6 +1312,22 @@ async def run_single_with_output(
 
     session_status = "completed"
     try:
+        if signal_manager and session_id:
+            if not await _wait_while_paused(signal_manager, session_id):
+                session_status = "cancelled"
+                if runtime.observability:
+                    runtime.observability.context.metadata["cancel_source"] = "kill_command"
+                console.print(_markup("Killed by rho-agent kill", THEME.warning))
+                return False
+            directives = signal_manager.consume_directives(session_id)
+            if directives:
+                console.print(
+                    _markup(
+                        "Ignoring queued directives in single-prompt mode.",
+                        THEME.muted,
+                    )
+                )
+
         # Wrap event stream with observability if enabled
         events = runtime.agent.run_turn(prompt)
         if runtime.observability:
@@ -1813,6 +1892,7 @@ def ps(
     now = datetime.now(timezone.utc)
     for info in agents:
         short_id = info.session_id[:8]
+        paused = sm.is_paused(info.session_id)
         try:
             started = datetime.fromisoformat(info.started_at)
             elapsed = now - started
@@ -1828,8 +1908,10 @@ def ps(
         preview = info.instruction_preview[:50]
         if len(info.instruction_preview) > 50:
             preview += "..."
+        state = "paused" if paused else "running"
+        state_color = THEME.warning if paused else THEME.success
         console.print(
-            f"  {_markup(short_id, THEME.accent)}  {_markup('running', THEME.success)}  "
+            f"  {_markup(short_id, THEME.accent)}  {_markup(state, state_color)}  "
             f"{_markup(f'{info.model:<14}', THEME.muted)}  {duration:>6}  {preview}"
         )
 
@@ -1871,10 +1953,285 @@ def kill(
         raise typer.Exit(1)
 
 
+@app.command()
+def monitor(
+    db_path: Annotated[
+        Optional[str],
+        typer.Option("--db", help="Path to telemetry database"),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option("--limit", "-n", help="Number of sessions to list in overview"),
+    ] = 20,
+    read_write: Annotated[
+        bool,
+        typer.Option(
+            "--read-write",
+            help="Open telemetry DB in read-write mode (default is read-only)",
+        ),
+    ] = False,
+) -> None:
+    """Interactive command center for telemetry and live agent controls."""
+    resolved_db = db_path or str(DEFAULT_TELEMETRY_DB)
+    sm = SignalManager()
+    try:
+        storage = TelemetryStorage(resolved_db, read_only=not read_write)
+    except Exception as exc:
+        console.print(_markup(f"Failed to open telemetry DB: {exc}", THEME.error))
+        raise typer.Exit(1) from exc
+
+    def print_help() -> None:
+        console.print(_markup("Commands:", THEME.secondary))
+        console.print("[dim]  overview                      show running agents + recent sessions[/dim]")
+        console.print("[dim]  running                       list running agents[/dim]")
+        console.print("[dim]  sessions [active|completed]   list recent telemetry sessions[/dim]")
+        console.print("[dim]  show <session_id_or_prefix>   show session detail[/dim]")
+        console.print("[dim]  kill <prefix|all>             cancel running session(s)[/dim]")
+        console.print("[dim]  pause <prefix|all>            pause running session(s)[/dim]")
+        console.print("[dim]  resume <prefix|all>           resume paused session(s)[/dim]")
+        console.print("[dim]  directive <prefix> <text>     inject directive into interactive run[/dim]")
+        console.print("[dim]  help                          show this help[/dim]")
+        console.print("[dim]  quit                          exit monitor[/dim]")
+
+    def render_running() -> None:
+        agents = sm.list_running()
+        if not agents:
+            console.print("[dim]No running agents[/dim]")
+            return
+        table = Table(show_header=True, header_style=THEME.secondary)
+        table.add_column("Session", style=THEME.accent)
+        table.add_column("State")
+        table.add_column("Model", style=THEME.muted)
+        table.add_column("Uptime", justify="right")
+        table.add_column("Preview", overflow="fold")
+        now = datetime.now(timezone.utc)
+        for info in agents:
+            paused = sm.is_paused(info.session_id)
+            state = "paused" if paused else "running"
+            state_color = THEME.warning if paused else THEME.success
+            try:
+                started = datetime.fromisoformat(info.started_at)
+            except ValueError:
+                started = now
+            table.add_row(
+                info.session_id[:8],
+                _markup(state, state_color),
+                info.model,
+                _format_elapsed(started, now),
+                info.instruction_preview,
+            )
+        console.print(table)
+
+    def render_sessions(status: str | None = None) -> None:
+        sessions = storage.list_sessions(status=status, limit=limit)
+        if not sessions:
+            console.print("[dim]No telemetry sessions found[/dim]")
+            return
+        table = Table(show_header=True, header_style=THEME.secondary)
+        table.add_column("Session", style=THEME.accent)
+        table.add_column("Status")
+        table.add_column("Model", style=THEME.muted)
+        table.add_column("Team/Project", style=THEME.muted)
+        table.add_column("Tokens", justify="right")
+        table.add_column("Tools", justify="right")
+        table.add_column("Turns", justify="right")
+        table.add_column("Duration", justify="right")
+        for s in sessions:
+            total_tokens = s.total_input_tokens + s.total_output_tokens
+            table.add_row(
+                s.session_id[:8],
+                s.status,
+                s.model,
+                f"{s.team_id}/{s.project_id}",
+                _format_token_count(total_tokens),
+                str(s.total_tool_calls),
+                str(s.turn_count),
+                _format_elapsed(s.started_at, s.ended_at),
+            )
+        console.print(table)
+
+    def resolve_running_prefix(prefix: str) -> list[str]:
+        if prefix == "all":
+            return [a.session_id for a in sm.list_running()]
+        return [a.session_id for a in sm.list_running() if a.session_id.startswith(prefix)]
+
+    def resolve_session_id(prefix: str) -> str | None:
+        detail = storage.get_session_detail(prefix)
+        if detail:
+            return prefix
+        recent = storage.list_sessions(limit=200)
+        matches = [s.session_id for s in recent if s.session_id.startswith(prefix)]
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
+    def show_detail(prefix: str) -> None:
+        session_id = resolve_session_id(prefix)
+        if not session_id:
+            console.print(_markup(f"Session not found for prefix '{prefix}'", THEME.error))
+            return
+        detail = storage.get_session_detail(session_id)
+        if not detail:
+            console.print(_markup(f"Session not found: {session_id}", THEME.error))
+            return
+
+        running = next((a for a in sm.list_running() if a.session_id == detail.session_id), None)
+        paused = sm.is_paused(detail.session_id)
+        status = "paused" if paused and detail.status == "active" else detail.status
+        if status == "active":
+            status_color = THEME.success
+        elif status == "paused":
+            status_color = THEME.warning
+        else:
+            status_color = THEME.warning
+
+        console.print(
+            Panel(
+                f"Session: {_markup(detail.session_id, THEME.accent)}\n"
+                f"Status: {_markup(status, status_color)}\n"
+                f"Model: {_markup(detail.model, THEME.accent)}\n"
+                f"Team/Project: {_markup(f'{detail.team_id}/{detail.project_id}', THEME.muted)}\n"
+                f"Profile: {_markup(detail.profile or '-', THEME.muted)}\n"
+                f"Duration: {_markup(_format_elapsed(detail.started_at, detail.ended_at), THEME.muted)}\n"
+                f"Tokens: {_markup(_format_token_count(detail.total_input_tokens + detail.total_output_tokens), THEME.muted)}\n"
+                f"Tool calls: {_markup(str(detail.total_tool_calls), THEME.muted)}\n"
+                f"Turns: {_markup(str(len(detail.turns)), THEME.muted)}\n"
+                f"PID: {_markup(str(running.pid), THEME.muted) if running else _markup('-', THEME.muted)}",
+                border_style=THEME.border,
+            )
+        )
+
+        if not detail.turns:
+            console.print("[dim]No turns recorded[/dim]")
+            return
+
+        table = Table(show_header=True, header_style=THEME.secondary)
+        table.add_column("Turn")
+        table.add_column("Input", justify="right")
+        table.add_column("Output", justify="right")
+        table.add_column("Tools", justify="right")
+        table.add_column("User Input Preview", overflow="fold")
+        for turn in detail.turns[-10:]:
+            preview = (turn.get("user_input") or "").replace("\n", " ")
+            if len(preview) > 100:
+                preview = preview[:100] + "..."
+            table.add_row(
+                str(turn.get("turn_index", "?")),
+                _format_token_count(int(turn.get("input_tokens", 0))),
+                _format_token_count(int(turn.get("output_tokens", 0))),
+                str(len(turn.get("tool_executions", []))),
+                preview,
+            )
+        console.print(table)
+
+    def render_overview() -> None:
+        console.print(_markup("Running agents", THEME.secondary))
+        render_running()
+        console.print()
+        console.print(_markup("Recent telemetry sessions", THEME.secondary))
+        render_sessions()
+
+    console.print(
+        Panel(
+            f"[bold]{_markup('rho-agent monitor', THEME.primary)}[/bold]\n"
+            f"Database: {_markup(resolved_db, THEME.muted)}\n"
+            f"Mode: {_markup('read-write' if read_write else 'read-only', THEME.muted)}\n"
+            "Type [bold]help[/bold] for commands.",
+            border_style=THEME.border,
+        )
+    )
+    render_overview()
+
+    while True:
+        try:
+            raw = input("monitor> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print()
+            break
+
+        if not raw:
+            continue
+        if raw in ("quit", "exit", "q"):
+            break
+        if raw in ("help", "h", "?"):
+            print_help()
+            continue
+        if raw in ("overview", "o", "refresh", "r"):
+            render_overview()
+            continue
+        if raw in ("running", "ps"):
+            render_running()
+            continue
+
+        try:
+            parts = shlex.split(raw)
+        except ValueError as exc:
+            console.print(_markup(f"Invalid command syntax: {exc}", THEME.error))
+            continue
+        command = parts[0].lower()
+
+        if command == "sessions":
+            status = None
+            if len(parts) > 1 and parts[1] != "all":
+                status = parts[1]
+            render_sessions(status=status)
+            continue
+
+        if command == "show" and len(parts) > 1:
+            show_detail(parts[1])
+            continue
+
+        if command in ("kill", "pause", "resume") and len(parts) > 1:
+            target = parts[1]
+            targets = resolve_running_prefix(target)
+            if not targets:
+                console.print(_markup(f"No running agents matching '{target}'", THEME.error))
+                continue
+
+            if command == "kill":
+                acted = [sid for sid in targets if sm.cancel(sid)]
+            elif command == "pause":
+                acted = [sid for sid in targets if sm.pause(sid)]
+            else:
+                acted = [sid for sid in targets if sm.resume(sid)]
+
+            if acted:
+                for sid in acted:
+                    console.print(_markup(f"{command}: {sid[:8]}", THEME.success))
+            else:
+                console.print(_markup(f"No agents updated by '{command}'", THEME.warning))
+            continue
+
+        if command == "directive" and len(parts) > 2:
+            target = parts[1]
+            directive = " ".join(parts[2:])
+            targets = resolve_running_prefix(target)
+            if not targets:
+                console.print(_markup(f"No running agents matching '{target}'", THEME.error))
+                continue
+            if len(targets) > 1:
+                console.print(
+                    _markup(
+                        f"Prefix '{target}' matched multiple sessions; use a longer prefix.",
+                        THEME.warning,
+                    )
+                )
+                continue
+            session_id = targets[0]
+            if sm.queue_directive(session_id, directive):
+                console.print(_markup(f"directive queued for {session_id[:8]}", THEME.success))
+            else:
+                console.print(_markup(f"Failed to queue directive for {session_id[:8]}", THEME.error))
+            continue
+
+        console.print(_markup(f"Unknown command: {raw}", THEME.warning))
+        console.print("[dim]Type 'help' for command list[/dim]")
+
+
 def cli() -> None:
     """CLI entrypoint with `main` as the default command."""
     args = sys.argv[1:]
-    subcommands = {"main", "dashboard", "ps", "kill"}
+    subcommands = {"main", "dashboard", "monitor", "ps", "kill"}
 
     if not args or args[0] not in subcommands:
         args = ["main", *args]
