@@ -305,3 +305,66 @@ async def test_delegate_child_cancel_check_includes_parent_agent_cancel(
     assert captured_cancel_check() is False
     parent_cancelled = True
     assert captured_cancel_check() is True
+
+
+@pytest.mark.asyncio
+async def test_delegate_registers_child_session_in_signal_manager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_session = Session(system_prompt="system")
+    parent_options = RuntimeOptions(profile=CapabilityProfile.readonly(), session_id="parent-session")
+    handler = DelegateHandler(
+        parent_session=parent_session,
+        parent_options=parent_options,
+        parent_approval_callback=None,
+        parent_cancel_check=None,
+        parent_agent_cancel_check=None,
+        requires_approval=False,
+    )
+
+    class FakeSignalManager:
+        def __init__(self) -> None:
+            self.registered: list[str] = []
+            self.deregistered: list[str] = []
+
+        def register(self, info: object) -> None:
+            session_id = getattr(info, "session_id", "")
+            self.registered.append(session_id)
+
+        def deregister(self, session_id: str) -> None:
+            self.deregistered.append(session_id)
+
+        def is_cancelled(self, session_id: str) -> bool:
+            del session_id
+            return False
+
+    fake_sm = FakeSignalManager()
+    monkeypatch.setattr("rho_agent.tools.handlers.delegate.SignalManager", lambda: fake_sm)
+
+    def fake_create_runtime(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return SimpleNamespace(session_id="child-1234")
+
+    async def fake_start_runtime(runtime: object) -> None:
+        del runtime
+        return None
+
+    async def fake_run_prompt(runtime: object, prompt: str) -> RunResult:
+        del runtime, prompt
+        return RunResult(text="ok", events=[], status="completed", usage={})
+
+    async def fake_close_runtime(runtime: object, status: str = "completed") -> None:
+        del runtime, status
+        return None
+
+    monkeypatch.setattr("rho_agent.runtime.factory.create_runtime", fake_create_runtime)
+    monkeypatch.setattr("rho_agent.runtime.lifecycle.start_runtime", fake_start_runtime)
+    monkeypatch.setattr("rho_agent.runtime.run.run_prompt", fake_run_prompt)
+    monkeypatch.setattr("rho_agent.runtime.lifecycle.close_runtime", fake_close_runtime)
+
+    await handler.handle(
+        ToolInvocation(call_id="1", tool_name="delegate", arguments={"instruction": "do work"})
+    )
+
+    assert fake_sm.registered == ["child-1234"]
+    assert fake_sm.deregistered == ["child-1234"]

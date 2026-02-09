@@ -357,6 +357,16 @@ class ApprovalHandler:
         if self.auto_approve:
             return True
 
+        sig = _format_tool_signature(tool_name, tool_args)
+        console.print(
+            Panel(
+                _markup(sig, THEME.tool_call),
+                title=_markup("approval", THEME.warning),
+                title_align="left",
+                border_style=THEME.warning,
+                padding=(0, 1),
+            )
+        )
         console.print(_markup("Approve? \\[Y/n]:", THEME.warning), end=" ")
 
         try:
@@ -582,9 +592,6 @@ def handle_event(
                 padding=(0, 1),
             )
         )
-        if event.tool_name == "delegate":
-            console.print(_markup("Sub-agent running... waiting for child result.", THEME.muted))
-
     elif event.type == "tool_end":
         # Show a brief summary of what the tool found
         summary = _format_tool_summary(event.tool_name, event.tool_metadata, event.tool_result)

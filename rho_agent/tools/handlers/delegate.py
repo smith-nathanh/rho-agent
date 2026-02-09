@@ -5,12 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import replace
+from datetime import datetime, timezone
+import os
 from time import monotonic
 from typing import Any
 
 from ...core.session import Session
 from ...runtime.options import RuntimeOptions
 from ...runtime.types import ApprovalCallback
+from ...signals import AgentInfo, SignalManager
 from ..base import ToolHandler, ToolInvocation, ToolOutput
 
 
@@ -96,16 +99,20 @@ class DelegateHandler(ToolHandler):
         from ...runtime.lifecycle import close_runtime, start_runtime
         from ...runtime.run import run_prompt
 
-        child_cancel_check: Callable[[], bool] | None = None
-        if self._parent_cancel_check is not None or self._parent_agent_cancel_check is not None:
-            def _child_cancel_check() -> bool:
-                if self._parent_agent_cancel_check is not None and self._parent_agent_cancel_check():
-                    return True
-                if self._parent_cancel_check is not None and self._parent_cancel_check():
-                    return True
-                return False
+        signal_manager = SignalManager()
+        child_session_id_ref: list[str | None] = [None]
 
-            child_cancel_check = _child_cancel_check
+        def _child_cancel_check() -> bool:
+            if self._parent_agent_cancel_check is not None and self._parent_agent_cancel_check():
+                return True
+            if self._parent_cancel_check is not None and self._parent_cancel_check():
+                return True
+            session_id = child_session_id_ref[0]
+            if session_id and signal_manager.is_cancelled(session_id):
+                return True
+            return False
+
+        child_cancel_check: Callable[[], bool] | None = _child_cancel_check
 
         child_runtime = create_runtime(
             child_session.system_prompt,
@@ -115,10 +122,26 @@ class DelegateHandler(ToolHandler):
             cancel_check=child_cancel_check,
         )
         child_session_id = getattr(child_runtime, "session_id", None)
+        child_session_id_ref[0] = child_session_id
+        child_registered = False
+        if isinstance(child_session_id, str) and child_session_id:
+            signal_manager.register(
+                AgentInfo(
+                    session_id=child_session_id,
+                    pid=os.getpid(),
+                    model=child_options.model,
+                    instruction_preview=instruction[:100],
+                    started_at=datetime.now(timezone.utc).isoformat(),
+                )
+            )
+            child_registered = True
 
         status = "error"
         started = monotonic()
         try:
+            if child_registered:
+                # Approval has already happened at this point; child execution starts now.
+                print(f"[delegate] Sub-agent {child_session_id[:8]} started", flush=True)
             await start_runtime(child_runtime)
             result = await run_prompt(child_runtime, instruction)
             status = result.status
@@ -144,3 +167,5 @@ class DelegateHandler(ToolHandler):
             )
         finally:
             await close_runtime(child_runtime, status=status)
+            if child_registered:
+                signal_manager.deregister(child_session_id)
