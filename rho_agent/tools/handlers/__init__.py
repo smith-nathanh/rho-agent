@@ -13,6 +13,7 @@ Mode-dependent Tools:
 - BashHandler (bash) - Shell execution (restricted or unrestricted)
 - WriteHandler (write) - File writing (off, create-only, or full)
 - EditHandler (edit) - Surgical file editing (only with file_write=full)
+- DelegateHandler (delegate) - Spawn one child agent for focused sub-work
 
 Database Tools (enabled via env vars):
 - OracleHandler (oracle)
@@ -32,6 +33,7 @@ from .read_excel import ReadExcelHandler
 # Mode-dependent tools
 from .bash import BashHandler
 from .write import WriteHandler
+from .delegate import DelegateHandler
 from .edit import EditHandler
 
 # Database tools
@@ -55,6 +57,7 @@ __all__ = [
     "BashHandler",
     "WriteHandler",
     "EditHandler",
+    "DelegateHandler",
     # Database handlers
     "MysqlHandler",
     "OracleHandler",

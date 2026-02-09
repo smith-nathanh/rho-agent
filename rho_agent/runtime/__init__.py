@@ -5,6 +5,7 @@ from .dispatch import AgentHandle, dispatch_prompt
 from .factory import ObservabilityInitializationError, create_runtime
 from .lifecycle import close_runtime, start_runtime
 from .options import RuntimeOptions
+from .reconfigure import reconfigure_runtime
 from .run import run_prompt
 from .types import AgentRuntime, RunResult
 
@@ -20,4 +21,5 @@ __all__ = [
     "close_runtime",
     "run_prompt",
     "dispatch_prompt",
+    "reconfigure_runtime",
 ]

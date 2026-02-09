@@ -10,6 +10,7 @@ from rho_agent.observability.context import TelemetryContext
 from rho_agent.observability.exporters.base import Exporter
 from rho_agent.observability.processor import ObservabilityProcessor
 from rho_agent.runtime.lifecycle import close_runtime, start_runtime
+from rho_agent.runtime.options import RuntimeOptions
 from rho_agent.runtime.run import run_prompt
 from rho_agent.runtime.types import AgentRuntime
 
@@ -75,6 +76,7 @@ def _build_runtime(exporter: CountingExporter) -> AgentRuntime:
         model="gpt-5-mini",
         profile_name="readonly",
         session_id=context.session_id,
+        options=RuntimeOptions(),
         observability=processor,
     )
 

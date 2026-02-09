@@ -56,8 +56,30 @@ def test_deregister_cleans_pause_and_directive_files(tmp_path) -> None:
     _register(sm, session_id)
     assert sm.pause(session_id)
     assert sm.queue_directive(session_id, "directive")
+    assert sm.record_response(session_id, "latest reply")
 
     sm.deregister(session_id)
 
     assert not sm.is_paused(session_id)
     assert sm.consume_directives(session_id) == []
+    assert sm.get_last_response(session_id) is None
+
+
+def test_record_and_read_last_response(tmp_path) -> None:
+    sm = SignalManager(signal_dir=tmp_path)
+    session_id = "abc12345-0000-0000-0000-000000000000"
+    _register(sm, session_id)
+
+    assert sm.record_response(session_id, "first response")
+    assert sm.get_last_response(session_id) == (1, "first response")
+
+    assert sm.record_response(session_id, "second response")
+    assert sm.get_last_response(session_id) == (2, "second response")
+
+
+def test_record_response_requires_running_session(tmp_path) -> None:
+    sm = SignalManager(signal_dir=tmp_path)
+    session_id = "abc12345-0000-0000-0000-000000000000"
+
+    assert not sm.record_response(session_id, "reply")
+    assert sm.get_last_response(session_id) is None

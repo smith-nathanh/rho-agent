@@ -48,6 +48,8 @@ from rho_agent.observability import (
     create_processor,
 )
 from rho_agent.prompts import load_prompt, prepare_prompt
+from rho_agent.runtime.options import RuntimeOptions
+from rho_agent.runtime.registry_extensions import register_runtime_tools
 
 # Load .env file - try multiple locations
 # 1. Current directory
@@ -215,6 +217,20 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     profile.bash_only = bash_only
     factory = ToolFactory(profile)
     registry = factory.create_registry(working_dir=working_dir)
+    register_runtime_tools(
+        registry,
+        runtime_session=session,
+        # Harbor runner uses LiteLLMClient directly; keep delegate disabled here
+        # until child delegation is implemented for this execution path.
+        runtime_options=RuntimeOptions(
+            working_dir=working_dir,
+            profile=profile,
+            auto_approve=True,
+            enable_delegate=False,
+        ),
+        approval_callback=auto_approve,
+        cancel_check=None,
+    )
 
     # Log available tools for debugging
     tool_names = [h.name for h in registry._handlers.values()]

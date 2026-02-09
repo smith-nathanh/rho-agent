@@ -12,7 +12,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from time import monotonic
+from time import monotonic, sleep
 from typing import Annotated, Any, Iterable, Optional
 
 import typer
@@ -40,7 +40,7 @@ from rich.table import Table
 from rich.theme import Theme
 
 from .capabilities import CapabilityProfile, ShellMode
-from .capabilities.factory import ToolFactory, load_profile
+from .capabilities.factory import load_profile
 from .cli_errors import (
     InvalidModeError,
     InvalidProfileError,
@@ -58,6 +58,7 @@ from .runtime import (
     RuntimeOptions,
     close_runtime,
     create_runtime,
+    reconfigure_runtime,
     start_runtime,
 )
 from .runtime.types import AgentRuntime
@@ -714,17 +715,13 @@ def switch_runtime_profile(
 ) -> CapabilityProfile:
     """Switch runtime capabilities to a new profile for the active session."""
     try:
-        capability_profile = load_profile(profile_name_or_path)
+        capability_profile = reconfigure_runtime(
+            runtime,
+            profile=profile_name_or_path,
+            working_dir=working_dir,
+        )
     except (ValueError, FileNotFoundError) as e:
         raise InvalidProfileError(str(e)) from e
-
-    registry = ToolFactory(capability_profile).create_registry(working_dir=working_dir)
-    runtime.registry = registry
-    runtime.agent.set_registry(registry)
-    runtime.profile_name = capability_profile.name
-
-    if runtime.observability and runtime.observability.context:
-        runtime.observability.context.profile = capability_profile.name
 
     return capability_profile
 
@@ -1023,6 +1020,7 @@ async def run_interactive(
         nonlocal session_status
 
         loop = asyncio.get_event_loop()
+        response_chunks: list[str] = []
 
         def on_cancel():
             console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
@@ -1053,6 +1051,8 @@ async def run_interactive(
                 if status_ctx and not saw_model_output:
                     elapsed = int(monotonic() - start)
                     status_ctx.update(f"⠋ working ({elapsed}s • Ctrl+C: cancel)")
+                if event.type == "text" and event.content:
+                    response_chunks.append(event.content)
                 if event.type in ("text", "tool_start", "error", "cancelled"):
                     saw_model_output = True
                     if status_ctx:
@@ -1079,6 +1079,8 @@ async def run_interactive(
                 )
             if status_ctx:
                 status_ctx.__exit__(None, None, None)
+            if signal_manager and session_id and response_chunks:
+                signal_manager.record_response(session_id, "".join(response_chunks))
         finally:
             if platform.system() != "Windows":
                 loop.remove_signal_handler(signal.SIGINT)
@@ -1101,6 +1103,15 @@ async def run_interactive(
                         break
                 if session_status == "cancelled":
                     break
+
+                if signal_manager.has_export_request(session_id):
+                    from .context_export import write_context_file
+
+                    write_context_file(
+                        signal_manager.context_path(session_id),
+                        runtime.session.get_messages(),
+                    )
+                    signal_manager.clear_export_request(session_id)
 
             try:
                 console.print()
@@ -1979,6 +1990,7 @@ def monitor(
     except Exception as exc:
         console.print(_markup(f"Failed to open telemetry DB: {exc}", THEME.error))
         raise typer.Exit(1) from exc
+    connection_state: dict[str, Any] | None = None
 
     def print_help() -> None:
         console.print(_markup("Commands:", THEME.secondary))
@@ -1990,6 +2002,8 @@ def monitor(
         console.print("[dim]  pause <prefix|all>            pause running session(s)[/dim]")
         console.print("[dim]  resume <prefix|all>           resume paused session(s)[/dim]")
         console.print("[dim]  directive <prefix> <text>     inject directive into interactive run[/dim]")
+        console.print("[dim]  connect <a> <b> [more...] -- <task> context-file collaboration[/dim]")
+        console.print("[dim]  disconnect                    end active connect session[/dim]")
         console.print("[dim]  help                          show this help[/dim]")
         console.print("[dim]  quit                          exit monitor[/dim]")
 
@@ -2054,6 +2068,208 @@ def monitor(
         if prefix == "all":
             return [a.session_id for a in sm.list_running()]
         return [a.session_id for a in sm.list_running() if a.session_id.startswith(prefix)]
+
+    def resolve_single_running(prefix: str) -> str | None:
+        matches = resolve_running_prefix(prefix)
+        if not matches:
+            console.print(_markup(f"No running agents matching '{prefix}'", THEME.error))
+            return None
+        if len(matches) > 1:
+            console.print(
+                _markup(
+                    f"Prefix '{prefix}' matched multiple sessions; use a longer prefix.",
+                    THEME.warning,
+                )
+            )
+            return None
+        return matches[0]
+
+    def truncate_for_directive(text: str, max_chars: int = 3000) -> str:
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + "\n...[truncated]..."
+
+    def wait_for_new_response(
+        session_id: str,
+        *,
+        after_seq: int,
+        timeout_seconds: int = 120,
+    ) -> tuple[int, str] | None:
+        deadline = monotonic() + timeout_seconds
+        while monotonic() < deadline:
+            latest = sm.get_last_response(session_id)
+            if latest and latest[0] > after_seq:
+                return latest
+            sleep(0.5)
+        return None
+
+    def request_fresh_export(session_id: str) -> bool:
+        sm.clear_export(session_id)
+        return sm.request_export(session_id)
+
+    def wait_for_export(
+        session_id: str,
+        *,
+        timeout_seconds: int = 60,
+    ) -> bool:
+        deadline = monotonic() + timeout_seconds
+        while monotonic() < deadline:
+            if sm.export_ready(session_id):
+                return True
+            sleep(0.5)
+        return False
+
+    def clear_connect_exports(session_ids: list[str]) -> None:
+        for sid in session_ids:
+            sm.clear_export(sid)
+
+    def build_connect_directive(
+        *,
+        session_id: str,
+        session_ids: list[str],
+        task: str,
+        prior_responses: list[tuple[str, str]],
+    ) -> str:
+        peer_lines = [
+            f"- {peer[:8]}: {sm.context_path(peer)}" for peer in session_ids if peer != session_id
+        ]
+        if peer_lines:
+            peer_contexts = "\n".join(peer_lines)
+        else:
+            peer_contexts = "- (none)"
+
+        if prior_responses:
+            prior_text = "\n\n".join(
+                f"[{peer[:8]}]\n{truncate_for_directive(text)}" for peer, text in prior_responses
+            )
+        else:
+            prior_text = "(none yet)"
+
+        return (
+            f"Task: {task}\n"
+            "This is a connect collaboration turn.\n"
+            "Use read/grep tools on peer context files, then respond with your analysis.\n\n"
+            "Peer context files:\n"
+            f"{peer_contexts}\n\n"
+            "Prior agent responses in this connect session:\n"
+            f"{prior_text}"
+        )
+
+    def run_connect(prefixes: list[str], task: str) -> None:
+        nonlocal connection_state
+        if connection_state is not None:
+            console.print(
+                _markup(
+                    "A connect session is already active. Run 'disconnect' before starting another.",
+                    THEME.warning,
+                )
+            )
+            return
+
+        session_ids: list[str] = []
+        for prefix in prefixes:
+            resolved = resolve_single_running(prefix)
+            if not resolved:
+                return
+            if resolved in session_ids:
+                console.print(_markup(f"Duplicate agent prefix '{prefix}'", THEME.warning))
+                continue
+            session_ids.append(resolved)
+
+        if len(session_ids) < 2:
+            console.print(_markup("connect requires at least two distinct running agents.", THEME.error))
+            return
+
+        paused = [sid[:8] for sid in session_ids if sm.is_paused(sid)]
+        if paused:
+            console.print(
+                _markup(
+                    f"Paused agents detected ({', '.join(paused)}). Resume before connect.",
+                    THEME.warning,
+                )
+            )
+            return
+
+        seq_by_session: dict[str, int] = {}
+        for sid in session_ids:
+            prior = sm.get_last_response(sid)
+            seq_by_session[sid] = prior[0] if prior else 0
+
+        for sid in session_ids:
+            if not request_fresh_export(sid):
+                console.print(_markup(f"Failed to request export for {sid[:8]}", THEME.error))
+                clear_connect_exports(session_ids)
+                return
+
+        for sid in session_ids:
+            if not wait_for_export(sid):
+                console.print(
+                    _markup(
+                        f"Timed out waiting for context export from {sid[:8]}",
+                        THEME.error,
+                    )
+                )
+                clear_connect_exports(session_ids)
+                return
+
+        responses: list[tuple[str, str]] = []
+
+        console.print(
+            _markup(
+                f"Starting connect with {len(session_ids)} agents",
+                THEME.success,
+            )
+        )
+
+        for sid in session_ids:
+            prompt = build_connect_directive(
+                session_id=sid,
+                session_ids=session_ids,
+                task=task,
+                prior_responses=responses,
+            )
+            if not sm.queue_directive(sid, prompt):
+                console.print(_markup(f"Failed to queue directive for {sid[:8]}", THEME.error))
+                clear_connect_exports(session_ids)
+                return
+
+            latest = wait_for_new_response(sid, after_seq=seq_by_session[sid])
+            if not latest:
+                console.print(
+                    _markup(
+                        f"Timed out waiting for response from {sid[:8]}",
+                        THEME.warning,
+                    )
+                )
+                clear_connect_exports(session_ids)
+                return
+
+            seq_by_session[sid], response_text = latest
+            responses.append((sid, response_text))
+
+            if not request_fresh_export(sid) or not wait_for_export(sid, timeout_seconds=15):
+                console.print(
+                    _markup(
+                        f"Failed to refresh context export for {sid[:8]} after response.",
+                        THEME.warning,
+                    )
+                )
+                clear_connect_exports(session_ids)
+                return
+
+            console.print(_markup(f"{sid[:8]}: response captured", THEME.muted))
+
+        connection_state = {
+            "session_ids": session_ids,
+            "task": task,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
+        console.print(
+            _markup(
+                f"Connect session open for {len(session_ids)} agents. Use 'disconnect' to end it.",
+                THEME.success,
+            )
+        )
 
     def resolve_session_id(prefix: str) -> str | None:
         detail = storage.get_session_detail(prefix)
@@ -2222,6 +2438,53 @@ def monitor(
                 console.print(_markup(f"directive queued for {session_id[:8]}", THEME.success))
             else:
                 console.print(_markup(f"Failed to queue directive for {session_id[:8]}", THEME.error))
+            continue
+
+        if command == "connect":
+            separator_index = parts.index("--") if "--" in parts else -1
+            if separator_index == -1:
+                console.print(
+                    _markup(
+                        "Usage: connect <a_prefix> <b_prefix> [more_prefixes...] -- <task>",
+                        THEME.warning,
+                    )
+                )
+                continue
+            left = parts[1:separator_index]
+            if len(left) < 2:
+                console.print(
+                    _markup(
+                        "connect requires at least two agent prefixes before '--'.",
+                        THEME.warning,
+                    )
+                )
+                continue
+            prefixes = left
+            task = " ".join(parts[separator_index + 1 :]).strip()
+            if not task:
+                console.print(_markup("connect task cannot be empty.", THEME.warning))
+                continue
+            run_connect(prefixes, task)
+            continue
+
+        if command == "disconnect":
+            if connection_state is None:
+                console.print(_markup("No active connect session.", THEME.warning))
+                continue
+
+            session_ids = connection_state.get("session_ids", [])
+            if not isinstance(session_ids, list):
+                session_ids = []
+
+            for sid in session_ids:
+                sm.queue_directive(
+                    sid,
+                    "The connect session has ended. Resume your previous work.",
+                )
+                sm.clear_export(sid)
+
+            connection_state = None
+            console.print(_markup("Disconnected active connect session.", THEME.success))
             continue
 
         console.print(_markup(f"Unknown command: {raw}", THEME.warning))

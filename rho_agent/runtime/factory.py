@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 
 from ..capabilities import CapabilityProfile
 from ..capabilities.factory import ToolFactory, load_profile
@@ -13,6 +14,7 @@ from ..core.session import Session
 from ..observability.config import ObservabilityConfig
 from ..observability.processor import ObservabilityProcessor
 from .options import RuntimeOptions
+from .registry_extensions import register_runtime_tools
 from .types import AgentRuntime, ApprovalCallback
 
 
@@ -41,7 +43,7 @@ async def _reject_all(_: str, __: dict[str, object]) -> bool:
     return False
 
 
-def _resolve_profile(
+def resolve_profile(
     profile: str | CapabilityProfile | None,
 ) -> CapabilityProfile:
     if isinstance(profile, CapabilityProfile):
@@ -90,10 +92,15 @@ def create_runtime(
     cancel_check: Callable[[], bool] | None = None,
 ) -> AgentRuntime:
     """Create a configured runtime."""
-    options = options or RuntimeOptions()
-    capability_profile = _resolve_profile(options.profile)
+    requested_options = options or RuntimeOptions()
+    capability_profile = resolve_profile(requested_options.profile)
     profile_name = capability_profile.name
-    session_id = options.session_id or str(uuid.uuid4())
+    session_id = requested_options.session_id or str(uuid.uuid4())
+    options = replace(
+        requested_options,
+        profile=capability_profile,
+        session_id=session_id,
+    )
 
     runtime_session = session or Session(system_prompt=system_prompt)
     factory = ToolFactory(capability_profile)
@@ -110,6 +117,14 @@ def create_runtime(
         resolved_approval_callback = _auto_approve
     else:
         resolved_approval_callback = _reject_all
+
+    register_runtime_tools(
+        registry,
+        runtime_session=runtime_session,
+        runtime_options=options,
+        approval_callback=resolved_approval_callback,
+        cancel_check=cancel_check,
+    )
 
     agent = Agent(
         session=runtime_session,
@@ -132,5 +147,8 @@ def create_runtime(
         model=options.model,
         profile_name=profile_name,
         session_id=session_id,
+        options=options,
+        approval_callback=resolved_approval_callback,
+        cancel_check=cancel_check,
         observability=observability,
     )

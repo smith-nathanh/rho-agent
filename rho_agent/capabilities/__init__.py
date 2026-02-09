@@ -67,7 +67,7 @@ class ApprovalMode(Enum):
 
 # Default tools that require approval in DANGEROUS mode
 DEFAULT_DANGEROUS_TOOLS = frozenset(
-    {"bash", "write", "edit", "oracle", "mysql", "sqlite", "vertica", "postgres"}
+    {"bash", "write", "edit", "oracle", "mysql", "sqlite", "vertica", "postgres", "delegate"}
 )
 
 # Default patterns that always require approval regardless of mode

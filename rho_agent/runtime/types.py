@@ -10,6 +10,7 @@ from ..core.agent import Agent, AgentEvent
 from ..core.session import Session
 from ..observability.processor import ObservabilityProcessor
 from ..tools.registry import ToolRegistry
+from .options import RuntimeOptions
 
 ApprovalCallback = Callable[[str, dict[str, Any]], Awaitable[bool]]
 EventHandler = Callable[[AgentEvent], None | Awaitable[None]]
@@ -25,6 +26,9 @@ class AgentRuntime:
     model: str
     profile_name: str
     session_id: str
+    options: RuntimeOptions
+    approval_callback: ApprovalCallback | None = None
+    cancel_check: Callable[[], bool] | None = None
     observability: ObservabilityProcessor | None = None
 
 

@@ -7,6 +7,8 @@ import pytest
 from rho_agent.capabilities import CapabilityProfile
 from rho_agent.cli_errors import InvalidProfileError
 from rho_agent.cli import handle_command, switch_runtime_profile
+from rho_agent.core.session import Session
+from rho_agent.runtime.options import RuntimeOptions
 
 
 class DummyContext:
@@ -33,10 +35,16 @@ def test_handle_command_mode_returns_mode_action() -> None:
 
 
 def test_switch_runtime_profile_updates_runtime_and_observability() -> None:
+    profile = CapabilityProfile.readonly()
+    options = RuntimeOptions(profile=profile, working_dir=".")
     runtime = SimpleNamespace(
         registry=None,
         agent=DummyAgent(),
+        session=Session(system_prompt="system"),
         profile_name="readonly",
+        options=options,
+        approval_callback=None,
+        cancel_check=None,
         observability=DummyObservability(),
     )
 
@@ -46,14 +54,22 @@ def test_switch_runtime_profile_updates_runtime_and_observability() -> None:
     assert profile.name == "developer"
     assert runtime.registry is runtime.agent.registry
     assert runtime.profile_name == "developer"
+    assert runtime.options.profile.name == "developer"
     assert runtime.observability.context.profile == "developer"
+    assert "delegate" in runtime.registry
 
 
 def test_switch_runtime_profile_invalid_profile_raises_cli_error() -> None:
+    profile = CapabilityProfile.readonly()
+    options = RuntimeOptions(profile=profile, working_dir=".")
     runtime = SimpleNamespace(
         registry=None,
         agent=DummyAgent(),
+        session=Session(system_prompt="system"),
         profile_name="readonly",
+        options=options,
+        approval_callback=None,
+        cancel_check=None,
         observability=None,
     )
 

@@ -69,6 +69,15 @@ class SignalManager:
     def _directive_path(self, session_id: str) -> Path:
         return self._dir / f"{session_id}.directive"
 
+    def _state_path(self, session_id: str) -> Path:
+        return self._dir / f"{session_id}.state"
+
+    def _export_path(self, session_id: str) -> Path:
+        return self._dir / f"{session_id}.export"
+
+    def _context_path(self, session_id: str) -> Path:
+        return self._dir / f"{session_id}.context"
+
     def register(self, info: AgentInfo) -> None:
         """Write a .running file for this agent session."""
         self._running_path(info.session_id).write_text(info.to_json(), encoding="utf-8")
@@ -80,6 +89,9 @@ class SignalManager:
             self._cancel_path(session_id),
             self._pause_path(session_id),
             self._directive_path(session_id),
+            self._state_path(session_id),
+            self._export_path(session_id),
+            self._context_path(session_id),
         ):
             try:
                 path.unlink()
@@ -188,6 +200,40 @@ class SignalManager:
                 self._unlock_file(f)
         return True
 
+    def request_export(self, session_id: str) -> bool:
+        """Request a context export from a running session."""
+        if not self._running_path(session_id).exists():
+            return False
+        self._export_path(session_id).write_text("", encoding="utf-8")
+        return True
+
+    def export_ready(self, session_id: str) -> bool:
+        """Check whether a context export file exists for a session."""
+        return self._context_path(session_id).exists()
+
+    def has_export_request(self, session_id: str) -> bool:
+        """Check whether export has been requested for a session."""
+        return self._export_path(session_id).exists()
+
+    def clear_export_request(self, session_id: str) -> None:
+        """Clear a pending export request marker."""
+        try:
+            self._export_path(session_id).unlink()
+        except FileNotFoundError:
+            pass
+
+    def context_path(self, session_id: str) -> Path:
+        """Return the exported context file path for a session."""
+        return self._context_path(session_id)
+
+    def clear_export(self, session_id: str) -> None:
+        """Delete both export request and exported context artifacts."""
+        self.clear_export_request(session_id)
+        try:
+            self._context_path(session_id).unlink()
+        except FileNotFoundError:
+            pass
+
     def consume_directives(self, session_id: str) -> list[str]:
         """Read and clear queued directives for a session."""
         path = self._directive_path(session_id)
@@ -218,6 +264,78 @@ class SignalManager:
             if isinstance(directive, str) and directive.strip():
                 directives.append(directive.strip())
         return directives
+
+    def record_response(self, session_id: str, response: str) -> bool:
+        """Record the latest assistant response for a running session."""
+        if not self._running_path(session_id).exists():
+            return False
+        response = response.strip()
+        if not response:
+            return False
+        path = self._state_path(session_id)
+        now = datetime.now(timezone.utc).isoformat()
+        with path.open("a+", encoding="utf-8") as f:
+            self._lock_file(f)
+            try:
+                f.seek(0)
+                existing_raw = f.read().strip()
+                existing = {}
+                if existing_raw:
+                    try:
+                        decoded = json.loads(existing_raw)
+                        if isinstance(decoded, dict):
+                            existing = decoded
+                    except json.JSONDecodeError:
+                        existing = {}
+
+                try:
+                    prior_seq = int(existing.get("response_seq", 0))
+                except (TypeError, ValueError):
+                    prior_seq = 0
+                response_seq = prior_seq + 1
+                payload = {
+                    "response_seq": response_seq,
+                    "last_response": response,
+                    "updated_at": now,
+                }
+                f.seek(0)
+                f.truncate(0)
+                f.write(json.dumps(payload))
+                f.flush()
+            finally:
+                self._unlock_file(f)
+        return True
+
+    def get_last_response(self, session_id: str) -> tuple[int, str] | None:
+        """Get the latest recorded assistant response for a session."""
+        path = self._state_path(session_id)
+        if not path.exists():
+            return None
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                self._lock_file(f)
+                try:
+                    raw = f.read().strip()
+                finally:
+                    self._unlock_file(f)
+        except OSError:
+            return None
+        if not raw:
+            return None
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        response = payload.get("last_response")
+        if not isinstance(response, str) or not response.strip():
+            return None
+        try:
+            response_seq = int(payload.get("response_seq", 0))
+        except (TypeError, ValueError):
+            response_seq = 0
+        return response_seq, response
 
     def _lock_file(self, file_obj: object) -> None:
         if fcntl is None:
