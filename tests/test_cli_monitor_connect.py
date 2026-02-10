@@ -15,6 +15,10 @@ class FakeTelemetryStorage:
         del status, limit
         return []
 
+    def count_sessions(self, status: str | None = None) -> int:
+        del status
+        return 0
+
     def get_session_detail(self, session_id: str) -> object | None:
         del session_id
         return None

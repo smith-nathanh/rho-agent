@@ -2015,18 +2015,18 @@ def monitor(
 
     def print_help() -> None:
         console.print(_markup("Commands:", THEME.secondary))
-        console.print("[dim]  overview                      show running agents + recent sessions[/dim]")
-        console.print("[dim]  running                       list running agents[/dim]")
-        console.print("[dim]  sessions [active|completed]   list recent telemetry sessions[/dim]")
-        console.print("[dim]  show <session_id_or_prefix>   show session detail[/dim]")
-        console.print("[dim]  kill <prefix|all>             cancel running session(s)[/dim]")
-        console.print("[dim]  pause <prefix|all>            pause running session(s)[/dim]")
-        console.print("[dim]  resume <prefix|all>           resume paused session(s)[/dim]")
-        console.print("[dim]  directive <prefix> <text>     inject directive into interactive run[/dim]")
-        console.print("[dim]  connect <a> <b> [more...] -- <task> context-file collaboration[/dim]")
-        console.print("[dim]  disconnect                    end active connect session[/dim]")
-        console.print("[dim]  help                          show this help[/dim]")
-        console.print("[dim]  quit                          exit monitor[/dim]")
+        console.print("[dim]  overview                                running agents + active sessions[/dim]")
+        console.print("[dim]  running                                 list running agents[/dim]")
+        console.print(r"[dim]  sessions \[active|completed|all]        browse telemetry sessions (default: all)[/dim]")
+        console.print("[dim]  show <id_or_prefix>                     session detail[/dim]")
+        console.print("[dim]  kill <prefix|all>                       cancel running session(s)[/dim]")
+        console.print("[dim]  pause <prefix|all>                      pause running session(s)[/dim]")
+        console.print("[dim]  resume <prefix|all>                     resume paused session(s)[/dim]")
+        console.print("[dim]  directive <prefix> <text>               inject directive into interactive run[/dim]")
+        console.print(r"[dim]  connect <a> <b> \[more...] -- <task>   context-file collaboration[/dim]")
+        console.print("[dim]  disconnect                              end active connect session[/dim]")
+        console.print("[dim]  help                                    show this help[/dim]")
+        console.print("[dim]  quit                                    exit monitor[/dim]")
 
     def render_running() -> None:
         agents = sm.list_running()
@@ -2365,8 +2365,14 @@ def monitor(
         console.print(_markup("Running agents", THEME.secondary))
         render_running()
         console.print()
-        console.print(_markup("Recent telemetry sessions", THEME.secondary))
-        render_sessions()
+        console.print(_markup("Active sessions", THEME.secondary))
+        render_sessions(status="active")
+        completed_count = storage.count_sessions(status="completed")
+        if completed_count:
+            console.print(
+                f"[dim]{completed_count} completed session{'s' if completed_count != 1 else ''}"
+                " — type [bold]sessions[/bold] to browse[/dim]"
+            )
 
     console.print(
         Panel(

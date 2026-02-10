@@ -434,6 +434,17 @@ class TelemetryStorage:
                 )
             return results
 
+    def count_sessions(self, status: str | None = None) -> int:
+        """Count sessions, optionally filtered by status."""
+        with self._connection() as conn:
+            if status:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM sessions WHERE status = ?", (status,)
+                ).fetchone()
+            else:
+                row = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()
+            return row[0] if row else 0
+
     def get_session_detail(self, session_id: str) -> SessionDetail | None:
         """Get detailed session information including turns and tool executions."""
         with self._connection() as conn:
