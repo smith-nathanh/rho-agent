@@ -5,8 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from rho_agent.capabilities import CapabilityProfile
-from rho_agent.cli_errors import InvalidProfileError
-from rho_agent.cli import handle_command, switch_runtime_profile
+from rho_agent.cli import InvalidProfileError, handle_command, switch_runtime_profile
 from rho_agent.core.session import Session
 from rho_agent.runtime.options import RuntimeOptions
 

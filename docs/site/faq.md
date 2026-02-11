@@ -1,26 +1,130 @@
 ---
 title: FAQ
-description: Common setup and usage questions.
+description: Common questions about setup, usage, profiles, and operations.
 order: 11
 ---
 
-## Why does docs sync use my local `rho-agent` checkout?
+## Setup
 
-For local development speed. CI/production sync from GitHub.
+### What models are supported?
 
-## How do docs get published to the website?
+Any OpenAI-compatible API. Set `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL` to point to your provider. The default model is `gpt-5-mini` (override with `OPENAI_MODEL` or `--model`).
 
-Changes merged to `rho-agent/main` under `docs/site/**` trigger a dispatch workflow that tells `rho-site` to rebuild.
+### Do I need Docker?
 
-## Why are my docs changes not visible on the site?
+Not for normal usage. Docker is only required for running evaluation benchmarks (AgentBench, Harbor/TerminalBench) which execute tasks in isolated containers.
 
-Check:
+### How do I connect to multiple databases?
 
-1. Docs were committed and pushed to `main`.
-2. `rho-agent` workflow ran successfully.
-3. `rho-site` dispatch workflow ran successfully.
-4. Deploy hook secret is configured (if your host requires explicit deploy trigger).
+Set environment variables for each database type. For SQLite, pass a comma-separated list of paths via `SQLITE_DB`. For other databases, each set of connection variables configures one database. The agent selects between them using the `database` parameter in tool calls.
 
-## Can I keep internal notes in `docs/`?
+## Usage
 
-Yes. Keep public website docs in `docs/site`, and internal notes in other paths such as `docs/internal`.
+### What's the difference between interactive and one-shot mode?
+
+**Interactive mode** (`rho-agent main`) starts a REPL where you type messages and the agent responds in a loop. **One-shot mode** (`rho-agent main "your prompt"`) runs a single task and exits. Both support the same profiles, tools, and observability.
+
+### How do I resume a previous conversation?
+
+```bash
+# List saved conversations
+rho-agent main --list
+
+# Resume the most recent
+rho-agent main -r latest
+
+# Resume by ID
+rho-agent main -r abc123
+```
+
+Conversations are saved automatically to `~/.config/rho-agent/conversations/`.
+
+### Can I use prompt templates with one-shot mode?
+
+Yes. Combine `--prompt` with a positional argument — the positional argument becomes the initial user message, overriding the template's `initial_prompt`:
+
+```bash
+rho-agent main --prompt task.md "focus specifically on OOM errors"
+```
+
+### How does the delegate tool work?
+
+The agent can spawn a child agent to handle a focused subtask. The child inherits the parent's profile and model, runs its task, and returns a text result. Delegation is single-level — children cannot delegate further. See [Architecture](architecture/) for details.
+
+## Profiles
+
+### What is the default profile?
+
+`readonly`. The agent can inspect files and run read-only shell commands, but cannot modify files or execute destructive commands.
+
+### When should I use `eval` mode?
+
+Only in sandboxed environments (containers, VMs) where the security boundary is the environment itself. The `eval` profile disables all restrictions and approval prompts. It exists for benchmark execution, not for general use.
+
+### Can I create a profile that allows file writes but restricts the shell?
+
+Yes. Create a custom YAML profile:
+
+```yaml
+profile: write-restricted-shell
+shell:
+  mode: restricted
+file_write:
+  mode: full
+database:
+  mode: readonly
+approval:
+  mode: dangerous
+```
+
+```bash
+rho-agent main --profile write-restricted-shell.yaml
+```
+
+## Operations
+
+### How do I see what agents are running?
+
+```bash
+rho-agent ps
+```
+
+Or use the monitor for a richer view:
+
+```bash
+rho-agent monitor
+# then type: overview
+```
+
+### How do I stop a runaway agent?
+
+```bash
+# Stop a specific agent by session ID prefix
+rho-agent kill abc1
+
+# Stop all running agents
+rho-agent kill --all
+```
+
+### Where is telemetry data stored?
+
+By default at `~/.config/rho-agent/telemetry.db` (SQLite). You can change this in `observability.yaml` or use the OTLP backend to export to an external collector.
+
+## Docs publishing
+
+### How do docs get published to the website?
+
+Changes merged to `main` under `docs/site/**` trigger a dispatch workflow that tells the site repo to rebuild.
+
+### Why are my docs changes not visible on the site?
+
+Check that:
+
+1. Changes were committed and pushed to `main`
+2. The `rho-agent` workflow ran successfully
+3. The site dispatch workflow ran successfully
+4. Any deploy hook secrets are configured correctly
+
+### Can I keep internal notes in the docs directory?
+
+Yes. Only files in `docs/site/` are published to the website. Internal notes can live at other paths like `docs/internal/`.
