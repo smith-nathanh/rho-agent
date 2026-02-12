@@ -2556,8 +2556,13 @@ def monitor(
 
 def cli() -> None:
     """CLI entrypoint with `main` as the default command."""
+    # Register conductor subcommand (lazy import to avoid circular deps)
+    from .conductor.cli import conduct as _conduct_fn
+
+    app.command(name="conduct")(_conduct_fn)
+
     args = sys.argv[1:]
-    subcommands = {"main", "dashboard", "monitor", "ps", "kill"}
+    subcommands = {"main", "dashboard", "monitor", "ps", "kill", "conduct"}
 
     if not args or args[0] not in subcommands:
         args = ["main", *args]
