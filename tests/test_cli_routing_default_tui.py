@@ -53,3 +53,25 @@ def test_cli_does_not_prepend_main_for_conduct(monkeypatch: pytest.MonkeyPatch) 
 
     args, _prog_name = fake_app.calls[-1]
     assert args == ["conduct", "--help"]
+
+
+def test_cli_preserves_global_help_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_app = FakeTyperApp()
+    monkeypatch.setattr(cli, "app", fake_app)
+    monkeypatch.setattr(sys, "argv", ["rho-agent", "--help"])
+
+    cli.cli()
+
+    args, _prog_name = fake_app.calls[-1]
+    assert args == ["--help"]
+
+
+def test_cli_preserves_global_version_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_app = FakeTyperApp()
+    monkeypatch.setattr(cli, "app", fake_app)
+    monkeypatch.setattr(sys, "argv", ["rho-agent", "--version"])
+
+    cli.cli()
+
+    args, _prog_name = fake_app.calls[-1]
+    assert args == ["--version"]

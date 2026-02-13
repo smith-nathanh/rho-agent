@@ -49,20 +49,23 @@ def test_launcher_command_assembly() -> None:
         model="gpt-5-mini",
         prompt="hello",
         auto_approve=True,
+        team_id="team-1",
+        project_id="proj-1",
     )
 
     launched = launcher.launch(req)
 
     args = captured["args"]
     assert isinstance(args, list)
-    # session-id is generated; validate structure and key flags.
+    # Validate structure and key flags.
     assert args[0:2] == ["rho-agent", "main"]
     assert "--profile" in args and args[args.index("--profile") + 1] == "developer"
     assert "--model" in args and args[args.index("--model") + 1] == "gpt-5-mini"
     assert "--working-dir" in args and args[args.index("--working-dir") + 1] == "/tmp"
+    assert "--team-id" in args and args[args.index("--team-id") + 1] == "team-1"
+    assert "--project-id" in args and args[args.index("--project-id") + 1] == "proj-1"
     assert "--auto-approve" in args
     assert args[-1] == "hello"
-
     assert "--session-id" in args
     session_id = args[args.index("--session-id") + 1]
     assert launched.session_id == session_id

@@ -37,6 +37,7 @@ class AgentList(ListView):
         if cp is None:
             return
 
+        prior_selected = self.selected_session_id
         agents = cp.list_running()
         self._rows = [
             _Row(session_id=a.session_id, label=f"{a.session_id[:8]}  {a.status.value}")
@@ -48,7 +49,14 @@ class AgentList(ListView):
         for row in self._rows:
             self.append(ListItem(Static(row.label)))
 
-        if self._rows and self.index is None:
+        if not self._rows:
+            return
+        if prior_selected:
+            for idx, row in enumerate(self._rows):
+                if row.session_id == prior_selected:
+                    self.index = idx
+                    return
+        if self.index is None:
             self.index = 0
 
     @property

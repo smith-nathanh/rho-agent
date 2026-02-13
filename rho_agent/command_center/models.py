@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import Optional
 
 
 class AgentStatus(StrEnum):
@@ -36,6 +37,8 @@ class LaunchRequest:
     model: str = "gpt-5-mini"
     prompt: str = ""
     auto_approve: bool = False
+    team_id: Optional[str] = None
+    project_id: Optional[str] = None
 
 
 @dataclass(slots=True)

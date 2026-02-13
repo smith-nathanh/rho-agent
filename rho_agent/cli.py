@@ -164,6 +164,22 @@ app = typer.Typer(
 )
 
 
+@app.callback(invoke_without_command=True)
+def _root_callback(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            help="Show rho-agent version and exit",
+            is_eager=True,
+        ),
+    ] = False,
+) -> None:
+    if version:
+        console.print(_get_version())
+        raise typer.Exit(0)
+
+
 def _markup(text: str, color: str) -> str:
     # Escape user/model/tool text so Rich markup tags inside content
     # don't get interpreted as formatting directives.
@@ -1586,6 +1602,14 @@ def main(
             help="Path to observability config file",
         ),
     ] = os.getenv("RHO_AGENT_OBSERVABILITY_CONFIG"),
+    session_id: Annotated[
+        Optional[str],
+        typer.Option(
+            "--session-id",
+            hidden=True,
+            help="Internal: override generated session ID for launched subprocesses",
+        ),
+    ] = None,
 ) -> None:
     """rho-agent: An agent harness and CLI with readonly and developer modes."""
     # Set preview lines for tool output display
@@ -1644,7 +1668,7 @@ def main(
     session_started = datetime.now()
 
     # Generate session ID and set up signal manager for ps/kill support
-    session_id = str(uuid.uuid4())
+    resolved_session_id = session_id or str(uuid.uuid4())
     signal_manager = SignalManager()
 
     # Load capability profile (needed for prompt rendering)
@@ -1801,11 +1825,11 @@ def main(
                 team_id=team_id,
                 project_id=project_id,
                 observability_config=observability_config,
-                session_id=session_id,
+                session_id=resolved_session_id,
             ),
             session=session,
             approval_callback=approval_handler.check_approval,
-            cancel_check=lambda: signal_manager.is_cancelled(session_id),
+            cancel_check=lambda: signal_manager.is_cancelled(resolved_session_id),
         )
     except ObservabilityInitializationError as exc:
         console.print(_markup(_format_observability_init_error(exc), THEME.error))
@@ -1832,7 +1856,7 @@ def main(
 
     # Register this agent session for ps/kill support
     agent_info = AgentInfo(
-        session_id=session_id,
+        session_id=resolved_session_id,
         pid=os.getpid(),
         model=runtime.model,
         instruction_preview=(run_prompt or "interactive session")[:100],
@@ -1852,7 +1876,7 @@ def main(
                         run_prompt,
                         output,
                         signal_manager=signal_manager,
-                        session_id=session_id,
+                        session_id=resolved_session_id,
                     )
                 )
             else:
@@ -1861,7 +1885,7 @@ def main(
                         runtime,
                         run_prompt,
                         signal_manager=signal_manager,
-                        session_id=session_id,
+                        session_id=resolved_session_id,
                     )
                 )
         else:
@@ -1875,11 +1899,11 @@ def main(
                     session_started,
                     conversation_id,
                     signal_manager=signal_manager,
-                    session_id=session_id,
+                    session_id=resolved_session_id,
                 )
             )
     finally:
-        signal_manager.deregister(session_id)
+        signal_manager.deregister(resolved_session_id)
 
 
 @app.command()
@@ -2568,7 +2592,7 @@ def cli() -> None:
             # Provide a clear, user-facing message.
             console.print(
                 _markup(
-                    "Command-center TUI requires the 'textual' dependency. Install rho-agent with TUI extras.",
+                    "Command-center TUI requires the 'textual' dependency. Reinstall or upgrade rho-agent with full dependencies.",
                     THEME.error,
                 )
             )
@@ -2592,6 +2616,9 @@ def cli() -> None:
 
     if not args:
         args = ["tui"]
+    elif args[0].startswith("-"):
+        # Preserve top-level Typer behavior for global flags like --help/--version.
+        pass
     elif args[0] not in subcommands:
         # Treat unknown-leading tokens as prompt args for the legacy `main` surface.
         args = ["main", *args]

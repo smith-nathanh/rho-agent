@@ -1,27 +1,83 @@
-#root {
-  height: 1fr;
+Screen {
+  color: #E6EDF3;
+  background: #11161D;
+}
+
+Header {
+  color: #E6EDF3;
+  background: #1B222C;
+  text-style: bold;
+}
+
+Footer {
+  color: #E6EDF3;
+  background: #1B222C;
 }
 
 #main {
   height: 1fr;
+  min-height: 0;
+  overflow: hidden;
 }
 
 #roster {
   width: 32;
-  border: solid $accent;
+  border: solid #3E4451;
+  background: #151B23;
 }
 
 #trajectory {
   width: 1fr;
-  border: solid $accent;
+  border: solid #3E4451;
+  background: #11161D;
 }
 
 #details {
   width: 40;
-  border: solid $accent;
+  border: solid #3E4451;
+  background: #11161D;
 }
 
 #command {
   height: 3;
-  border: solid $accent;
+  min-height: 3;
+  border: solid #3E4451;
+  background: #151B23;
+}
+
+#command:focus-within {
+  border: solid #61AFEF;
+}
+
+#command-label {
+  color: #56B6C2;
+  width: 10;
+}
+
+#command-input {
+  width: 1fr;
+  height: 1;
+  min-height: 1;
+  color: #E6EDF3;
+  background: #11161D;
+  border: none;
+}
+
+#command-input:focus {
+  border: none;
+  background: #0E141C;
+}
+
+ListView > ListItem {
+  color: #E6EDF3;
+  background: #151B23;
+}
+
+ListView > ListItem.--highlight {
+  color: #11161D;
+  background: #61AFEF;
+}
+
+ListView:focus {
+  border: solid #61AFEF;
 }

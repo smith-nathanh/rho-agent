@@ -27,6 +27,8 @@ class LaunchModalResult:
     model: str
     prompt: str
     auto_approve: bool
+    team_id: str
+    project_id: str
 
 
 class LaunchAgentModal(ModalScreen[LaunchModalResult | None]):
@@ -80,6 +82,8 @@ class LaunchAgentModal(ModalScreen[LaunchModalResult | None]):
         model: str = "gpt-5-mini",
         prompt: str = "",
         auto_approve: bool = False,
+        team_id: str = "",
+        project_id: str = "",
     ) -> None:
         super().__init__()
         self._defaults = {
@@ -88,6 +92,8 @@ class LaunchAgentModal(ModalScreen[LaunchModalResult | None]):
             "model": model,
             "prompt": prompt,
             "auto_approve": auto_approve,
+            "team_id": team_id,
+            "project_id": project_id,
         }
 
     class Submitted(Message):
@@ -121,6 +127,14 @@ class LaunchAgentModal(ModalScreen[LaunchModalResult | None]):
                 yield Input(value=self._defaults["prompt"], id="prompt")
 
             with Horizontal(classes="row"):
+                yield Static("Team ID", classes="label")
+                yield Input(value=self._defaults["team_id"], id="team-id")
+
+            with Horizontal(classes="row"):
+                yield Static("Project ID", classes="label")
+                yield Input(value=self._defaults["project_id"], id="project-id")
+
+            with Horizontal(classes="row"):
                 yield Static("Auto approve", classes="label")
                 yield Checkbox(value=bool(self._defaults["auto_approve"]), id="auto-approve")
 
@@ -143,6 +157,8 @@ class LaunchAgentModal(ModalScreen[LaunchModalResult | None]):
         model = self.query_one("#model", Input).value.strip() or "gpt-5-mini"
         prompt = self.query_one("#prompt", Input).value.strip()
         auto_approve = self.query_one("#auto-approve", Checkbox).value
+        team_id = self.query_one("#team-id", Input).value.strip()
+        project_id = self.query_one("#project-id", Input).value.strip()
 
         # Validate working dir via Input validators.
         wd_input = self.query_one("#working-dir", Input)
@@ -157,6 +173,9 @@ class LaunchAgentModal(ModalScreen[LaunchModalResult | None]):
         if not model:
             self._set_error("Model is required")
             return
+        if bool(team_id) != bool(project_id):
+            self._set_error("Provide both Team ID and Project ID, or leave both blank")
+            return
 
         self._set_error("")
         self.dismiss(
@@ -166,5 +185,7 @@ class LaunchAgentModal(ModalScreen[LaunchModalResult | None]):
                 model=model,
                 prompt=prompt,
                 auto_approve=bool(auto_approve),
+                team_id=team_id,
+                project_id=project_id,
             )
         )

@@ -40,7 +40,7 @@ def test_stop_managed_exited_process_is_removed(tmp_path, monkeypatch) -> None:
         working_dir=tmp_path,
         profile="readonly",
         model="gpt-5-mini",
-        prompt=None,
+        prompt="",
         auto_approve=False,
     )
     launched = launcher.launch(req)

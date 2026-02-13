@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("textual")
+from textual.widgets import Button
 
 from rho_agent.command_center.app import CommandCenterApp, CommandCenterServices
 from rho_agent.command_center.models import AgentStatus, LaunchRequest, RunningAgent
@@ -14,6 +15,7 @@ from rho_agent.command_center.models import AgentStatus, LaunchRequest, RunningA
 @dataclass(slots=True)
 class _FakeControlPlane:
     running: list[RunningAgent]
+    last_call: tuple[str, ...] | None = None
 
     def list_running(self) -> list[RunningAgent]:
         return list(self.running)
@@ -129,29 +131,63 @@ async def test_launch_modal_validation_and_submit(tmp_path: Path) -> None:
     async with app.run_test() as pilot:
         await pilot.pause(0.05)
 
-        await pilot.press("l")
+        await pilot.app.action_launch()
         await pilot.pause(0.05)
 
         # Invalid path should block submission.
-        pilot.app.query_one("#working-dir").value = str(tmp_path / "does-not-exist")
-        await pilot.click("#launch")
+        pilot.app.screen.query_one("#working-dir").value = str(tmp_path / "does-not-exist")
+        await pilot.app.screen.on_button_pressed(
+            Button.Pressed(pilot.app.screen.query_one("#launch", Button))
+        )
         await pilot.pause(0.05)
-        assert pilot.app.screen.query_one("#error").renderable.plain == "Working dir must exist"
+        assert str(pilot.app.screen.query_one("#error").render()) == "Working dir must exist"
         assert launcher.launched == []
 
         # Valid path should submit.
-        pilot.app.query_one("#working-dir").value = str(tmp_path)
-        pilot.app.query_one("#profile").value = "readonly"
-        pilot.app.query_one("#model").value = "gpt-5-mini"
-        pilot.app.query_one("#prompt").value = ""
-        await pilot.click("#launch")
+        pilot.app.screen.query_one("#working-dir").value = str(tmp_path)
+        pilot.app.screen.query_one("#profile").value = "readonly"
+        pilot.app.screen.query_one("#model").value = "gpt-5-mini"
+        pilot.app.screen.query_one("#prompt").value = ""
+        await pilot.app.screen.on_button_pressed(
+            Button.Pressed(pilot.app.screen.query_one("#launch", Button))
+        )
+        await pilot.pause(0.05)
+        assert len(launcher.launched) == 1
+        req = launcher.launched[-1]
+        assert req.prompt == ""
+
+        await pilot.app.action_launch()
+        await pilot.pause(0.05)
+        pilot.app.screen.query_one("#working-dir").value = str(tmp_path)
+        pilot.app.screen.query_one("#prompt").value = "hello from modal"
+        pilot.app.screen.query_one("#team-id").value = "team-a"
+        pilot.app.screen.query_one("#project-id").value = ""
+        await pilot.app.screen.on_button_pressed(
+            Button.Pressed(pilot.app.screen.query_one("#launch", Button))
+        )
+        await pilot.pause(0.05)
+        assert (
+            str(pilot.app.screen.query_one("#error").render())
+            == "Provide both Team ID and Project ID, or leave both blank"
+        )
+        assert len(launcher.launched) == 1
+
+        pilot.app.screen.query_one("#prompt").value = "hello from modal"
+        pilot.app.screen.query_one("#team-id").value = "team-a"
+        pilot.app.screen.query_one("#project-id").value = "proj-a"
+        await pilot.app.screen.on_button_pressed(
+            Button.Pressed(pilot.app.screen.query_one("#launch", Button))
+        )
         await pilot.pause(0.05)
 
-        assert len(launcher.launched) == 1
-        req = launcher.launched[0]
+        assert len(launcher.launched) == 2
+        req = launcher.launched[-1]
         assert req.working_dir == tmp_path
         assert req.profile == "readonly"
         assert req.model == "gpt-5-mini"
+        assert req.prompt == "hello from modal"
+        assert req.team_id == "team-a"
+        assert req.project_id == "proj-a"
 
 
 @pytest.mark.asyncio

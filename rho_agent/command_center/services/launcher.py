@@ -38,8 +38,8 @@ class AgentLauncher:
         entrypoint: list[str] | None = None,
     ) -> None:
         self._popen_factory = popen_factory
-        # Prefer running via current interpreter and module path.
-        self._entrypoint = entrypoint or [sys.executable, "-m", "rho_agent"]
+        # Prefer running via current interpreter and CLI module path.
+        self._entrypoint = entrypoint or [sys.executable, "-m", "rho_agent.cli"]
         self._registry: dict[str, _RegistryEntry] = {}
 
     def _build_command(self, request: LaunchRequest, *, session_id: str) -> list[str]:
@@ -55,6 +55,10 @@ class AgentLauncher:
             "--working-dir",
             os.fspath(request.working_dir),
         ]
+        if request.team_id:
+            cmd.extend(["--team-id", request.team_id])
+        if request.project_id:
+            cmd.extend(["--project-id", request.project_id])
         if request.auto_approve:
             cmd.append("--auto-approve")
         if request.prompt:
