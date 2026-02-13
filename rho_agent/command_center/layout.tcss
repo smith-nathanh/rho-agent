@@ -1,0 +1,27 @@
+#root {
+  height: 1fr;
+}
+
+#main {
+  height: 1fr;
+}
+
+#roster {
+  width: 32;
+  border: solid $accent;
+}
+
+#trajectory {
+  width: 1fr;
+  border: solid $accent;
+}
+
+#details {
+  width: 40;
+  border: solid $accent;
+}
+
+#command {
+  height: 3;
+  border: solid $accent;
+}
