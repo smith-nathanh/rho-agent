@@ -8,7 +8,7 @@ from textual.widgets import Input, Static
 class CommandInput(Static):
     """Command input pane.
 
-    Placeholder for a palette/command line. For now it just accepts text.
+    Accepts palette-like commands. The app listens for submitted values.
     """
 
     services: object | None = None
@@ -16,7 +16,13 @@ class CommandInput(Static):
     def compose(self) -> ComposeResult:
         with Horizontal():
             yield Static("Command:", id="command-label")
-            yield Input(placeholder="/pause, /resume, /kill, /directive ...", id="command-input")
+            yield Input(
+                placeholder="/pause [prefix], /resume [prefix], /kill [prefix], /directive <prefix> <text>, /launch, /refresh",
+                id="command-input",
+            )
 
     def focus_input(self) -> None:
         self.query_one("#command-input", Input).focus()
+
+    def clear(self) -> None:
+        self.query_one("#command-input", Input).value = ""

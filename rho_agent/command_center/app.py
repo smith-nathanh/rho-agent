@@ -15,8 +15,11 @@ from dataclasses import dataclass
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Header
+from textual.widgets import Footer, Header, Input
 
+from rho_agent.command_center.commands import parse_palette_command
+from rho_agent.command_center.modals.launch_agent_modal import LaunchAgentModal
+from rho_agent.command_center.models import LaunchRequest
 from rho_agent.command_center.services.control_plane import ControlPlane
 from rho_agent.command_center.services.launcher import AgentLauncher
 from rho_agent.command_center.services.local_signal_transport import LocalSignalTransport
@@ -51,12 +54,13 @@ class CommandCenterApp(App[None]):
         Binding("up", "roster_up", show=False),
         # Focus
         Binding("tab", "focus_next", "Next focus", show=False),
-        # Control actions (placeholders)
+        # Control actions
         Binding("p", "pause", "Pause"),
         Binding("r", "resume", "Resume"),
         Binding("x", "kill", "Kill"),
         Binding("d", "directive", "Directive"),
         Binding("n", "refresh", "Refresh"),
+        Binding("l", "launch", "Launch"),
         Binding("/", "command_palette", "Command"),
     ]
 
@@ -143,13 +147,70 @@ class CommandCenterApp(App[None]):
         await self.action_refresh()
 
     async def action_directive(self) -> None:
-        # Placeholder directive dispatch.
+        # Keep keybinding flow simple: send placeholder directive to selected.
         prefix = self._selected_prefix()
         self.services.control_plane.directive(prefix, "(placeholder directive)")
 
+    async def action_launch(self) -> None:
+        result = await self.push_screen_wait(
+            LaunchAgentModal(
+                working_dir=".",
+                profile="readonly",
+                model="gpt-5-mini",
+                prompt="",
+                auto_approve=False,
+            )
+        )
+        if result is None:
+            return
+        self.services.launcher.launch(
+            LaunchRequest(
+                working_dir=result.working_dir,
+                profile=result.profile,
+                model=result.model,
+                prompt=result.prompt,
+                auto_approve=result.auto_approve,
+            )
+        )
+        await self.action_refresh()
+
     async def action_command_palette(self) -> None:
-        # Placeholder: focus command input.
         self.query_one(CommandInput).focus_input()
+
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+        # Only handle submissions from the palette input.
+        if event.input.id != "command-input":
+            return
+
+        raw = event.value
+        cmd_input = self.query_one(CommandInput)
+        cmd_input.clear()
+
+        try:
+            parsed = parse_palette_command(raw, control_plane=self.services.control_plane)
+        except ValueError as e:
+            self.bell()
+            self.notify(str(e), severity="error")
+            return
+
+        if parsed.name == "pause":
+            self.services.control_plane.pause(parsed.target_prefix or "all")
+            await self.action_refresh()
+        elif parsed.name == "resume":
+            self.services.control_plane.resume(parsed.target_prefix or "all")
+            await self.action_refresh()
+        elif parsed.name == "kill":
+            self.services.control_plane.kill(parsed.target_prefix or "all")
+            await self.action_refresh()
+        elif parsed.name == "directive":
+            assert parsed.target_prefix is not None
+            self.services.control_plane.directive(parsed.target_prefix, parsed.text)
+        elif parsed.name == "launch":
+            await self.action_launch()
+        elif parsed.name == "refresh":
+            await self.action_refresh()
+        else:
+            self.notify(f"Unhandled command '{parsed.name}'", severity="error")
 
 
 def run() -> None:
