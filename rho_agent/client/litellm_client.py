@@ -158,7 +158,21 @@ class LiteLLMClient:
         if response:
             try:
                 cost = self._litellm.completion_cost(completion_response=response)
-                if cost:
+                if cost is not None:
+                    usage["cost_usd"] = cost
+            except Exception:
+                pass
+
+        # Fallback: compute from model + token counts (e.g. streaming chunks
+        # where completion_cost on the chunk object fails)
+        if "cost_usd" not in usage and usage["input_tokens"] + usage["output_tokens"] > 0:
+            try:
+                cost = self._litellm.completion_cost(
+                    model=self._model,
+                    prompt_tokens=usage["input_tokens"],
+                    completion_tokens=usage["output_tokens"],
+                )
+                if cost is not None:
                     usage["cost_usd"] = cost
             except Exception:
                 pass
