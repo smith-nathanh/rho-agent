@@ -83,6 +83,8 @@ from rich.theme import Theme
 
 from .capabilities import CapabilityProfile, ShellMode
 from .capabilities.factory import load_profile
+from .command_center.services.control_plane import ControlPlane
+from .command_center.services.local_signal_transport import LocalSignalTransport
 from .core.agent import AgentEvent
 from .core.conversations import ConversationStore
 from .core.session import Session
@@ -2042,6 +2044,7 @@ def monitor(
     """Interactive command center for telemetry and live agent controls."""
     resolved_db = db_path or str(DEFAULT_TELEMETRY_DB)
     sm = SignalManager()
+    control_plane = ControlPlane(LocalSignalTransport(sm))
     try:
         storage = TelemetryStorage(resolved_db, read_only=not read_write)
     except Exception as exc:
@@ -2122,24 +2125,15 @@ def monitor(
         console.print(table)
 
     def resolve_running_prefix(prefix: str) -> list[str]:
-        if prefix == "all":
-            return [a.session_id for a in sm.list_running()]
-        return [a.session_id for a in sm.list_running() if a.session_id.startswith(prefix)]
+        return control_plane.resolve_running_prefix(prefix)
 
     def resolve_single_running(prefix: str) -> str | None:
-        matches = resolve_running_prefix(prefix)
-        if not matches:
-            console.print(_markup(f"No running agents matching '{prefix}'", THEME.error))
-            return None
-        if len(matches) > 1:
-            console.print(
-                _markup(
-                    f"Prefix '{prefix}' matched multiple sessions; use a longer prefix.",
-                    THEME.warning,
-                )
-            )
-            return None
-        return matches[0]
+        session_id, error = control_plane.resolve_single_running(prefix)
+        if not error:
+            return session_id
+        color = THEME.warning if "multiple sessions" in error else THEME.error
+        console.print(_markup(error, color))
+        return None
 
     def truncate_for_directive(text: str, max_chars: int = 3000) -> str:
         if len(text) <= max_chars:
@@ -2462,21 +2456,20 @@ def monitor(
 
         if command in ("kill", "pause", "resume") and len(parts) > 1:
             target = parts[1]
-            targets = resolve_running_prefix(target)
-            if not targets:
-                console.print(_markup(f"No running agents matching '{target}'", THEME.error))
-                continue
-
             if command == "kill":
-                acted = [sid for sid in targets if sm.cancel(sid)]
+                outcome = control_plane.kill(target)
             elif command == "pause":
-                acted = [sid for sid in targets if sm.pause(sid)]
+                outcome = control_plane.pause(target)
             else:
-                acted = [sid for sid in targets if sm.resume(sid)]
+                outcome = control_plane.resume(target)
 
-            if acted:
-                for sid in acted:
+            if outcome.acted_session_ids:
+                for sid in outcome.acted_session_ids:
                     console.print(_markup(f"{command}: {sid[:8]}", THEME.success))
+            elif outcome.error:
+                console.print(_markup(outcome.error, THEME.error))
+            elif outcome.warning:
+                console.print(_markup(outcome.warning, THEME.warning))
             else:
                 console.print(_markup(f"No agents updated by '{command}'", THEME.warning))
             continue
@@ -2484,23 +2477,16 @@ def monitor(
         if command == "directive" and len(parts) > 2:
             target = parts[1]
             directive = " ".join(parts[2:])
-            targets = resolve_running_prefix(target)
-            if not targets:
-                console.print(_markup(f"No running agents matching '{target}'", THEME.error))
-                continue
-            if len(targets) > 1:
-                console.print(
-                    _markup(
-                        f"Prefix '{target}' matched multiple sessions; use a longer prefix.",
-                        THEME.warning,
-                    )
-                )
-                continue
-            session_id = targets[0]
-            if sm.queue_directive(session_id, directive):
+            outcome = control_plane.directive(target, directive)
+            if outcome.acted_session_ids:
+                session_id = outcome.acted_session_ids[0]
                 console.print(_markup(f"directive queued for {session_id[:8]}", THEME.success))
+            elif outcome.warning:
+                console.print(_markup(outcome.warning, THEME.warning))
+            elif outcome.error:
+                console.print(_markup(outcome.error, THEME.error))
             else:
-                console.print(_markup(f"Failed to queue directive for {session_id[:8]}", THEME.error))
+                console.print(_markup("Failed to queue directive", THEME.error))
             continue
 
         if command == "connect":
