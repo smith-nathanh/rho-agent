@@ -2543,16 +2543,57 @@ def monitor(
 
 
 def cli() -> None:
-    """CLI entrypoint with `main` as the default command."""
+    """CLI entrypoint.
+
+    Default UX: launch the Textual command-center TUI when no explicit subcommand is
+    provided.
+
+    Required non-TUI subcommands (e.g. `conduct`) must continue to route correctly.
+    """
+
     # Register conductor subcommand (lazy import to avoid circular deps)
     from .conductor.cli import conduct as _conduct_fn
 
     app.command(name="conduct")(_conduct_fn)
 
-    args = sys.argv[1:]
-    subcommands = {"main", "dashboard", "monitor", "ps", "kill", "conduct"}
+    @app.command(name="tui")
+    @app.command(name="command-center")
+    def _command_center_tui() -> None:
+        """Launch the command-center TUI."""
 
-    if not args or args[0] not in subcommands:
+        try:
+            from .command_center.app import CommandCenterApp
+        except ModuleNotFoundError as exc:
+            # Textual is an optional dependency in some environments (e.g. minimal CI).
+            # Provide a clear, user-facing message.
+            console.print(
+                _markup(
+                    "Command-center TUI requires the 'textual' dependency. Install rho-agent with TUI extras.",
+                    THEME.error,
+                )
+            )
+            raise typer.Exit(1) from exc
+
+        CommandCenterApp().run()
+
+    args = sys.argv[1:]
+
+    # Keep legacy commands routable, but they're no longer the primary/default UX surface.
+    subcommands = {
+        "main",
+        "tui",
+        "command-center",
+        "dashboard",
+        "monitor",
+        "ps",
+        "kill",
+        "conduct",
+    }
+
+    if not args:
+        args = ["tui"]
+    elif args[0] not in subcommands:
+        # Treat unknown-leading tokens as prompt args for the legacy `main` surface.
         args = ["main", *args]
 
     app(args=args, prog_name="rho-agent")
