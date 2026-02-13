@@ -17,7 +17,4 @@ database:
   mode: readonly  # SELECT queries only, mutations blocked
 
 approval:
-  mode: dangerous  # Approve dangerous tools (bash, database)
-  # Default dangerous tools that require approval:
-  # - bash (shell execution)
-  # - oracle, mysql, sqlite, vertica, postgres (database access)
+  mode: dangerous  # Require user approval before running dangerous tools (bash, database, delegate)
