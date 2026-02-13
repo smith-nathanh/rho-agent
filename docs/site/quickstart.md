@@ -18,10 +18,18 @@ cd rho-agent
 uv sync
 ```
 
-## Start an interactive session
+## Start the command center (recommended)
 
 ```bash
 export OPENAI_API_KEY=sk-...
+uv run rho-agent
+```
+
+This launches the **command center TUI** (Textual). From here you can browse sessions/telemetry and manage running agents.
+
+## Start an interactive agent session (non-TUI)
+
+```bash
 uv run rho-agent main
 ```
 
@@ -66,18 +74,18 @@ uv run rho-agent main "list all tables and describe their schemas"
 
 Database tools support PostgreSQL, MySQL, Oracle, Vertica, and SQLite. See [Tools](tools/) for configuration details.
 
-## Monitor running agents
+## Manage running agents
 
 ```bash
-# List running agents
+# Command center (TUI)
+uv run rho-agent
+
+# Or from another terminal:
 uv run rho-agent ps
-
-# Launch the observability dashboard
-uv run rho-agent dashboard
-
-# Open the interactive monitor
-uv run rho-agent monitor
+uv run rho-agent kill <prefix>
 ```
+
+Note: the legacy `monitor` and `dashboard` commands still exist, but the command center TUI is the primary workflow.
 
 ## Next steps
 

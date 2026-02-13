@@ -4,9 +4,19 @@ description: Commands, flags, and usage examples for the rho-agent CLI.
 order: 4
 ---
 
-## `rho-agent main`
+## `rho-agent` (default: command center TUI)
 
-The primary command. Starts an interactive REPL or runs a one-shot task.
+Running `rho-agent` with no subcommand launches the **command center TUI** (Textual):
+
+```bash
+rho-agent
+rho-agent tui
+rho-agent command-center
+```
+
+## `rho-agent main` (agent REPL / one-shot)
+
+Starts an interactive REPL or runs a one-shot task.
 
 ```bash
 rho-agent main [PROMPT] [OPTIONS]

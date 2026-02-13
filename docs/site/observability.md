@@ -1,6 +1,6 @@
 ---
 title: Observability
-description: Session telemetry, token tracking, tool metrics, dashboard, and monitor.
+description: Session telemetry, token tracking, tool metrics, and the command center.
 order: 9
 ---
 
@@ -103,7 +103,17 @@ Each tool call within a turn:
 | `capture.tool_arguments` | bool | `true` | Record tool call arguments |
 | `capture.tool_results` | bool | `false` | Record tool call results |
 
-## Dashboard
+## Command center (TUI)
+
+The command center TUI is the primary way to browse sessions and manage running agents.
+
+```bash
+rho-agent
+# or:
+rho-agent tui
+```
+
+## Dashboard (legacy)
 
 The Streamlit dashboard provides a visual interface for browsing telemetry data.
 
@@ -119,9 +129,9 @@ Features:
 - Token usage analytics by team, project, and time period
 - Tool execution statistics: call frequency, success rate, and average duration
 
-## Monitor
+## Monitor (legacy)
 
-The monitor is an interactive command center that combines telemetry browsing with live agent management.
+The legacy monitor is a prompt-toolkit interactive interface that combines telemetry browsing with live agent management.
 
 ```bash
 rho-agent monitor

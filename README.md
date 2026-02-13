@@ -29,11 +29,27 @@ uv sync --group dev
 uv run --group dev python -m pytest
 ```
 
-## Running the Agent
+## Running rho-agent
 
-### Interactive CLI
+### Command center (TUI-first)
 
-Start a REPL session for exploratory, multi-turn research:
+The default `rho-agent` entrypoint launches the **command center TUI** (Textual):
+
+```bash
+uv run rho-agent
+# equivalent:
+uv run rho-agent tui
+# alias:
+uv run rho-agent command-center
+```
+
+From the command center you can browse recent sessions, inspect telemetry, and send live
+control commands (pause/resume/kill/directive). You can also launch new agent runs from
+within the TUI.
+
+### Agent REPL / one-shot prompts (non-TUI)
+
+The legacy REPL/dispatch surface is still available via `rho-agent main`:
 
 ```bash
 uv run rho-agent main
@@ -209,8 +225,8 @@ at `validate_config.py`.
 - **File editing**: Write and edit tools available in developer/eval profiles
 - **Multiple database backends**: SQLite, PostgreSQL, MySQL, Oracle, Vertica—with configurable read-only or mutation access
 - **Prompt templates**: Markdown files with variable substitution for repeatable investigations
-- **Observability**: Session tracking, token usage, tool execution metrics with Streamlit dashboard
-- **Session management**: List and kill running agents from another terminal with `rho-agent ps` and `rho-agent kill`
+- **Observability**: Session tracking, token usage, tool execution metrics (SQLite/OTLP). Use the command center TUI for live inspection.
+- **Session management**: Control running agents via the command center TUI, or from another terminal with `rho-agent ps` and `rho-agent kill`
 - **Evaluation integrations**: AgentBench (DBBench, OS Interaction) and Harbor/TerminalBench
 
 ## Capability Profiles
@@ -392,7 +408,15 @@ export RHO_AGENT_PROJECT_ID=logs
 uv run rho-agent main "analyze this error"
 ```
 
-### Dashboard
+### Command center (TUI)
+
+For live inspection and control, use the command center TUI:
+
+```bash
+uv run rho-agent
+```
+
+### Dashboard (legacy)
 
 Launch the Streamlit dashboard to view session history and analytics:
 
@@ -441,6 +465,11 @@ observability:
 ## CLI Reference
 
 ```
+# Command center (default)
+uv run rho-agent
+uv run rho-agent tui
+
+# Agent REPL / one-shot
 uv run rho-agent main [PROMPT] [OPTIONS]
 
 Options:
@@ -459,7 +488,7 @@ Options:
   --team-id ID           Team ID for observability
   --project-id ID        Project ID for observability
 
-# Launch observability dashboard
+# Launch observability dashboard (legacy)
 uv run rho-agent dashboard [--port PORT] [--db PATH]
 
 # List running agent sessions

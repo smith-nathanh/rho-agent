@@ -89,12 +89,13 @@ rho-agent main --profile write-restricted-shell.yaml
 rho-agent ps
 ```
 
-Or use the monitor for a richer view:
+Or use the command center TUI for a richer view:
 
 ```bash
-rho-agent monitor
-# then type: overview
+rho-agent
 ```
+
+(You can still use the legacy monitor: `rho-agent monitor`.)
 
 ### How do I stop a runaway agent?
 
