@@ -90,6 +90,7 @@ from .core.conversations import ConversationStore
 from .core.session import Session
 from .observability.config import DEFAULT_TELEMETRY_DB
 from .observability.storage.sqlite import TelemetryStorage
+from .command_center.services.telemetry_feed import TelemetryFeed
 from .prompts import load_prompt, parse_vars, prepare_prompt
 from .runtime import (
     ObservabilityInitializationError,
@@ -2047,6 +2048,7 @@ def monitor(
     control_plane = ControlPlane(LocalSignalTransport(sm))
     try:
         storage = TelemetryStorage(resolved_db, read_only=not read_write)
+        telemetry_feed = TelemetryFeed(storage)
     except Exception as exc:
         console.print(_markup(f"Failed to open telemetry DB: {exc}", THEME.error))
         raise typer.Exit(1) from exc
@@ -2097,7 +2099,7 @@ def monitor(
         console.print(table)
 
     def render_sessions(status: str | None = None) -> None:
-        sessions = storage.list_sessions(status=status, limit=limit)
+        sessions = telemetry_feed.list_recent_sessions(limit=limit, status=status)
         if not sessions:
             console.print("[dim]No telemetry sessions found[/dim]")
             return
@@ -2323,10 +2325,10 @@ def monitor(
         )
 
     def resolve_session_id(prefix: str) -> str | None:
-        detail = storage.get_session_detail(prefix)
+        detail = telemetry_feed.get_session_detail(prefix)
         if detail:
             return prefix
-        recent = storage.list_sessions(limit=200)
+        recent = telemetry_feed.list_recent_sessions(limit=200)
         matches = [s.session_id for s in recent if s.session_id.startswith(prefix)]
         if len(matches) == 1:
             return matches[0]
@@ -2337,7 +2339,7 @@ def monitor(
         if not session_id:
             console.print(_markup(f"Session not found for prefix '{prefix}'", THEME.error))
             return
-        detail = storage.get_session_detail(session_id)
+        detail = telemetry_feed.get_session_detail(session_id)
         if not detail:
             console.print(_markup(f"Session not found: {session_id}", THEME.error))
             return
