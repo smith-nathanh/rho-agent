@@ -2058,6 +2058,7 @@ def monitor(
         console.print("[dim]  running                                 list running agents[/dim]")
         console.print(r"[dim]  sessions \[active|completed|all]        browse telemetry sessions (default: all)[/dim]")
         console.print("[dim]  show <id_or_prefix>                     session detail[/dim]")
+        console.print("[dim]  watch <id_or_prefix>                    stream new tools + responses[/dim]")
         console.print("[dim]  kill <prefix|all>                       cancel running session(s)[/dim]")
         console.print("[dim]  pause <prefix|all>                      pause running session(s)[/dim]")
         console.print("[dim]  resume <prefix|all>                     resume paused session(s)[/dim]")
@@ -2332,6 +2333,154 @@ def monitor(
             return matches[0]
         return None
 
+    def resolve_watch_session_id(prefix: str) -> str | None:
+        telemetry_match = resolve_session_id(prefix)
+        if telemetry_match:
+            return telemetry_match
+        running_match = resolve_single_running(prefix)
+        if running_match:
+            return running_match
+        return None
+
+    def format_tool_args_preview(arguments: object, max_chars: int = 400) -> str:
+        if not isinstance(arguments, dict):
+            return "{}"
+        text = json.dumps(arguments, ensure_ascii=False)
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + "... [truncated]"
+
+    def watch_session(prefix: str, poll_interval_seconds: float = 1.0) -> None:
+        session_id = resolve_watch_session_id(prefix)
+        if not session_id:
+            console.print(_markup(f"Session not found for prefix '{prefix}'", THEME.error))
+            return
+
+        detail = storage.get_session_detail(session_id)
+        seen_turn_ids: set[str] = set()
+        seen_execution_ids: set[str] = set()
+        if detail:
+            for turn in detail.turns:
+                turn_id = turn.get("turn_id")
+                if isinstance(turn_id, str):
+                    seen_turn_ids.add(turn_id)
+                for tool in turn.get("tool_executions", []):
+                    execution_id = tool.get("execution_id")
+                    if isinstance(execution_id, str):
+                        seen_execution_ids.add(execution_id)
+
+        latest_response = sm.get_last_response(session_id)
+        last_response_seq = latest_response[0] if latest_response else 0
+
+        console.print(
+            _markup(
+                f"Watching {session_id[:8]} (Ctrl+C to stop)",
+                THEME.success,
+            )
+        )
+        console.print(
+            _markup(
+                "Streams completed tool calls from telemetry and latest assistant responses.",
+                THEME.muted,
+            )
+        )
+
+        waiting_for_telemetry_announced = False
+        seen_running = any(a.session_id == session_id for a in sm.list_running())
+
+        try:
+            while True:
+                running = any(a.session_id == session_id for a in sm.list_running())
+                seen_running = seen_running or running
+
+                detail = storage.get_session_detail(session_id)
+                if detail:
+                    waiting_for_telemetry_announced = False
+                    for turn in detail.turns:
+                        turn_id = turn.get("turn_id")
+                        if not isinstance(turn_id, str):
+                            continue
+
+                        if turn_id not in seen_turn_ids:
+                            seen_turn_ids.add(turn_id)
+                            user_input = str(turn.get("user_input") or "").strip()
+                            if user_input:
+                                preview = user_input.replace("\n", " ")
+                                if len(preview) > 180:
+                                    preview = preview[:180] + "..."
+                                console.print(
+                                    _markup(
+                                        f"user: {preview}",
+                                        THEME.secondary,
+                                    )
+                                )
+                            else:
+                                console.print(_markup("user: (empty)", THEME.secondary))
+
+                        for tool in turn.get("tool_executions", []):
+                            execution_id = tool.get("execution_id")
+                            if not isinstance(execution_id, str) or execution_id in seen_execution_ids:
+                                continue
+                            seen_execution_ids.add(execution_id)
+
+                            tool_name = str(tool.get("tool_name") or "tool")
+                            success = bool(tool.get("success"))
+                            duration_ms = int(tool.get("duration_ms") or 0)
+                            status_text = "ok" if success else "error"
+                            status_color = THEME.success if success else THEME.error
+                            console.print(
+                                f"{_markup(f'tool: {tool_name}', THEME.tool_call)} "
+                                f"{_markup(status_text, status_color)} "
+                                f"{_markup(f'({duration_ms} ms)', THEME.muted)}"
+                            )
+
+                            args_preview = format_tool_args_preview(tool.get("arguments"))
+                            console.print(_markup(f"args: {args_preview}", THEME.muted))
+
+                            if not success and tool.get("error"):
+                                console.print(_markup(f"error: {tool['error']}", THEME.error))
+
+                            result_preview = _format_tool_preview(
+                                str(tool.get("result") or ""),
+                                tool_name,
+                                max_lines=TOOL_PREVIEW_LINES,
+                            )
+                            if result_preview:
+                                console.print(_markup(result_preview, THEME.tool_result))
+                            console.print()
+                elif not waiting_for_telemetry_announced:
+                    console.print(
+                        _markup(
+                            "Waiting for telemetry rows for this session...",
+                            THEME.muted,
+                        )
+                    )
+                    waiting_for_telemetry_announced = True
+
+                latest_response = sm.get_last_response(session_id)
+                if latest_response and latest_response[0] > last_response_seq:
+                    last_response_seq = latest_response[0]
+                    response_text = latest_response[1].strip()
+                    response_preview = response_text
+                    if len(response_preview) > 500:
+                        response_preview = response_preview[:500] + "... [truncated]"
+                    console.print(_markup("[assistant response]", THEME.primary))
+                    console.print(_markup(response_preview, THEME.primary))
+                    console.print()
+
+                if detail and detail.status != "active" and not running:
+                    console.print(_markup(f"Session ended ({detail.status}).", THEME.muted))
+                    return
+
+                if not running and seen_running and detail is None:
+                    console.print(_markup("Session no longer running.", THEME.muted))
+                    return
+
+                sleep(poll_interval_seconds)
+        except KeyboardInterrupt:
+            console.print()
+            console.print(_markup("Stopped watching.", THEME.muted))
+
     def show_detail(prefix: str) -> None:
         session_id = resolve_session_id(prefix)
         if not session_id:
@@ -2452,6 +2601,10 @@ def monitor(
 
         if command == "show" and len(parts) > 1:
             show_detail(parts[1])
+            continue
+
+        if command == "watch" and len(parts) > 1:
+            watch_session(parts[1])
             continue
 
         if command in ("kill", "pause", "resume") and len(parts) > 1:
