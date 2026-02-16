@@ -66,6 +66,18 @@ uv run rho-agent main "list all tables and describe their schemas"
 
 Database tools support PostgreSQL, MySQL, Oracle, Vertica, and SQLite. See [Tools](tools/) for configuration details.
 
+## Run in a remote sandbox
+
+Use the `daytona` profile to execute all tools in a Daytona cloud VM. The agent process stays local — only tool execution happens remotely.
+
+```bash
+uv pip install 'rho-agent[daytona]'
+export DAYTONA_API_KEY=your-key
+uv run rho-agent main --profile daytona "explore the filesystem and install Python 3.13"
+```
+
+A sandbox is provisioned on the first tool call and automatically cleaned up when the session ends.
+
 ## Monitor running agents
 
 ```bash

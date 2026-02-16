@@ -49,6 +49,7 @@ The `ToolRegistry` maps tool names to handler instances. It is built during `cre
 - **`readonly`** registers: `bash` (restricted), `read`, `grep`, `glob`, `list`, `read_excel`, and available database handlers
 - **`developer`** adds: `write`, `edit`, `delegate`
 - **`eval`** enables database mutations and disables approval
+- **`daytona`** replaces all file and shell tools with remote equivalents that execute in a Daytona cloud VM, while database and external service tools run locally
 - Custom profiles define their own tool set via YAML
 
 Each handler implements a common interface: `name`, `description`, `parameters` (JSON schema), and `handle()`. The registry generates the tool definitions array sent to the model API.

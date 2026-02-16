@@ -185,6 +185,31 @@ Work item operations for Azure DevOps. Enabled when `AZURE_DEVOPS_ORG` and `AZUR
 
 **Mutation operations** (blocked when `AZURE_DEVOPS_READONLY=true`): `create`, `add_comment`, `update`, `link`
 
+## Daytona remote sandbox tools
+
+When the `daytona` profile is active, all file and shell tools (`bash`, `read`, `write`, `edit`, `glob`, `grep`, `list`) are replaced with remote equivalents that execute in a Daytona cloud VM. The tool names and parameter schemas are identical — the model sees the same interface, but execution happens remotely.
+
+A `SandboxManager` lazily provisions a sandbox on the first tool call and tears it down when the session closes. All handlers share the same sandbox instance.
+
+### How it works
+
+1. Agent dispatches a tool call (e.g., `bash` with `command: "ls -la"`)
+2. The Daytona handler forwards the command to the remote sandbox via the Daytona SDK
+3. Output is returned to the agent in the same format as local handlers
+
+### Configuration
+
+| Environment variable | Default | Description |
+|---|---|---|
+| `DAYTONA_API_KEY` | — | API key for Daytona (required) |
+| `DAYTONA_API_URL` | Daytona default | API endpoint override |
+| `DAYTONA_SANDBOX_IMAGE` | `ubuntu:latest` | Container image for the sandbox |
+| `DAYTONA_SANDBOX_CPU` | — | CPU cores |
+| `DAYTONA_SANDBOX_MEMORY` | — | Memory in MB |
+| `DAYTONA_SANDBOX_DISK` | — | Disk in GB |
+
+Database and external service tools (Azure DevOps) continue to run locally even under the `daytona` profile.
+
 ## Delegation tool
 
 ### `delegate`

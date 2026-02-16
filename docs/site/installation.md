@@ -72,6 +72,19 @@ Database tools are enabled automatically when their environment variables are se
 | Oracle | `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD` |
 | Vertica | `VERTICA_HOST`, `VERTICA_DATABASE`, `VERTICA_USER`, `VERTICA_PASSWORD` |
 
+### Daytona remote sandbox
+
+Required for the `daytona` profile. Install the SDK extra with `uv pip install 'rho-agent[daytona]'`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DAYTONA_API_KEY` | — | API key (required) |
+| `DAYTONA_API_URL` | Daytona default | API endpoint override |
+| `DAYTONA_SANDBOX_IMAGE` | `ubuntu:latest` | Container image for the sandbox |
+| `DAYTONA_SANDBOX_CPU` | — | CPU cores |
+| `DAYTONA_SANDBOX_MEMORY` | — | Memory in MB |
+| `DAYTONA_SANDBOX_DISK` | — | Disk in GB |
+
 ### Azure DevOps integration
 
 | Variable | Description |

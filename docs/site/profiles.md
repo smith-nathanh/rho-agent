@@ -53,6 +53,26 @@ Unrestricted profile for sandboxed environments. No restrictions, no approval pr
 rho-agent main --profile eval
 ```
 
+### `daytona`
+
+Remote sandbox profile. All tool execution (bash, read, write, edit, glob, grep, list) happens in a Daytona cloud VM. The agent process stays local — only the LLM conversation loop and tool dispatch run on your machine.
+
+The sandbox is the security boundary, so shell and file write access are unrestricted and no approval prompts are needed. Database tools still run locally in read-only mode.
+
+| Capability | Setting |
+|---|---|
+| Shell | Unrestricted (remote sandbox) |
+| File write | Full (remote sandbox) |
+| Database | SELECT only (local) |
+| Approval | None |
+
+```bash
+export DAYTONA_API_KEY=your-key
+rho-agent main --profile daytona
+```
+
+Requires the Daytona SDK extra: `uv pip install 'rho-agent[daytona]'`. See [Installation](installation/) for environment variable configuration.
+
 ### `developer-bash-only`
 
 Same capabilities as `developer`, but only registers the `bash` tool. File inspection and database tools are not available — the agent must use shell commands for everything.
