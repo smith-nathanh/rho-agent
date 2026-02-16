@@ -54,6 +54,9 @@ redis = [
     "redis>=5.0.0",
 ]
 
+# Optional: Daytona cloud sandbox integration
+daytona = ["daytona>=0.1.0"]
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.3.0",

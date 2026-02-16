@@ -49,6 +49,10 @@ class ToolFactory:
         env = env or dict(os.environ)
         working_dir = working_dir or os.getcwd()
 
+        # Daytona profile: all tools execute remotely
+        if self.profile.name == "daytona":
+            return self._register_daytona_tools(registry, env, working_dir)
+
         # Register core tools (unless bash_only mode)
         if not self.profile.bash_only:
             self._register_core_tools(registry)
@@ -195,6 +199,49 @@ class ToolFactory:
             except ImportError:
                 pass
 
+    def _register_daytona_tools(
+        self,
+        registry: ToolRegistry,
+        env: dict[str, str],
+        working_dir: str,
+    ) -> ToolRegistry:
+        """Register Daytona remote sandbox handlers for all tools."""
+        try:
+            from ..tools.handlers.daytona import (
+                DaytonaBashHandler,
+                DaytonaEditHandler,
+                DaytonaGlobHandler,
+                DaytonaGrepHandler,
+                DaytonaListHandler,
+                DaytonaReadHandler,
+                DaytonaWriteHandler,
+                SandboxManager,
+            )
+        except ImportError as exc:
+            raise ImportError(
+                "Daytona SDK not installed. Install with: uv pip install 'rho-agent[daytona]'"
+            ) from exc
+
+        sandbox_working_dir = self.profile.shell_working_dir or working_dir
+        manager = SandboxManager.from_env(working_dir=sandbox_working_dir, env=env)
+
+        registry.register(DaytonaBashHandler(manager))
+        registry.register(DaytonaReadHandler(manager))
+        registry.register(DaytonaWriteHandler(manager))
+        registry.register(DaytonaEditHandler(manager))
+        registry.register(DaytonaGlobHandler(manager))
+        registry.register(DaytonaGrepHandler(manager))
+        registry.register(DaytonaListHandler(manager))
+
+        # Stash manager for lifecycle cleanup
+        registry._sandbox_manager = manager  # type: ignore[attr-defined]
+
+        # Also register database and external service tools (these run locally)
+        self._register_database_tools(registry, env)
+        self._register_external_services(registry, env)
+
+        return registry
+
     def _register_external_services(self, registry: ToolRegistry, env: dict[str, str]) -> None:
         """Register external service tools that are configured via environment."""
         # Azure DevOps - writable by default since agent needs to post findings
@@ -248,6 +295,7 @@ def load_profile(name_or_path: str) -> CapabilityProfile:
         "readonly": CapabilityProfile.readonly,
         "developer": CapabilityProfile.developer,
         "eval": CapabilityProfile.eval,
+        "daytona": CapabilityProfile.daytona,
     }
 
     if name_or_path in builtins:
@@ -271,5 +319,5 @@ def load_profile(name_or_path: str) -> CapabilityProfile:
 
     raise ValueError(
         f"Unknown profile: {name_or_path}. "
-        f"Use 'readonly', 'developer', 'eval', or provide a path to a YAML file."
+        f"Use 'readonly', 'developer', 'eval', 'daytona', or provide a path to a YAML file."
     )

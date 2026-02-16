@@ -153,6 +153,20 @@ class CapabilityProfile:
         )
 
     @classmethod
+    def daytona(cls, working_dir: str = "/home/daytona") -> "CapabilityProfile":
+        """Remote sandbox profile - all tools execute in a Daytona cloud VM."""
+        return cls(
+            name="daytona",
+            description="Remote sandbox - tools execute in Daytona cloud VM",
+            shell=ShellMode.UNRESTRICTED,
+            file_write=FileWriteMode.FULL,
+            database=DatabaseMode.READONLY,
+            approval=ApprovalMode.NONE,
+            shell_timeout=300,
+            shell_working_dir=working_dir,
+        )
+
+    @classmethod
     def from_yaml(cls, path: str | Path) -> "CapabilityProfile":
         """Load a profile from a YAML file."""
         path = Path(path).expanduser().resolve()
