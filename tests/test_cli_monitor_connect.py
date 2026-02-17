@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from rho_agent.cli import monitor
+from rho_agent.cli.monitor import monitor
 from rho_agent.signals import AgentInfo
 
 
@@ -85,8 +85,8 @@ class FakeSignalManager:
 
 def test_monitor_connect_then_disconnect(monkeypatch) -> None:
     fake_sm = FakeSignalManager()
-    monkeypatch.setattr("rho_agent.cli.SignalManager", lambda: fake_sm)
-    monkeypatch.setattr("rho_agent.cli.TelemetryStorage", FakeTelemetryStorage)
+    monkeypatch.setattr("rho_agent.cli.monitor.SignalManager", lambda: fake_sm)
+    monkeypatch.setattr("rho_agent.cli.monitor.TelemetryStorage", FakeTelemetryStorage)
 
     commands = iter(
         [
@@ -117,8 +117,8 @@ def test_monitor_connect_then_disconnect(monkeypatch) -> None:
 
 def test_monitor_disconnect_without_active_connect(monkeypatch) -> None:
     fake_sm = FakeSignalManager()
-    monkeypatch.setattr("rho_agent.cli.SignalManager", lambda: fake_sm)
-    monkeypatch.setattr("rho_agent.cli.TelemetryStorage", FakeTelemetryStorage)
+    monkeypatch.setattr("rho_agent.cli.monitor.SignalManager", lambda: fake_sm)
+    monkeypatch.setattr("rho_agent.cli.monitor.TelemetryStorage", FakeTelemetryStorage)
 
     commands = iter(["disconnect", "quit"])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(commands))
@@ -129,7 +129,7 @@ def test_monitor_disconnect_without_active_connect(monkeypatch) -> None:
         del kwargs
         printed.extend(str(arg) for arg in args)
 
-    monkeypatch.setattr("rho_agent.cli.console.print", capture_print)
+    monkeypatch.setattr("rho_agent.cli.monitor.console.print", capture_print)
 
     monitor(db_path=":memory:")
 

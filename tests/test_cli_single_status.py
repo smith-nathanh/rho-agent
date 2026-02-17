@@ -29,10 +29,10 @@ async def test_run_single_sets_error_status_on_error_event(monkeypatch: pytest.M
     async def fake_close_runtime(runtime: object, status: str) -> None:
         statuses.append(status)
 
-    monkeypatch.setattr("rho_agent.cli.start_runtime", fake_start_runtime)
-    monkeypatch.setattr("rho_agent.cli.close_runtime", fake_close_runtime)
-    monkeypatch.setattr("rho_agent.cli.handle_event", lambda event, **kwargs: None)
-    monkeypatch.setattr("rho_agent.cli.platform.system", lambda: "Windows")
+    monkeypatch.setattr("rho_agent.cli.single.start_runtime", fake_start_runtime)
+    monkeypatch.setattr("rho_agent.cli.single.close_runtime", fake_close_runtime)
+    monkeypatch.setattr("rho_agent.cli.single.handle_event", lambda event, **kwargs: None)
+    monkeypatch.setattr("rho_agent.cli.single.platform.system", lambda: "Windows")
 
     runtime = SimpleNamespace(agent=ErrorAgent(), observability=None)
     await run_single(runtime, "prompt")
@@ -53,10 +53,10 @@ async def test_run_single_with_output_returns_false_and_sets_error_status(
     async def fake_close_runtime(runtime: object, status: str) -> None:
         statuses.append(status)
 
-    monkeypatch.setattr("rho_agent.cli.start_runtime", fake_start_runtime)
-    monkeypatch.setattr("rho_agent.cli.close_runtime", fake_close_runtime)
-    monkeypatch.setattr("rho_agent.cli.handle_event", lambda event, **kwargs: None)
-    monkeypatch.setattr("rho_agent.cli.platform.system", lambda: "Windows")
+    monkeypatch.setattr("rho_agent.cli.single.start_runtime", fake_start_runtime)
+    monkeypatch.setattr("rho_agent.cli.single.close_runtime", fake_close_runtime)
+    monkeypatch.setattr("rho_agent.cli.single.handle_event", lambda event, **kwargs: None)
+    monkeypatch.setattr("rho_agent.cli.single.platform.system", lambda: "Windows")
 
     runtime = SimpleNamespace(agent=ErrorAgent(), observability=None)
     output_path = tmp_path / "response.txt"
