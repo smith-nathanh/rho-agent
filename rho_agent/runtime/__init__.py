@@ -7,12 +7,17 @@ from .lifecycle import close_runtime, start_runtime
 from .options import RuntimeOptions
 from .reconfigure import reconfigure_runtime
 from .run import run_prompt
-from .types import AgentRuntime, RunResult
+from .store import RunStore, SqliteRunStore
+from .types import AgentRuntime, RunResult, RunState, ToolApprovalItem
 
 __all__ = [
     "RuntimeOptions",
     "AgentRuntime",
     "RunResult",
+    "RunState",
+    "ToolApprovalItem",
+    "RunStore",
+    "SqliteRunStore",
     "CancellationToken",
     "AgentHandle",
     "create_runtime",

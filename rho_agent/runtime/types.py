@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from ..core.agent import Agent, AgentEvent
@@ -14,6 +14,77 @@ from .options import RuntimeOptions
 
 ApprovalCallback = Callable[[str, dict[str, Any]], Awaitable[bool]]
 EventHandler = Callable[[AgentEvent], None | Awaitable[None]]
+
+
+@dataclass
+class ToolApprovalItem:
+    """Tool call paused for out-of-band approval."""
+
+    tool_call_id: str
+    tool_name: str
+    tool_args: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tool_call_id": self.tool_call_id,
+            "tool_name": self.tool_name,
+            "tool_args": self.tool_args,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ToolApprovalItem:
+        return cls(
+            tool_call_id=str(data["tool_call_id"]),
+            tool_name=str(data["tool_name"]),
+            tool_args=dict(data.get("tool_args", {})),
+        )
+
+
+@dataclass
+class RunState:
+    """Serializable state envelope for interrupted runs."""
+
+    session_id: str
+    system_prompt: str
+    history: list[dict[str, Any]]
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cached_tokens: int = 0
+    total_reasoning_tokens: int = 0
+    total_cost_usd: float = 0.0
+    last_input_tokens: int = 0
+    pending_approvals: list[ToolApprovalItem] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "system_prompt": self.system_prompt,
+            "history": self.history,
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "total_cached_tokens": self.total_cached_tokens,
+            "total_reasoning_tokens": self.total_reasoning_tokens,
+            "total_cost_usd": self.total_cost_usd,
+            "last_input_tokens": self.last_input_tokens,
+            "pending_approvals": [item.to_dict() for item in self.pending_approvals],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RunState:
+        return cls(
+            session_id=str(data["session_id"]),
+            system_prompt=str(data["system_prompt"]),
+            history=[dict(message) for message in data.get("history", [])],
+            total_input_tokens=int(data.get("total_input_tokens", 0)),
+            total_output_tokens=int(data.get("total_output_tokens", 0)),
+            total_cached_tokens=int(data.get("total_cached_tokens", 0)),
+            total_reasoning_tokens=int(data.get("total_reasoning_tokens", 0)),
+            total_cost_usd=float(data.get("total_cost_usd", 0.0)),
+            last_input_tokens=int(data.get("last_input_tokens", 0)),
+            pending_approvals=[
+                ToolApprovalItem.from_dict(item) for item in data.get("pending_approvals", [])
+            ],
+        )
 
 
 @dataclass
@@ -39,4 +110,6 @@ class RunResult:
     text: str
     events: list[AgentEvent]
     status: str
-    usage: dict[str, int]
+    usage: dict[str, int | float]
+    interruptions: list[ToolApprovalItem] = field(default_factory=list)
+    state: RunState | None = None

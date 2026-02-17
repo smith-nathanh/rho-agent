@@ -1,6 +1,7 @@
 """Core agent loop for rho-agent."""
 
 import asyncio
+import json
 from collections.abc import AsyncIterator, Callable, Awaitable
 from dataclasses import dataclass
 from typing import Any
@@ -66,6 +67,7 @@ class AgentEvent:
     - "turn_complete": Full turn finished (cumulative metrics)
     - "error": An error occurred
     - "tool_blocked": Tool call was blocked by user
+    - "interruption": Run paused waiting for out-of-band tool approval
     - "compact_start": Context compaction starting
     - "compact_end": Context compaction finished
     - "cancelled": Turn was cancelled
@@ -89,6 +91,10 @@ class CompactResult:
     tokens_before: int
     tokens_after: int
     trigger: str  # "manual" or "auto"
+
+
+class ApprovalInterrupt(Exception):
+    """Raised by approval callbacks to pause execution for external approval."""
 
 
 class Agent:
@@ -124,6 +130,7 @@ class Agent:
         self._enable_nudge = enable_nudge
         self._nudge_count = 0
         self._call_index = 0  # Tracks API calls within current turn
+        self._interrupted_tool_calls: list[tuple[str, str, dict[str, Any]]] = []
 
     def request_cancel(self) -> None:
         """Request cancellation of the current turn."""
@@ -142,6 +149,13 @@ class Agent:
         self._cancel_requested = False
         self._nudge_count = 0
         self._call_index = 0
+        self._interrupted_tool_calls.clear()
+
+    def consume_interrupted_tool_calls(self) -> list[tuple[str, str, dict[str, Any]]]:
+        """Return and clear tool calls queued during an approval interruption."""
+        pending = [(call_id, name, dict(args)) for call_id, name, args in self._interrupted_tool_calls]
+        self._interrupted_tool_calls.clear()
+        return pending
 
     def is_cancelled(self) -> bool:
         """Check if cancellation has been requested.
@@ -249,7 +263,13 @@ class Agent:
         threshold = int(self._context_window * AUTO_COMPACT_THRESHOLD)
         return token_count > threshold
 
-    async def run_turn(self, user_input: str) -> AsyncIterator[AgentEvent]:
+    async def run_turn(
+        self,
+        user_input: str,
+        *,
+        pending_tool_calls: list[tuple[str, str, dict[str, Any]]] | None = None,
+        approval_overrides: dict[str, bool] | None = None,
+    ) -> AsyncIterator[AgentEvent]:
         """Run a single conversation turn.
 
         This may involve multiple model calls if tools are invoked.
@@ -266,177 +286,217 @@ class Agent:
                 content=f"Compacted: {result.tokens_before} → {result.tokens_after} tokens",
             )
 
-        # Add user message to history
-        self._session.add_user_message(user_input)
+        # Add user message to history for a fresh run. Resumed runs continue
+        # from existing assistant tool calls without inserting a blank message.
+        if user_input:
+            self._session.add_user_message(user_input)
+
+        queued_tool_calls = list(pending_tool_calls or [])
 
         # Loop until we get a final response (no more tool calls)
         while True:
+            pending_tool_calls_for_execution = queued_tool_calls
+            queued_tool_calls = []
+
+            if pending_tool_calls_for_execution:
+                # Skip model call and resume by executing already-emitted tool calls.
+                text_content = ""
+            else:
+                # Check for cancellation before model call
+                if self.is_cancelled():
+                    yield AgentEvent(type="cancelled", content="Cancelled before model call")
+                    return
+
+                # Check if auto-compaction is needed before next model call
+                if self.should_auto_compact():
+                    yield AgentEvent(type="compact_start", content="auto")
+                    result = await self.compact(trigger="auto")
+                    yield AgentEvent(
+                        type="compact_end",
+                        content=f"Compacted: {result.tokens_before} → {result.tokens_after} tokens",
+                    )
+
+                # Build prompt
+                prompt = Prompt(
+                    system=self._session.system_prompt,
+                    messages=[
+                        Message(
+                            role=m["role"],
+                            content=m.get("content"),
+                            tool_calls=m.get("tool_calls"),
+                            tool_call_id=m.get("tool_call_id"),
+                        )
+                        for m in self._session.get_messages()
+                    ],
+                    tools=self._registry.get_specs(),
+                )
+
+                # Track what we get in this turn
+                text_content = ""
+                tool_calls: list[dict[str, Any]] = []
+                pending_tool_calls_for_execution = []  # (id, name, args)
+
+                # Stream response
+                async for event in self._client.stream(prompt):
+                    # Check for cancellation during streaming
+                    if self.is_cancelled():
+                        yield AgentEvent(type="cancelled", content="Cancelled during model response")
+                        return
+
+                    if event.type == "text":
+                        text_content += event.content or ""
+                        yield AgentEvent(type="text", content=event.content)
+
+                    elif event.type == "tool_call":
+                        tc = event.tool_call
+                        if tc:
+                            yield AgentEvent(
+                                type="tool_start",
+                                tool_name=tc.name,
+                                tool_call_id=tc.id,
+                                tool_args=tc.arguments,
+                            )
+                            # OpenAI format for tool calls
+                            tool_calls.append(
+                                {
+                                    "id": tc.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc.name,
+                                        "arguments": json.dumps(tc.arguments),
+                                    },
+                                }
+                            )
+                            pending_tool_calls_for_execution.append((tc.id, tc.name, tc.arguments))
+
+                    elif event.type == "done":
+                        if event.usage:
+                            self._session.update_token_usage(
+                                event.usage.get("input_tokens", 0),
+                                event.usage.get("output_tokens", 0),
+                                event.usage.get("cached_tokens", 0),
+                                event.usage.get("reasoning_tokens", 0),
+                                event.usage.get("cost_usd", 0.0),
+                            )
+
+                            # Emit per-call metrics
+                            self._call_index += 1
+                            yield AgentEvent(
+                                type="api_call_complete",
+                                usage={
+                                    "input_tokens": event.usage.get("input_tokens", 0),
+                                    "output_tokens": event.usage.get("output_tokens", 0),
+                                    "cached_tokens": event.usage.get("cached_tokens", 0),
+                                    "reasoning_tokens": event.usage.get("reasoning_tokens", 0),
+                                    "cost_usd": event.usage.get("cost_usd", 0.0),
+                                    "call_index": self._call_index,
+                                },
+                            )
+
+                    elif event.type == "error":
+                        yield AgentEvent(type="error", content=event.content)
+                        return
+
+                # Record what the assistant said/did
+                if tool_calls:
+                    self._session.add_assistant_tool_calls(tool_calls)
+                elif text_content:
+                    self._session.add_assistant_message(text_content)
+
+                # If no tool calls, check if we should nudge or finish
+                if not pending_tool_calls_for_execution:
+                    # Check if we should nudge (eval mode only)
+                    if self._enable_nudge and self._nudge_count < MAX_NUDGES:
+                        text_lower = text_content.lower()
+                        has_completion = any(s in text_lower for s in COMPLETION_SIGNALS)
+                        # Nudge if no completion signal and response is short
+                        if not has_completion and len(text_content) < 500:
+                            self._nudge_count += 1
+                            self._session.add_user_message(NUDGE_MESSAGE)
+                            continue  # Loop back to model
+
+                    # Reset nudge count and finish turn
+                    self._nudge_count = 0
+                    yield AgentEvent(
+                        type="turn_complete",
+                        usage={
+                            "total_input_tokens": self._session.total_input_tokens,
+                            "total_output_tokens": self._session.total_output_tokens,
+                            "total_cached_tokens": self._session.total_cached_tokens,
+                            "total_reasoning_tokens": self._session.total_reasoning_tokens,
+                            "total_cost_usd": self._session.total_cost_usd,
+                            "context_size": self._session.last_input_tokens,
+                        },
+                    )
+                    return
+
             # Check for cancellation before model call
             if self.is_cancelled():
-                yield AgentEvent(type="cancelled", content="Cancelled before model call")
-                return
-
-            # Check if auto-compaction is needed before next model call
-            if self.should_auto_compact():
-                yield AgentEvent(type="compact_start", content="auto")
-                result = await self.compact(trigger="auto")
-                yield AgentEvent(
-                    type="compact_end",
-                    content=f"Compacted: {result.tokens_before} → {result.tokens_after} tokens",
-                )
-
-            # Build prompt
-            prompt = Prompt(
-                system=self._session.system_prompt,
-                messages=[
-                    Message(
-                        role=m["role"],
-                        content=m.get("content"),
-                        tool_calls=m.get("tool_calls"),
-                        tool_call_id=m.get("tool_call_id"),
-                    )
-                    for m in self._session.get_messages()
-                ],
-                tools=self._registry.get_specs(),
-            )
-
-            # Track what we get in this turn
-            text_content = ""
-            tool_calls: list[dict[str, Any]] = []
-            pending_tool_calls: list[tuple[str, str, dict[str, Any]]] = []  # (id, name, args)
-
-            # Stream response
-            async for event in self._client.stream(prompt):
-                # Check for cancellation during streaming
-                if self.is_cancelled():
-                    yield AgentEvent(type="cancelled", content="Cancelled during model response")
-                    return
-
-                if event.type == "text":
-                    text_content += event.content or ""
-                    yield AgentEvent(type="text", content=event.content)
-
-                elif event.type == "tool_call":
-                    tc = event.tool_call
-                    if tc:
-                        yield AgentEvent(
-                            type="tool_start",
-                            tool_name=tc.name,
-                            tool_call_id=tc.id,
-                            tool_args=tc.arguments,
-                        )
-                        # OpenAI format for tool calls
-                        tool_calls.append(
-                            {
-                                "id": tc.id,
-                                "type": "function",
-                                "function": {
-                                    "name": tc.name,
-                                    "arguments": __import__("json").dumps(tc.arguments),
-                                },
-                            }
-                        )
-                        pending_tool_calls.append((tc.id, tc.name, tc.arguments))
-
-                elif event.type == "done":
-                    if event.usage:
-                        self._session.update_token_usage(
-                            event.usage.get("input_tokens", 0),
-                            event.usage.get("output_tokens", 0),
-                            event.usage.get("cached_tokens", 0),
-                            event.usage.get("reasoning_tokens", 0),
-                            event.usage.get("cost_usd", 0.0),
-                        )
-
-                        # Emit per-call metrics
-                        self._call_index += 1
-                        yield AgentEvent(
-                            type="api_call_complete",
-                            usage={
-                                "input_tokens": event.usage.get("input_tokens", 0),
-                                "output_tokens": event.usage.get("output_tokens", 0),
-                                "cached_tokens": event.usage.get("cached_tokens", 0),
-                                "reasoning_tokens": event.usage.get("reasoning_tokens", 0),
-                                "cost_usd": event.usage.get("cost_usd", 0.0),
-                                "call_index": self._call_index,
-                            },
-                        )
-
-                elif event.type == "error":
-                    yield AgentEvent(type="error", content=event.content)
-                    return
-
-            # Record what the assistant said/did
-            if tool_calls:
-                self._session.add_assistant_tool_calls(tool_calls)
-            elif text_content:
-                self._session.add_assistant_message(text_content)
-
-            # If no tool calls, check if we should nudge or finish
-            if not pending_tool_calls:
-                # Check if we should nudge (eval mode only)
-                if self._enable_nudge and self._nudge_count < MAX_NUDGES:
-                    text_lower = text_content.lower()
-                    has_completion = any(s in text_lower for s in COMPLETION_SIGNALS)
-                    # Nudge if no completion signal and response is short
-                    if not has_completion and len(text_content) < 500:
-                        self._nudge_count += 1
-                        self._session.add_user_message(NUDGE_MESSAGE)
-                        continue  # Loop back to model
-
-                # Reset nudge count and finish turn
-                self._nudge_count = 0
-                yield AgentEvent(
-                    type="turn_complete",
-                    usage={
-                        "total_input_tokens": self._session.total_input_tokens,
-                        "total_output_tokens": self._session.total_output_tokens,
-                        "total_cached_tokens": self._session.total_cached_tokens,
-                        "total_reasoning_tokens": self._session.total_reasoning_tokens,
-                        "total_cost_usd": self._session.total_cost_usd,
-                        "context_size": self._session.last_input_tokens,
-                    },
-                )
+                yield AgentEvent(type="cancelled", content="Cancelled before tool execution")
                 return
 
             # Execute tool calls
             tool_results: list[ToolResult] = []
             rejected = False
-            for tool_id, tool_name, tool_args in pending_tool_calls:
+            for i, (tool_id, tool_name, tool_args) in enumerate(pending_tool_calls_for_execution):
                 # Check for cancellation before each tool
                 if self.is_cancelled():
                     yield AgentEvent(type="cancelled", content="Cancelled before tool execution")
                     return
 
                 # Check approval if callback is set and tool requires it
-                if self._approval_callback and self._registry.requires_approval(tool_name):
-                    approved = await self._approval_callback(tool_name, tool_args)
-                    if not approved:
-                        # Must add result to keep API happy, then end turn
-                        tool_results.append(
-                            ToolResult(
-                                tool_call_id=tool_id,
-                                content="Command rejected by user. Awaiting new instructions.",
-                            )
-                        )
+                approved_override = None
+                if approval_overrides and tool_id in approval_overrides:
+                    approved_override = approval_overrides[tool_id]
+
+                approval_checked = False
+                approved = True
+                if approved_override is not None:
+                    approval_checked = True
+                    approved = approved_override
+                elif self._approval_callback and self._registry.requires_approval(tool_name):
+                    approval_checked = True
+                    try:
+                        approved = await self._approval_callback(tool_name, tool_args)
+                    except ApprovalInterrupt:
+                        if tool_results:
+                            self._session.add_tool_results(tool_results)
+                        self._interrupted_tool_calls = [
+                            (call_id, name, dict(args))
+                            for call_id, name, args in pending_tool_calls_for_execution[i:]
+                        ]
                         yield AgentEvent(
-                            type="tool_blocked",
+                            type="interruption",
                             tool_name=tool_name,
                             tool_call_id=tool_id,
                             tool_args=tool_args,
                         )
-                        rejected = True
-                        # Add dummy results for remaining tool calls
-                        for remaining_id, _, _ in pending_tool_calls[
-                            pending_tool_calls.index((tool_id, tool_name, tool_args)) + 1 :
-                        ]:
-                            tool_results.append(
-                                ToolResult(
-                                    tool_call_id=remaining_id,
-                                    content="Command skipped - user rejected previous command.",
-                                )
+                        return
+
+                if approval_checked and not approved:
+                    # Must add result to keep API happy, then end turn
+                    tool_results.append(
+                        ToolResult(
+                            tool_call_id=tool_id,
+                            content="Command rejected by user. Awaiting new instructions.",
+                        )
+                    )
+                    yield AgentEvent(
+                        type="tool_blocked",
+                        tool_name=tool_name,
+                        tool_call_id=tool_id,
+                        tool_args=tool_args,
+                    )
+                    rejected = True
+                    # Add dummy results for remaining tool calls
+                    for remaining_id, _, _ in pending_tool_calls_for_execution[i + 1 :]:
+                        tool_results.append(
+                            ToolResult(
+                                tool_call_id=remaining_id,
+                                content="Command skipped - user rejected previous command.",
                             )
-                        break
+                        )
+                    break
 
                 invocation = ToolInvocation(
                     call_id=tool_id,
