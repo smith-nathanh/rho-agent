@@ -12,7 +12,7 @@ Any OpenAI-compatible API. Set `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL`
 
 ### Do I need Docker?
 
-Not for normal usage. Docker is only required for running evaluation benchmarks (AgentBench, Harbor/TerminalBench) which execute tasks in isolated containers.
+Not for normal usage. Docker is only required for running Harbor/TerminalBench evaluations, which execute tasks in isolated containers.
 
 ### How do I connect to multiple databases?
 

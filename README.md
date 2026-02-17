@@ -211,7 +211,7 @@ at `validate_config.py`.
 - **Prompt templates**: Markdown files with variable substitution for repeatable investigations
 - **Observability**: Session tracking, token usage, tool execution metrics with Streamlit dashboard
 - **Session management**: List and kill running agents from another terminal with `rho-agent ps` and `rho-agent kill`
-- **Evaluation integrations**: AgentBench (DBBench, OS Interaction) and Harbor/TerminalBench
+- **Evaluation integrations**: BIRD-Bench and Harbor/TerminalBench
 
 ## Capability Profiles
 
@@ -458,17 +458,15 @@ uv run rho-agent kill [PREFIX] [--all]
 
 rho-agent includes integrations for running LLM benchmarks:
 
-### AgentBench
+### BIRD-Bench
 
 ```bash
-# DBBench - database query tasks
-rho-eval dbbench ~/proj/AgentBench/data/dbbench/standard.jsonl
-
-# OS Interaction - Linux system tasks
-rho-eval os-interaction ~/proj/AgentBench/data/os_interaction
+# Text-to-SQL benchmark
+rho-eval bird ~/proj/bird-bench-mini-dev/mini_dev_data/mini_dev_sqlite.json \
+  ~/proj/bird-bench-mini-dev/mini_dev_data/dev_databases/
 ```
 
-See `rho_agent/eval/agentbench/README.md` for setup and options.
+See `rho_agent/eval/birdbench/README.md` for setup and options.
 
 ### Harbor / TerminalBench
 

@@ -3,15 +3,10 @@
 Entry point: rho-eval
 
 Commands:
-  dbbench          - AgentBench DBBench evaluation
-  os-interaction   - AgentBench OS Interaction evaluation
   bird             - BIRD-Bench text-to-SQL evaluation
 """
 
 import typer
-
-# Import existing agentbench commands
-from .agentbench.cli import dbbench, os_interaction
 
 # Import birdbench command
 from .birdbench.cli import bird
@@ -22,10 +17,14 @@ app = typer.Typer(
     add_completion=False,
 )
 
+
+@app.callback()
+def main() -> None:
+    """Run evaluations through rho-agent."""
+
+
 # Register commands
-app.command()(dbbench)
-app.command(name="os-interaction")(os_interaction)
-app.command()(bird)
+app.command(name="bird")(bird)
 
 if __name__ == "__main__":
     app()

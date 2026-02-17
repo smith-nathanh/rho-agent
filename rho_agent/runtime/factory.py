@@ -4,17 +4,14 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from dataclasses import replace
 
-from ..capabilities import CapabilityProfile
-from ..capabilities.factory import ToolFactory, load_profile
 from ..client.model import ModelClient
 from ..core.agent import Agent
 from ..core.session import Session
 from ..observability.config import ObservabilityConfig
 from ..observability.processor import ObservabilityProcessor
+from .builder import build_runtime_registry
 from .options import RuntimeOptions
-from .registry_extensions import register_runtime_tools
 from .types import AgentRuntime, ApprovalCallback
 
 
@@ -41,16 +38,6 @@ async def _auto_approve(_: str, __: dict[str, object]) -> bool:
 
 async def _reject_all(_: str, __: dict[str, object]) -> bool:
     return False
-
-
-def resolve_profile(
-    profile: str | CapabilityProfile | None,
-) -> CapabilityProfile:
-    if isinstance(profile, CapabilityProfile):
-        return profile
-    if profile:
-        return load_profile(profile)
-    return CapabilityProfile.readonly()
 
 
 def _build_observability(
@@ -93,31 +80,44 @@ def create_runtime(
 ) -> AgentRuntime:
     """Create a configured runtime."""
     requested_options = options or RuntimeOptions()
-    capability_profile = resolve_profile(requested_options.profile)
-    profile_name = capability_profile.name
     session_id = requested_options.session_id or str(uuid.uuid4())
-    options = replace(
-        requested_options,
-        profile=capability_profile,
-        session_id=session_id,
-    )
 
     runtime_session = session or Session(system_prompt=system_prompt)
-    factory = ToolFactory(capability_profile)
-    registry = factory.create_registry(working_dir=options.working_dir)
+
+    if approval_callback:
+        resolved_approval_callback = approval_callback
+    elif requested_options.auto_approve:
+        resolved_approval_callback = _auto_approve
+    else:
+        resolved_approval_callback = _reject_all
+
+    # Build registry/options through the shared builder path used by reconfigure_runtime.
+    agent_ref: Agent | None = None
+
+    def parent_agent_cancel_check() -> bool:
+        if agent_ref is None:
+            return False
+        return agent_ref.is_cancelled()
+
+    build = build_runtime_registry(
+        runtime_session=runtime_session,
+        runtime_options=requested_options,
+        approval_callback=resolved_approval_callback,
+        cancel_check=cancel_check,
+        parent_agent_cancel_check=parent_agent_cancel_check,
+        session_id=session_id,
+    )
+    options = build.runtime_options
+    capability_profile = build.capability_profile
+    profile_name = capability_profile.name
+    registry = build.registry
+
     client = ModelClient(
         model=options.model,
         base_url=options.base_url,
         service_tier=options.service_tier,
         reasoning_effort=options.reasoning_effort,
     )
-
-    if approval_callback:
-        resolved_approval_callback = approval_callback
-    elif options.auto_approve:
-        resolved_approval_callback = _auto_approve
-    else:
-        resolved_approval_callback = _reject_all
 
     agent = Agent(
         session=runtime_session,
@@ -126,14 +126,7 @@ def create_runtime(
         approval_callback=resolved_approval_callback,
         cancel_check=cancel_check,
     )
-    register_runtime_tools(
-        registry,
-        runtime_session=runtime_session,
-        runtime_options=options,
-        approval_callback=resolved_approval_callback,
-        cancel_check=cancel_check,
-        parent_agent_cancel_check=agent.is_cancelled,
-    )
+    agent_ref = agent
     observability = _build_observability(
         options=options,
         model=options.model,

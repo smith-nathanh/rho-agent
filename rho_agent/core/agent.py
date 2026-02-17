@@ -133,6 +133,10 @@ class Agent:
         """Swap the active tool registry for subsequent model calls."""
         self._registry = registry
 
+    def set_approval_callback(self, approval_callback: ApprovalCallback | None) -> None:
+        """Swap the active approval callback used for tool-gated calls."""
+        self._approval_callback = approval_callback
+
     def _reset_cancel(self) -> None:
         """Reset cancellation state for a new turn."""
         self._cancel_requested = False
