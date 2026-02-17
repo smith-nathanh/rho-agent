@@ -34,6 +34,7 @@ rho-agent conduct <prd> [OPTIONS]
 |--------|---------|-------------|
 | `--working-dir`, `-d` | `.` | Project directory to work in |
 | `--model`, `-m` | `$OPENAI_MODEL` or `gpt-5-mini` | Model to use for all agents |
+| `--service-tier` | `$RHO_AGENT_SERVICE_TIER` or none | OpenAI service tier (e.g. `flex`, `auto`) |
 | `--state` | auto-generated | Path to state JSON file |
 | `--branch` | none | Create and work on a git branch |
 | `--resume` | false | Resume from saved state |
@@ -101,6 +102,12 @@ rho-agent conduct prd.md \
   --test-cmd "pytest tests/ -v" \
   --lint-cmd "ruff check ." \
   --typecheck-cmd "pyright"
+```
+
+Run workers/reviewer/planner on flex tier for lower API cost:
+
+```bash
+rho-agent conduct prd.md --service-tier flex
 ```
 
 Resume after an interruption or pause:

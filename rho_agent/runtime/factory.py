@@ -108,6 +108,7 @@ def create_runtime(
     client = ModelClient(
         model=options.model,
         base_url=options.base_url,
+        service_tier=options.service_tier,
         reasoning_effort=options.reasoning_effort,
     )
 

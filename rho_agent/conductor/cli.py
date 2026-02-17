@@ -25,6 +25,10 @@ def conduct(
         str,
         typer.Option("--model", "-m", help="Model to use"),
     ] = os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+    service_tier: Annotated[
+        Optional[str],
+        typer.Option("--service-tier", help="OpenAI service tier (flex, auto)"),
+    ] = os.getenv("RHO_AGENT_SERVICE_TIER"),
     state_path: Annotated[
         Optional[str],
         typer.Option("--state", help="Path to state JSON file"),
@@ -94,6 +98,7 @@ def conduct(
         prd_path=prd,
         working_dir=resolved_dir,
         model=model,
+        service_tier=service_tier,
         state_path=state_path,
         context_window=context_window,
         budget_threshold=budget_threshold,

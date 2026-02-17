@@ -118,6 +118,7 @@ async def run_planner(
     """
     options = RuntimeOptions(
         model=config.model,
+        service_tier=config.service_tier,
         profile="readonly",
         working_dir=config.working_dir,
         auto_approve=True,

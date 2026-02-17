@@ -109,6 +109,7 @@ async def run_worker(
     """
     options = RuntimeOptions(
         model=config.model,
+        service_tier=config.service_tier,
         profile="developer",
         working_dir=config.working_dir,
         auto_approve=True,
@@ -186,6 +187,7 @@ async def run_worker_retry(
     """Run a fresh worker session to fix check failures."""
     options = RuntimeOptions(
         model=config.model,
+        service_tier=config.service_tier,
         profile="developer",
         working_dir=config.working_dir,
         auto_approve=True,

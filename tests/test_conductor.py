@@ -125,7 +125,11 @@ def test_dag_has_remaining_work():
 
 
 def test_state_round_trip(tmp_path):
-    config = ConductorConfig(prd_path="/tmp/prd.md", working_dir="/tmp/proj")
+    config = ConductorConfig(
+        prd_path="/tmp/prd.md",
+        working_dir="/tmp/proj",
+        service_tier="flex",
+    )
     dag = _make_dag()
     dag.tasks["T1"].status = TaskStatus.DONE
     dag.tasks["T1"].commit_sha = "abc123"
@@ -157,6 +161,7 @@ def test_state_round_trip(tmp_path):
     assert loaded.dag.tasks["T1"].commit_sha == "abc123"
     assert loaded.dag.tasks["T2"].status == TaskStatus.PENDING
     assert loaded.usage["T1"].worker_input_tokens == 1000
+    assert loaded.config.service_tier == "flex"
 
 
 def test_state_load_resets_in_progress(tmp_path):

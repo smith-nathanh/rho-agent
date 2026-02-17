@@ -105,6 +105,7 @@ class ConductorConfig:
     model: str = field(
         default_factory=lambda: os.getenv("OPENAI_MODEL", "gpt-5-mini")
     )
+    service_tier: str | None = field(default_factory=lambda: os.getenv("RHO_AGENT_SERVICE_TIER"))
     state_path: str | None = None
     context_window: int = 400_000
     budget_threshold: float = 0.7
