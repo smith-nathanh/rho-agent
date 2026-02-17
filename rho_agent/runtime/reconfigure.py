@@ -5,8 +5,7 @@ from __future__ import annotations
 from ..capabilities import CapabilityProfile
 from .builder import build_runtime_registry
 from .factory import _auto_approve, _reject_all
-from .types import ApprovalCallback
-from .types import AgentRuntime
+from .types import ApprovalCallback, LocalRuntime
 
 
 def _resolve_reconfigured_approval_callback(
@@ -28,7 +27,7 @@ def _resolve_reconfigured_approval_callback(
 
 
 def reconfigure_runtime(
-    runtime: AgentRuntime,
+    runtime: LocalRuntime,
     *,
     profile: str | CapabilityProfile | None = None,
     working_dir: str | None = None,

@@ -12,7 +12,7 @@ from rho_agent.observability.processor import ObservabilityProcessor
 from rho_agent.runtime.lifecycle import close_runtime, start_runtime
 from rho_agent.runtime.options import RuntimeOptions
 from rho_agent.runtime.run import run_prompt
-from rho_agent.runtime.types import AgentRuntime
+from rho_agent.runtime.types import LocalRuntime
 
 
 class CountingExporter(Exporter):
@@ -65,11 +65,11 @@ class DummyAgent:
         )
 
 
-def _build_runtime(exporter: CountingExporter) -> AgentRuntime:
+def _build_runtime(exporter: CountingExporter) -> LocalRuntime:
     config = ObservabilityConfig(enabled=True, tenant=TenantConfig("team", "project"))
     context = TelemetryContext.from_config(config, model="gpt-5-mini", profile="readonly")
     processor = ObservabilityProcessor(config, context, exporter=exporter)
-    return AgentRuntime(
+    return LocalRuntime(
         agent=DummyAgent(),  # type: ignore[arg-type]
         session=object(),  # type: ignore[arg-type]
         registry=object(),  # type: ignore[arg-type]

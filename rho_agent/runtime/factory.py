@@ -12,7 +12,8 @@ from ..observability.config import ObservabilityConfig
 from ..observability.processor import ObservabilityProcessor
 from .builder import build_runtime_registry
 from .options import RuntimeOptions
-from .types import AgentRuntime, ApprovalCallback
+from .protocol import Runtime
+from .types import ApprovalCallback, LocalRuntime
 
 
 class ObservabilityInitializationError(RuntimeError):
@@ -77,8 +78,12 @@ def create_runtime(
     session: Session | None = None,
     approval_callback: ApprovalCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
-) -> AgentRuntime:
-    """Create a configured runtime."""
+) -> Runtime:
+    """Create a configured runtime.
+
+    Returns a :class:`LocalRuntime` for local profiles, or a
+    :class:`DaytonaRuntime` when the resolved profile is ``"daytona"``.
+    """
     requested_options = options or RuntimeOptions()
     session_id = requested_options.session_id or str(uuid.uuid4())
 
@@ -134,7 +139,28 @@ def create_runtime(
         session_id=session_id,
     )
 
-    return AgentRuntime(
+    if profile_name == "daytona":
+        from .daytona import DaytonaRuntime
+
+        manager = DaytonaRuntime.register_daytona_tools(
+            registry,
+            working_dir=capability_profile.shell_working_dir or options.working_dir or "/home/daytona",
+        )
+        return DaytonaRuntime(
+            agent=agent,
+            session=runtime_session,
+            registry=registry,
+            model=options.model,
+            profile_name=profile_name,
+            session_id=session_id,
+            options=options,
+            approval_callback=resolved_approval_callback,
+            cancel_check=cancel_check,
+            observability=observability,
+            _manager=manager,
+        )
+
+    return LocalRuntime(
         agent=agent,
         session=runtime_session,
         registry=registry,

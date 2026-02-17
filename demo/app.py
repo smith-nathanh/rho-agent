@@ -42,7 +42,7 @@ from rho_agent.runtime import (
     run_prompt,
     start_runtime,
 )
-from rho_agent.runtime.types import AgentRuntime
+from rho_agent.runtime.types import LocalRuntime
 
 # Config
 DB_PATH = Path(__file__).parent / "sample_data.db"
@@ -83,7 +83,7 @@ def ensure_demo_db_config() -> None:
     os.environ["RHO_AGENT_DB_CONFIG"] = str(DB_CONFIG_PATH)
 
 
-def get_runtime() -> AgentRuntime:
+def get_runtime() -> LocalRuntime:
     """Get or create the session runtime."""
     runtime = st.session_state.runtime
     if runtime is None:

@@ -3,11 +3,12 @@
 __version__ = "0.1.0"
 
 from .runtime import (
-    AgentRuntime,
     AgentHandle,
     CancellationToken,
+    LocalRuntime,
     RunResult,
     RunState,
+    Runtime,
     RuntimeOptions,
     SqliteRunStore,
     ToolApprovalItem,
@@ -21,7 +22,8 @@ from .runtime import (
 __all__ = [
     "__version__",
     "RuntimeOptions",
-    "AgentRuntime",
+    "Runtime",
+    "LocalRuntime",
     "AgentHandle",
     "RunResult",
     "RunState",

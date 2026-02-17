@@ -2,61 +2,13 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-
-from .types import AgentRuntime, EventHandler, RunResult, RunState, ToolApprovalItem
-
-
-def _restore_state(runtime: AgentRuntime, state: RunState) -> None:
-    """Mutate runtime/session in-place from a serialized run snapshot."""
-    runtime.session_id = state.session_id
-    runtime.options.session_id = state.session_id
-    if runtime.observability:
-        runtime.observability.context.session_id = state.session_id
-    runtime.session.system_prompt = state.system_prompt
-    runtime.session.history = deepcopy(state.history)
-    runtime.session.total_input_tokens = state.total_input_tokens
-    runtime.session.total_output_tokens = state.total_output_tokens
-    runtime.session.total_cached_tokens = state.total_cached_tokens
-    runtime.session.total_reasoning_tokens = state.total_reasoning_tokens
-    runtime.session.total_cost_usd = state.total_cost_usd
-    runtime.session.last_input_tokens = state.last_input_tokens
-
-
-def _capture_state(runtime: AgentRuntime, interruptions: list[ToolApprovalItem]) -> RunState:
-    """Build a serializable run snapshot from the current runtime session."""
-    return RunState(
-        session_id=runtime.session_id,
-        system_prompt=runtime.session.system_prompt,
-        history=deepcopy(runtime.session.history),
-        total_input_tokens=runtime.session.total_input_tokens,
-        total_output_tokens=runtime.session.total_output_tokens,
-        total_cached_tokens=runtime.session.total_cached_tokens,
-        total_reasoning_tokens=runtime.session.total_reasoning_tokens,
-        total_cost_usd=runtime.session.total_cost_usd,
-        last_input_tokens=runtime.session.last_input_tokens,
-        pending_approvals=interruptions,
-    )
-
-
-def _consume_interruptions(runtime: AgentRuntime) -> list[ToolApprovalItem]:
-    """Fetch and normalize pending approval calls from the runtime agent."""
-    consume = getattr(runtime.agent, "consume_interrupted_tool_calls", None)
-    if not callable(consume):
-        return []
-    pending = consume()
-    return [
-        ToolApprovalItem(
-            tool_call_id=tool_call_id,
-            tool_name=tool_name,
-            tool_args=dict(tool_args),
-        )
-        for tool_call_id, tool_name, tool_args in pending
-    ]
+from .protocol import Runtime
+from .store import RunStore
+from .types import EventHandler, RunResult, RunState, ToolApprovalItem
 
 
 async def run_prompt(
-    runtime: AgentRuntime,
+    runtime: Runtime,
     prompt: str | RunState,
     *,
     on_event: EventHandler | None = None,
@@ -64,13 +16,13 @@ async def run_prompt(
 ) -> RunResult:
     """Run one prompt and collect output/events.
 
-    If `prompt` is a `RunState`, the runtime is restored and execution resumes
-    from that interrupted state.
+    If ``prompt`` is a :class:`RunState`, the runtime is restored and
+    execution resumes from that interrupted state.
     """
     pending_tool_calls: list[tuple[str, str, dict[str, object]]] | None = None
     user_input = ""
     if isinstance(prompt, RunState):
-        _restore_state(runtime, prompt)
+        runtime.restore_state(prompt)
         pending_tool_calls = [
             (item.tool_call_id, item.tool_name, dict(item.tool_args))
             for item in prompt.pending_approvals
@@ -128,7 +80,7 @@ async def run_prompt(
     state = None
     if status == "interrupted":
         interruptions = _consume_interruptions(runtime)
-        state = _capture_state(runtime, interruptions)
+        state = runtime.capture_state(interruptions)
 
     return RunResult(
         text="".join(collected_text),
@@ -138,3 +90,54 @@ async def run_prompt(
         interruptions=interruptions,
         state=state,
     )
+
+
+async def run_prompt_stored(
+    runtime: Runtime,
+    prompt: str | RunState | None,
+    *,
+    run_store: RunStore,
+    run_id: str,
+    on_event: EventHandler | None = None,
+    approval_decisions: dict[str, bool] | None = None,
+) -> RunResult:
+    """Run a prompt with automatic state persistence.
+
+    Wraps :func:`run_prompt` with store-based load/save:
+
+    * If ``prompt`` is ``None``, loads the interrupted state from ``run_store``.
+    * On interruption, saves state to ``run_store``.
+    * On completion/cancellation/error, deletes state from ``run_store``.
+    """
+    if prompt is None:
+        loaded = run_store.load(run_id)
+        if loaded is None:
+            raise ValueError(f"No persisted run state found for run_id={run_id!r}.")
+        prompt = loaded
+
+    result = await run_prompt(
+        runtime,
+        prompt,
+        on_event=on_event,
+        approval_decisions=approval_decisions,
+    )
+
+    if result.status == "interrupted" and result.state is not None:
+        run_store.save(run_id, result.state)
+    elif result.status in {"completed", "cancelled", "error"}:
+        run_store.delete(run_id)
+
+    return result
+
+
+def _consume_interruptions(runtime: Runtime) -> list[ToolApprovalItem]:
+    """Fetch and normalize pending approval calls from the runtime agent."""
+    pending = runtime.agent.consume_interrupted_tool_calls()
+    return [
+        ToolApprovalItem(
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            tool_args=dict(tool_args),
+        )
+        for tool_call_id, tool_name, tool_args in pending
+    ]

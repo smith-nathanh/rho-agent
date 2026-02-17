@@ -9,9 +9,9 @@ from rho_agent.client.model import StreamEvent, ToolCall
 from rho_agent.core.agent import Agent, ApprovalInterrupt
 from rho_agent.core.session import Session
 from rho_agent.runtime.options import RuntimeOptions
-from rho_agent.runtime.run import run_prompt
+from rho_agent.runtime.run import run_prompt, run_prompt_stored
 from rho_agent.runtime.store import SqliteRunStore
-from rho_agent.runtime.types import AgentRuntime, RunState, ToolApprovalItem
+from rho_agent.runtime.types import LocalRuntime, RunState, ToolApprovalItem
 from rho_agent.tools.base import ToolHandler, ToolInvocation, ToolOutput
 from rho_agent.tools.registry import ToolRegistry
 
@@ -51,7 +51,7 @@ class ApprovalTool(ToolHandler):
         return ToolOutput(content=f"executed:{cmd}")
 
 
-def _build_runtime(client: ScriptedClient) -> AgentRuntime:
+def _build_runtime(client: ScriptedClient) -> LocalRuntime:
     session = Session(system_prompt="system")
     registry = ToolRegistry()
     registry.register(ApprovalTool())
@@ -65,7 +65,7 @@ def _build_runtime(client: ScriptedClient) -> AgentRuntime:
         client=client,  # type: ignore[arg-type]
         approval_callback=interrupt_approval,
     )
-    return AgentRuntime(
+    return LocalRuntime(
         agent=agent,
         session=session,
         registry=registry,
@@ -170,6 +170,74 @@ async def test_run_prompt_resume_denied_approval_halts_action_set() -> None:
     assert not any(message.get("content") == "executed:rm a.txt" for message in tool_messages)
     assert not any(message.get("content") == "executed:rm b.txt" for message in tool_messages)
     assert any(event.type == "tool_blocked" and event.tool_call_id == "tool-1" for event in resumed.events)
+
+
+@pytest.mark.asyncio
+async def test_run_prompt_stored_resume_from_persisted_store(tmp_path) -> None:
+    run_id = "run-1"
+    store = SqliteRunStore(tmp_path / "run-state.db")
+
+    first_runtime = _build_runtime(
+        ScriptedClient(
+            scripts=[
+                [
+                    StreamEvent(
+                        type="tool_call",
+                        tool_call=ToolCall(
+                            id="tool-1",
+                            name="needs_approval",
+                            arguments={"cmd": "ls"},
+                        ),
+                    ),
+                    StreamEvent(type="done", usage={"input_tokens": 10, "output_tokens": 5}),
+                ]
+            ]
+        )
+    )
+    interrupted = await run_prompt_stored(
+        first_runtime,
+        "run command",
+        run_store=store,
+        run_id=run_id,
+    )
+    assert interrupted.status == "interrupted"
+    persisted = store.load(run_id)
+    assert persisted is not None
+    assert [item.tool_call_id for item in persisted.pending_approvals] == ["tool-1"]
+
+    second_runtime = _build_runtime(
+        ScriptedClient(
+            scripts=[
+                [
+                    StreamEvent(type="text", content="all set"),
+                    StreamEvent(type="done", usage={"input_tokens": 4, "output_tokens": 3}),
+                ]
+            ]
+        )
+    )
+    resumed = await run_prompt_stored(
+        second_runtime,
+        None,
+        approval_decisions={"tool-1": True},
+        run_store=store,
+        run_id=run_id,
+    )
+    assert resumed.status == "completed"
+    assert resumed.text == "all set"
+    assert store.load(run_id) is None
+    assert any(
+        message.get("role") == "tool" and message.get("content") == "executed:ls"
+        for message in second_runtime.session.history
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_prompt_stored_none_without_persisted_state_raises(tmp_path) -> None:
+    runtime = _build_runtime(ScriptedClient(scripts=[]))
+    store = SqliteRunStore(tmp_path / "run-state.db")
+
+    with pytest.raises(ValueError, match="No persisted run state found"):
+        await run_prompt_stored(runtime, None, run_store=store, run_id="missing")
 
 
 def test_sqlite_run_store_round_trip(tmp_path) -> None:

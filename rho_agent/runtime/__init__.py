@@ -5,14 +5,18 @@ from .dispatch import AgentHandle, dispatch_prompt
 from .factory import ObservabilityInitializationError, create_runtime
 from .lifecycle import close_runtime, start_runtime
 from .options import RuntimeOptions
+from .protocol import Runtime
 from .reconfigure import reconfigure_runtime
-from .run import run_prompt
+from .run import run_prompt, run_prompt_stored
 from .store import RunStore, SqliteRunStore
-from .types import AgentRuntime, RunResult, RunState, ToolApprovalItem
+from .daytona import DaytonaRuntime
+from .types import LocalRuntime, RunResult, RunState, ToolApprovalItem
 
 __all__ = [
     "RuntimeOptions",
-    "AgentRuntime",
+    "Runtime",
+    "LocalRuntime",
+    "DaytonaRuntime",
     "RunResult",
     "RunState",
     "ToolApprovalItem",
@@ -25,6 +29,7 @@ __all__ = [
     "start_runtime",
     "close_runtime",
     "run_prompt",
+    "run_prompt_stored",
     "dispatch_prompt",
     "reconfigure_runtime",
 ]

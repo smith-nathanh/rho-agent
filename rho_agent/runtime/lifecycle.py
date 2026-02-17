@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
-from .types import AgentRuntime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .protocol import Runtime
 
 
-async def start_runtime(runtime: AgentRuntime) -> None:
+async def start_runtime(runtime: Runtime) -> None:
     """Start runtime-level telemetry session if configured."""
-    if runtime.observability:
-        await runtime.observability.start_session()
+    await runtime.start()
 
 
-async def close_runtime(runtime: AgentRuntime, status: str = "completed") -> None:
-    """Close runtime-level telemetry session and sandbox if configured."""
-    # Clean up Daytona sandbox if one was created
-    manager = getattr(runtime.registry, "_sandbox_manager", None)
-    if manager is not None:
-        await manager.close()
-
-    if runtime.observability:
-        await runtime.observability.end_session(status)
+async def close_runtime(runtime: Runtime, status: str = "completed") -> None:
+    """Close runtime-level telemetry session if configured."""
+    await runtime.close(status)

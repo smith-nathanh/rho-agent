@@ -99,7 +99,7 @@ from .runtime import (
     reconfigure_runtime,
     start_runtime,
 )
-from .runtime.types import AgentRuntime
+from .runtime.types import LocalRuntime
 from .signals import AgentInfo, SignalManager
 from .ui.theme import THEME
 
@@ -767,7 +767,7 @@ def handle_command(
 
 
 def switch_runtime_profile(
-    runtime: AgentRuntime,
+    runtime: LocalRuntime,
     profile_name_or_path: str,
     *,
     working_dir: str,
@@ -786,7 +786,7 @@ def switch_runtime_profile(
 
 
 async def run_interactive(
-    runtime: AgentRuntime,
+    runtime: LocalRuntime,
     approval_handler: ApprovalHandler,
     mode_name: str,
     working_dir: str,
@@ -1243,7 +1243,7 @@ async def run_interactive(
 
 
 async def run_single(
-    runtime: AgentRuntime,
+    runtime: LocalRuntime,
     prompt: str,
     signal_manager: SignalManager | None = None,
     session_id: str | None = None,
@@ -1340,7 +1340,7 @@ async def run_single(
 
 
 async def run_single_with_output(
-    runtime: AgentRuntime,
+    runtime: LocalRuntime,
     prompt: str,
     output_path: str,
     signal_manager: SignalManager | None = None,

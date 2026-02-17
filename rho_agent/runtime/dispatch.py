@@ -7,14 +7,15 @@ from dataclasses import dataclass
 
 from .cancellation import CancellationToken
 from .run import run_prompt
-from .types import AgentRuntime, EventHandler, RunResult
+from .protocol import Runtime
+from .types import EventHandler, RunResult
 
 
 @dataclass
 class AgentHandle:
     """Handle for a background-dispatched agent run."""
 
-    runtime: AgentRuntime
+    runtime: Runtime
     prompt: str
     task: asyncio.Task[RunResult]
     token: CancellationToken | None = None
@@ -50,7 +51,7 @@ class AgentHandle:
 
 
 def dispatch_prompt(
-    runtime: AgentRuntime,
+    runtime: Runtime,
     prompt: str,
     *,
     on_event: EventHandler | None = None,
