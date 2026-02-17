@@ -85,15 +85,6 @@ Required for the `daytona` profile. Install the SDK extra with `uv pip install '
 | `DAYTONA_SANDBOX_MEMORY` | — | Memory in MB |
 | `DAYTONA_SANDBOX_DISK` | — | Disk in GB |
 
-### Azure DevOps integration
-
-| Variable | Description |
-|---|---|
-| `AZURE_DEVOPS_ORG` | Organization name |
-| `AZURE_DEVOPS_PAT` | Personal access token |
-| `AZURE_DEVOPS_PROJECT` | Default project (optional) |
-| `AZURE_DEVOPS_READONLY` | Set to `true` to disable mutations |
-
 ## Troubleshooting
 
 If your `.venv` gets into a bad state (packages installed but imports fail), reset it:

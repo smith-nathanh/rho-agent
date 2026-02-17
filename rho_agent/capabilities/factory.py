@@ -64,10 +64,9 @@ class ToolFactory:
         if not self.profile.bash_only:
             self._register_write_tools(registry)
 
-        # Register database and external service tools unless bash_only mode
+        # Register database tools unless bash_only mode
         if not self.profile.bash_only:
             self._register_database_tools(registry, env)
-            self._register_external_services(registry, env)
 
         return registry
 
@@ -236,27 +235,10 @@ class ToolFactory:
         # Stash manager for lifecycle cleanup
         registry._sandbox_manager = manager  # type: ignore[attr-defined]
 
-        # Also register database and external service tools (these run locally)
+        # Also register database tools (these run locally)
         self._register_database_tools(registry, env)
-        self._register_external_services(registry, env)
 
         return registry
-
-    def _register_external_services(self, registry: ToolRegistry, env: dict[str, str]) -> None:
-        """Register external service tools that are configured via environment."""
-        # Azure DevOps - writable by default since agent needs to post findings
-        # Set AZURE_DEVOPS_READONLY=true to disable mutations
-        if env.get("AZURE_DEVOPS_ORG"):
-            readonly = env.get("AZURE_DEVOPS_READONLY", "").lower() == "true"
-            self._register_azure_devops(registry, readonly)
-
-    def _register_azure_devops(self, registry: ToolRegistry, readonly: bool) -> None:
-        """Register Azure DevOps handler."""
-        from ..tools.handlers.azure_devops import AzureDevOpsHandler
-
-        requires_approval = self.profile.requires_tool_approval("azure_devops")
-        handler = AzureDevOpsHandler(readonly=readonly, requires_approval=requires_approval)
-        registry.register(handler)
 
 
 def create_registry_from_profile(

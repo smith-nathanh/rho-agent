@@ -161,30 +161,6 @@ Configured via `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`.
 
 Configured via `VERTICA_HOST`, `VERTICA_DATABASE`, `VERTICA_USER`, `VERTICA_PASSWORD`.
 
-## Integration tools
-
-### `azure_devops`
-
-Work item operations for Azure DevOps. Enabled when `AZURE_DEVOPS_ORG` and `AZURE_DEVOPS_PAT` environment variables are set.
-
-| Parameter | Type | Description |
-|---|---|---|
-| `operation` | string | Operation name (required) |
-| `project` | string | Project name (defaults to `AZURE_DEVOPS_PROJECT`) |
-| `wiql` | string | WIQL query for `search` |
-| `work_item_id` | integer | Work item ID for `get`, `update`, `add_comment` |
-| `work_item_type` | string | Type for `create` (e.g., "Bug", "Task") |
-| `title` | string | Title for `create` |
-| `comment` | string | Comment text |
-| `fields` | dict | Fields for `create` or `update` |
-| `target_work_item_id` | integer | Target for `link` |
-| `link_type` | string | `parent`, `child`, `related`, `predecessor`, `successor` |
-| `top` | integer | Max results for `search` |
-
-**Read-only operations**: `search`, `get`, `get_comments`, `get_history`, `list_projects`
-
-**Mutation operations** (blocked when `AZURE_DEVOPS_READONLY=true`): `create`, `add_comment`, `update`, `link`
-
 ## Daytona remote sandbox tools
 
 When the `daytona` profile is active, all file and shell tools (`bash`, `read`, `write`, `edit`, `glob`, `grep`, `list`) are replaced with remote equivalents that execute in a Daytona cloud VM. The tool names and parameter schemas are identical — the model sees the same interface, but execution happens remotely.
@@ -208,7 +184,7 @@ A `SandboxManager` lazily provisions a sandbox on the first tool call and tears 
 | `DAYTONA_SANDBOX_MEMORY` | — | Memory in MB |
 | `DAYTONA_SANDBOX_DISK` | — | Disk in GB |
 
-Database and external service tools (Azure DevOps) continue to run locally even under the `daytona` profile.
+Database tools continue to run locally even under the `daytona` profile.
 
 ## Delegation tool
 
