@@ -62,12 +62,14 @@ class ToolRegistry:
 
     def get_specs(self) -> list[dict[str, Any]]:
         """Get all tool specs for the LLM."""
-        return [handler.to_spec() for handler in self._handlers.values()]
+        return [handler.to_spec() for handler in self._handlers.values() if handler.is_enabled]
 
     def requires_approval(self, tool_name: str) -> bool:
         """Check if a tool requires user approval before execution."""
         handler = self._handlers.get(tool_name)
-        return handler.requires_approval if handler else True
+        if handler is None or not handler.is_enabled:
+            return True
+        return handler.requires_approval
 
     async def dispatch(self, invocation: ToolInvocation) -> ToolOutput:
         """Dispatch a tool invocation to the appropriate handler."""
@@ -75,6 +77,12 @@ class ToolRegistry:
         if handler is None:
             return ToolOutput(
                 content=f"Unknown tool: {invocation.tool_name}",
+                success=False,
+            )
+
+        if not handler.is_enabled:
+            return ToolOutput(
+                content=f"Tool '{invocation.tool_name}' is currently disabled",
                 success=False,
             )
 

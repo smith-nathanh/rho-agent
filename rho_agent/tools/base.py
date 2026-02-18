@@ -49,6 +49,15 @@ class ToolHandler(ABC):
         ...
 
     @property
+    def is_enabled(self) -> bool:
+        """Whether this tool is currently available to the LLM.
+
+        Override to implement dynamic enablement based on handler state.
+        Default: always enabled.
+        """
+        return True
+
+    @property
     def requires_approval(self) -> bool:
         """Whether this tool requires user approval before execution.
 
