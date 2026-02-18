@@ -15,7 +15,6 @@ from rich.panel import Panel
 
 from ..core.agent import AgentEvent
 from ..core.conversations import ConversationStore
-from ..runtime import close_runtime, start_runtime
 from ..runtime.types import LocalRuntime
 from ..signals import SignalManager
 from ..ui.theme import THEME
@@ -66,7 +65,7 @@ class InteractiveSession:
 
     async def run(self) -> None:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        await start_runtime(self.runtime)
+        await self.runtime.start()
 
         key_bindings = KeyBindings()
 
@@ -184,7 +183,7 @@ class InteractiveSession:
             self.session_status = "error"
             raise
         finally:
-            await close_runtime(self.runtime, self.session_status)
+            await self.runtime.close(self.session_status)
 
             if self.runtime.session.history:
                 saved_path = self.conversation_store.save(

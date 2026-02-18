@@ -10,13 +10,13 @@ from .runtime import (
     RunState,
     Runtime,
     RuntimeOptions,
+    SessionUsage,
     SqliteRunStore,
     ToolApprovalItem,
-    close_runtime,
     create_runtime,
     dispatch_prompt,
     run_prompt,
-    start_runtime,
+    session_usage,
 )
 
 __all__ = [
@@ -27,12 +27,12 @@ __all__ = [
     "AgentHandle",
     "RunResult",
     "RunState",
+    "SessionUsage",
     "ToolApprovalItem",
     "SqliteRunStore",
     "CancellationToken",
     "create_runtime",
-    "start_runtime",
-    "close_runtime",
     "run_prompt",
     "dispatch_prompt",
+    "session_usage",
 ]

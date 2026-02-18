@@ -5,13 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from ..runtime import (
-    RuntimeOptions,
-    create_runtime,
-    start_runtime,
-    run_prompt,
-    close_runtime,
-)
+from ..runtime import create_runtime, run_prompt, session_usage
+from ..runtime.types import SessionUsage
 from .models import ConductorConfig, Task, TaskDAG
 from .prompts import REVIEWER_SYSTEM_PROMPT, REVIEWER_USER_TEMPLATE
 from .worker import _format_acceptance_criteria, _format_verification
@@ -22,9 +17,11 @@ class ReviewResult:
     """Result from a reviewer session."""
 
     summary: str
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cost_usd: float = 0.0
+    usage: SessionUsage = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.usage is None:
+            self.usage = SessionUsage()
 
 
 async def run_reviewer(
@@ -40,16 +37,9 @@ async def run_reviewer(
     The reviewer has developer profile access — it can read files, edit code,
     and run verification commands. It fixes any issues it finds directly.
     """
-    options = RuntimeOptions(
-        model=config.model,
-        service_tier=config.service_tier,
+    options = config.runtime_options(
         profile="developer",
-        working_dir=config.working_dir,
-        auto_approve=True,
-        enable_delegate=False,
-        team_id=config.team_id,
-        project_id=config.project_id,
-        telemetry_metadata={"source": "conductor_reviewer", "task_id": task.id},
+        metadata={"source": "conductor_reviewer", "task_id": task.id},
     )
     runtime = create_runtime(
         REVIEWER_SYSTEM_PROMPT,
@@ -65,19 +55,10 @@ async def run_reviewer(
         verification_commands=_format_verification(dag.verification),
     )
 
-    status = "completed"
-    await start_runtime(runtime)
-    try:
+    async with runtime:
         result = await run_prompt(runtime, prompt)
-    except Exception:
-        status = "error"
-        raise
-    finally:
-        await close_runtime(runtime, status)
 
     return ReviewResult(
         summary=result.text,
-        input_tokens=runtime.session.total_input_tokens,
-        output_tokens=runtime.session.total_output_tokens,
-        cost_usd=runtime.session.total_cost_usd,
+        usage=session_usage(runtime.session),
     )

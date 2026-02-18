@@ -23,7 +23,7 @@ from rho_agent.capabilities import (
     ShellMode,
 )
 from rho_agent.prompts import load_prompt
-from rho_agent.runtime import RuntimeOptions, close_runtime, create_runtime, run_prompt, start_runtime
+from rho_agent.runtime import RuntimeOptions, create_runtime, run_prompt
 
 from .config import BirdMetrics, EvalAbortedError, EvalConfig, TaskResult, TaskStatus
 from .evaluator import BirdEvaluator
@@ -106,7 +106,7 @@ class BirdRunner:
             submit_handler = SubmitSqlHandler(on_submit=capture_sql)
             runtime.registry.register(submit_handler)
 
-            await start_runtime(runtime)
+            await runtime.start()
 
             # Run the task
             prompt = task.get_prompt()
@@ -189,7 +189,7 @@ class BirdRunner:
 
         finally:
             if runtime:
-                await close_runtime(runtime, status="completed")
+                await runtime.close(status="completed")
             if handler:
                 handler.close()
             if tmp_db_path and Path(tmp_db_path).exists():

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
+from types import TracebackType
 from typing import Any
 
 from ..core.agent import Agent, AgentEvent
@@ -15,6 +16,24 @@ from .options import RuntimeOptions
 
 ApprovalCallback = Callable[[str, dict[str, Any]], Awaitable[bool]]
 EventHandler = Callable[[AgentEvent], None | Awaitable[None]]
+
+
+@dataclass
+class SessionUsage:
+    """Extracted token/cost usage from a session."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+def session_usage(session: Session) -> SessionUsage:
+    """Extract usage from a Session into a SessionUsage."""
+    return SessionUsage(
+        input_tokens=session.total_input_tokens,
+        output_tokens=session.total_output_tokens,
+        cost_usd=session.total_cost_usd,
+    )
 
 
 @dataclass
@@ -102,6 +121,20 @@ class LocalRuntime:
     approval_callback: ApprovalCallback | None = None
     cancel_check: Callable[[], bool] | None = None
     observability: ObservabilityProcessor | None = None
+    close_status: str = "completed"
+
+    async def __aenter__(self) -> LocalRuntime:
+        await self.start()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        status = "error" if exc_type is not None else self.close_status
+        await self.close(status)
 
     async def start(self) -> None:
         """Start runtime-level telemetry session if configured."""

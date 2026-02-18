@@ -6,6 +6,7 @@ import os
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
+from types import TracebackType
 from typing import Any
 
 from ..core.agent import Agent
@@ -34,6 +35,7 @@ class DaytonaRuntime:
     approval_callback: ApprovalCallback | None = None
     cancel_check: Callable[[], bool] | None = None
     observability: ObservabilityProcessor | None = None
+    close_status: str = "completed"
 
     # Daytona-specific — set during construction, not by callers.
     _manager: Any = field(default=None, repr=False)
@@ -41,6 +43,19 @@ class DaytonaRuntime:
     # ------------------------------------------------------------------
     # Runtime protocol
     # ------------------------------------------------------------------
+
+    async def __aenter__(self) -> DaytonaRuntime:
+        await self.start()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        status = "error" if exc_type is not None else self.close_status
+        await self.close(status)
 
     async def start(self) -> None:
         """Start observability session (sandbox is created lazily)."""

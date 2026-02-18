@@ -6,7 +6,6 @@ import signal
 from pathlib import Path
 from time import monotonic
 
-from ..runtime import close_runtime, start_runtime
 from ..runtime.types import LocalRuntime
 from ..signals import SignalManager
 from ..ui.theme import THEME
@@ -27,7 +26,7 @@ async def run_single(
 ) -> None:
     """Run a single prompt and exit."""
     # Start observability session if enabled
-    await start_runtime(runtime)
+    await runtime.start()
 
     loop = asyncio.get_event_loop()
     interactive_tty = _is_interactive_terminal()
@@ -113,7 +112,7 @@ async def run_single(
     finally:
         if platform.system() != "Windows":
             loop.remove_signal_handler(signal.SIGINT)
-        await close_runtime(runtime, session_status)
+        await runtime.close(session_status)
 
 
 async def run_single_with_output(
@@ -141,7 +140,7 @@ async def run_single_with_output(
         return False
 
     # Start observability session if enabled
-    await start_runtime(runtime)
+    await runtime.start()
 
     collected_text: list[str] = []
     cancelled = False
@@ -236,7 +235,7 @@ async def run_single_with_output(
     finally:
         if platform.system() != "Windows":
             loop.remove_signal_handler(signal.SIGINT)
-        await close_runtime(runtime, session_status)
+        await runtime.close(session_status)
 
     if cancelled:
         return False

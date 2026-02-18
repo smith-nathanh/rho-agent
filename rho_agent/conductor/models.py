@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
+from ..runtime.options import RuntimeOptions
+
 
 class TaskStatus(str, Enum):
     PENDING = "pending"
@@ -120,6 +122,22 @@ class ConductorConfig:
     resume: bool = False
     project_id: str | None = None
     team_id: str | None = None
+
+    def runtime_options(
+        self, *, profile: str, metadata: dict[str, str] | None = None
+    ) -> RuntimeOptions:
+        """Build RuntimeOptions from this config."""
+        return RuntimeOptions(
+            model=self.model,
+            service_tier=self.service_tier,
+            profile=profile,
+            working_dir=self.working_dir,
+            auto_approve=True,
+            enable_delegate=False,
+            team_id=self.team_id,
+            project_id=self.project_id,
+            telemetry_metadata=metadata or {},
+        )
 
 
 @dataclass

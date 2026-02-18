@@ -247,9 +247,9 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
                 )
 
                 # Accumulate usage
-                usage.worker_input_tokens += worker_result.input_tokens
-                usage.worker_output_tokens += worker_result.output_tokens
-                usage.worker_cost_usd += worker_result.cost_usd
+                usage.worker_input_tokens += worker_result.usage.input_tokens
+                usage.worker_output_tokens += worker_result.usage.output_tokens
+                usage.worker_cost_usd += worker_result.usage.cost_usd
                 usage.worker_sessions += 1
 
                 if worker_result.status == "completed":
@@ -319,9 +319,9 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
                         config=config,
                         cancel_check=_cancel_check,
                     )
-                    usage.worker_input_tokens += retry_result.input_tokens
-                    usage.worker_output_tokens += retry_result.output_tokens
-                    usage.worker_cost_usd += retry_result.cost_usd
+                    usage.worker_input_tokens += retry_result.usage.input_tokens
+                    usage.worker_output_tokens += retry_result.usage.output_tokens
+                    usage.worker_cost_usd += retry_result.usage.cost_usd
                     usage.worker_sessions += 1
                     if retry_result.status != "completed":
                         task.status = TaskStatus.FAILED
@@ -377,9 +377,9 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
                         config=config,
                         cancel_check=_cancel_check,
                     )
-                    usage.reviewer_input_tokens += review_result.input_tokens
-                    usage.reviewer_output_tokens += review_result.output_tokens
-                    usage.reviewer_cost_usd += review_result.cost_usd
+                    usage.reviewer_input_tokens += review_result.usage.input_tokens
+                    usage.reviewer_output_tokens += review_result.usage.output_tokens
+                    usage.reviewer_cost_usd += review_result.usage.cost_usd
 
                     # Commit any reviewer fixes
                     review_sha = await git_add_and_commit(

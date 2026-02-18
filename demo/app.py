@@ -37,10 +37,8 @@ import streamlit as st
 
 from rho_agent.runtime import (
     RuntimeOptions,
-    close_runtime,
     create_runtime,
     run_prompt,
-    start_runtime,
 )
 from rho_agent.runtime.types import LocalRuntime
 
@@ -185,7 +183,7 @@ def render_chat_tab() -> None:
                 async def stream_events():
                     nonlocal response_text, tool_calls, current_tool_placeholder
                     runtime = get_runtime()
-                    await start_runtime(runtime)
+                    await runtime.start()
 
                     async def on_event(event):
                         nonlocal response_text, tool_calls, current_tool_placeholder
@@ -403,7 +401,7 @@ def main() -> None:
         if st.button("Clear Conversation"):
             runtime = st.session_state.get("runtime")
             if runtime is not None:
-                asyncio.run(close_runtime(runtime, "completed"))
+                asyncio.run(runtime.close("completed"))
                 st.session_state.runtime = None
             st.session_state.messages = []
             st.rerun()

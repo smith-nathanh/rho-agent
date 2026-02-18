@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from types import TracebackType
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ..core.agent import Agent
@@ -22,8 +23,11 @@ class Runtime(Protocol):
 
     Read-only properties expose the runtime's collaborators.
     ``start`` / ``close`` bracket the session lifecycle.
+    Supports ``async with runtime:`` for automatic lifecycle management.
     ``restore_state`` / ``capture_state`` support interrupt/resume.
     """
+
+    close_status: str
 
     @property
     def agent(self) -> Agent: ...
@@ -54,6 +58,15 @@ class Runtime(Protocol):
 
     @property
     def observability(self) -> ObservabilityProcessor | None: ...
+
+    async def __aenter__(self) -> Runtime: ...
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
 
     async def start(self) -> None: ...
 

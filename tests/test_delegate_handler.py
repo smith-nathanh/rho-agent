@@ -13,6 +13,31 @@ from rho_agent.tools.base import ToolInvocation
 from rho_agent.tools.handlers.delegate import DelegateHandler
 
 
+class FakeRuntime:
+    """Fake runtime that supports async context manager protocol."""
+
+    def __init__(self, *, session_id: str | None = None, **kwargs: object) -> None:
+        self.session_id = session_id
+        self.close_status = "completed"
+        self._close_calls: list[str] = []
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    async def start(self) -> None:
+        return None
+
+    async def close(self, status: str = "completed") -> None:
+        self._close_calls.append(status)
+
+    async def __aenter__(self) -> FakeRuntime:
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        status = "error" if exc_type is not None else self.close_status
+        await self.close(status)
+
+
 @pytest.mark.asyncio
 async def test_empty_instruction_returns_error_without_spawning(monkeypatch: pytest.MonkeyPatch) -> None:
     parent_session = Session(system_prompt="system")
@@ -68,7 +93,7 @@ async def test_delegate_full_context_false_uses_empty_child_history(monkeypatch:
     )
 
     captured: dict[str, object] = {}
-    close_calls: list[str] = []
+    fake_rt = FakeRuntime()
 
     def fake_create_runtime(
         system_prompt: str,
@@ -83,22 +108,14 @@ async def test_delegate_full_context_false_uses_empty_child_history(monkeypatch:
         captured["session"] = session
         captured["approval_callback"] = approval_callback
         captured["cancel_check"] = cancel_check
-        return SimpleNamespace()
-
-    async def fake_start_runtime(runtime: object) -> None:
-        captured["started"] = runtime
+        return fake_rt
 
     async def fake_run_prompt(runtime: object, prompt: str) -> RunResult:
         captured["prompt"] = prompt
         return RunResult(text="child complete", events=[], status="completed", usage={"input_tokens": 1})
 
-    async def fake_close_runtime(runtime: object, status: str = "completed") -> None:
-        close_calls.append(status)
-
     monkeypatch.setattr("rho_agent.runtime.factory.create_runtime", fake_create_runtime)
-    monkeypatch.setattr("rho_agent.runtime.lifecycle.start_runtime", fake_start_runtime)
     monkeypatch.setattr("rho_agent.runtime.run.run_prompt", fake_run_prompt)
-    monkeypatch.setattr("rho_agent.runtime.lifecycle.close_runtime", fake_close_runtime)
 
     output = await handler.handle(
         ToolInvocation(
@@ -126,7 +143,7 @@ async def test_delegate_full_context_false_uses_empty_child_history(monkeypatch:
     assert output.metadata["child_status"] == "completed"
     assert "child_session_id" in output.metadata
     assert output.metadata["duration_seconds"] >= 0
-    assert close_calls == ["completed"]
+    assert fake_rt._close_calls == ["completed"]
 
 
 @pytest.mark.asyncio
@@ -159,21 +176,13 @@ async def test_delegate_full_context_true_snapshots_parent_history(
     ) -> object:
         nonlocal captured_child_session
         captured_child_session = session
-        return SimpleNamespace()
-
-    async def fake_start_runtime(runtime: object) -> None:
-        return None
+        return FakeRuntime()
 
     async def fake_run_prompt(runtime: object, prompt: str) -> RunResult:
         return RunResult(text="ok", events=[], status="completed", usage={})
 
-    async def fake_close_runtime(runtime: object, status: str = "completed") -> None:
-        return None
-
     monkeypatch.setattr("rho_agent.runtime.factory.create_runtime", fake_create_runtime)
-    monkeypatch.setattr("rho_agent.runtime.lifecycle.start_runtime", fake_start_runtime)
     monkeypatch.setattr("rho_agent.runtime.run.run_prompt", fake_run_prompt)
-    monkeypatch.setattr("rho_agent.runtime.lifecycle.close_runtime", fake_close_runtime)
 
     await handler.handle(
         ToolInvocation(
@@ -204,24 +213,16 @@ async def test_delegate_failure_still_closes_child_runtime(monkeypatch: pytest.M
         requires_approval=False,
     )
 
-    close_calls: list[str] = []
+    fake_rt = FakeRuntime()
 
     def fake_create_runtime(*args: object, **kwargs: object) -> object:
-        return SimpleNamespace()
-
-    async def fake_start_runtime(runtime: object) -> None:
-        return None
+        return fake_rt
 
     async def fake_run_prompt(runtime: object, prompt: str) -> RunResult:
         raise RuntimeError("boom")
 
-    async def fake_close_runtime(runtime: object, status: str = "completed") -> None:
-        close_calls.append(status)
-
     monkeypatch.setattr("rho_agent.runtime.factory.create_runtime", fake_create_runtime)
-    monkeypatch.setattr("rho_agent.runtime.lifecycle.start_runtime", fake_start_runtime)
     monkeypatch.setattr("rho_agent.runtime.run.run_prompt", fake_run_prompt)
-    monkeypatch.setattr("rho_agent.runtime.lifecycle.close_runtime", fake_close_runtime)
 
     output = await handler.handle(
         ToolInvocation(call_id="1", tool_name="delegate", arguments={"instruction": "do work"})
@@ -231,7 +232,7 @@ async def test_delegate_failure_still_closes_child_runtime(monkeypatch: pytest.M
     assert output.metadata["child_status"] == "error"
     assert "child_session_id" in output.metadata
     assert output.metadata["duration_seconds"] >= 0
-    assert close_calls == ["error"]
+    assert fake_rt._close_calls == ["error"]
 
 
 def test_child_runtime_does_not_include_delegate_tool() -> None:
@@ -278,24 +279,14 @@ async def test_delegate_child_cancel_check_includes_parent_agent_cancel(
         del system_prompt, options, session, approval_callback
         nonlocal captured_cancel_check
         captured_cancel_check = cancel_check
-        return SimpleNamespace()
-
-    async def fake_start_runtime(runtime: object) -> None:
-        del runtime
-        return None
+        return FakeRuntime()
 
     async def fake_run_prompt(runtime: object, prompt: str) -> RunResult:
         del runtime, prompt
         return RunResult(text="ok", events=[], status="completed", usage={})
 
-    async def fake_close_runtime(runtime: object, status: str = "completed") -> None:
-        del runtime, status
-        return None
-
     monkeypatch.setattr("rho_agent.runtime.factory.create_runtime", fake_create_runtime)
-    monkeypatch.setattr("rho_agent.runtime.lifecycle.start_runtime", fake_start_runtime)
     monkeypatch.setattr("rho_agent.runtime.run.run_prompt", fake_run_prompt)
-    monkeypatch.setattr("rho_agent.runtime.lifecycle.close_runtime", fake_close_runtime)
 
     await handler.handle(
         ToolInvocation(call_id="1", tool_name="delegate", arguments={"instruction": "do work"})
@@ -343,24 +334,14 @@ async def test_delegate_registers_child_session_in_signal_manager(
 
     def fake_create_runtime(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        return SimpleNamespace(session_id="child-1234")
-
-    async def fake_start_runtime(runtime: object) -> None:
-        del runtime
-        return None
+        return FakeRuntime(session_id="child-1234")
 
     async def fake_run_prompt(runtime: object, prompt: str) -> RunResult:
         del runtime, prompt
         return RunResult(text="ok", events=[], status="completed", usage={})
 
-    async def fake_close_runtime(runtime: object, status: str = "completed") -> None:
-        del runtime, status
-        return None
-
     monkeypatch.setattr("rho_agent.runtime.factory.create_runtime", fake_create_runtime)
-    monkeypatch.setattr("rho_agent.runtime.lifecycle.start_runtime", fake_start_runtime)
     monkeypatch.setattr("rho_agent.runtime.run.run_prompt", fake_run_prompt)
-    monkeypatch.setattr("rho_agent.runtime.lifecycle.close_runtime", fake_close_runtime)
 
     await handler.handle(
         ToolInvocation(call_id="1", tool_name="delegate", arguments={"instruction": "do work"})
