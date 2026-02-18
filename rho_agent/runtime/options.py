@@ -31,4 +31,5 @@ class RuntimeOptions:
     )
     session_id: str | None = None
     telemetry_metadata: dict[str, Any] = field(default_factory=dict)
+    response_format: dict[str, Any] | None = None
     enable_delegate: bool = True

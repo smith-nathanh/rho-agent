@@ -45,6 +45,7 @@ class LiteLLMClient:
         initial_timeout: float | None = None,
         temperature: float | None = None,
         reasoning_effort: str | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the LiteLLM client.
 
@@ -72,6 +73,7 @@ class LiteLLMClient:
         self._initial_timeout = initial_timeout or self.DEFAULT_INITIAL_TIMEOUT
         self._temperature = temperature
         self._reasoning_effort = reasoning_effort
+        self._response_format = response_format
 
         # Disable LiteLLM's internal logging to reduce noise
         litellm.suppress_debug_info = True
@@ -121,6 +123,9 @@ class LiteLLMClient:
 
         if prompt and prompt.tools:
             kwargs["tools"] = prompt.tools
+
+        if self._response_format:
+            kwargs["response_format"] = self._response_format
 
         return kwargs
 

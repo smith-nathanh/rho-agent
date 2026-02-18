@@ -69,9 +69,11 @@ class ModelClient:
         service_tier: str | None = None,
         temperature: float | None = None,
         reasoning_effort: str | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> None:
         self._temperature = temperature
         self._reasoning_effort = reasoning_effort
+        self._response_format = response_format
         # For flex processing, use longer timeout (15 min) per OpenAI docs
         if timeout is None:
             timeout = 900.0 if service_tier == "flex" else 60.0
@@ -131,6 +133,9 @@ class ModelClient:
 
         if self._service_tier:
             kwargs["service_tier"] = self._service_tier
+
+        if self._response_format:
+            kwargs["response_format"] = self._response_format
 
         try:
             # Track tool calls being built
@@ -230,6 +235,9 @@ class ModelClient:
         if self._service_tier:
             kwargs["service_tier"] = self._service_tier
 
+        if self._response_format:
+            kwargs["response_format"] = self._response_format
+
         try:
             response = await self._client.chat.completions.create(**kwargs)
             choice = response.choices[0]
@@ -288,6 +296,8 @@ class ModelClient:
                 kwargs["temperature"] = self._temperature
             if self._service_tier:
                 kwargs["service_tier"] = self._service_tier
+            if self._response_format:
+                kwargs["response_format"] = self._response_format
 
             response = await self._client.chat.completions.create(**kwargs)
             content = response.choices[0].message.content or ""

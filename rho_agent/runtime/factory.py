@@ -122,6 +122,7 @@ def create_runtime(
         base_url=options.base_url,
         service_tier=options.service_tier,
         reasoning_effort=options.reasoning_effort,
+        response_format=options.response_format,
     )
 
     agent = Agent(
