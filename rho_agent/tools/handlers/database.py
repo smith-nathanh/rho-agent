@@ -10,6 +10,7 @@ from typing import Any
 
 from ...config.databases import DatabaseConfig
 from ..base import ToolHandler, ToolInvocation, ToolOutput
+from .paths import is_path_sensitive
 
 
 # SQL patterns that indicate write operations (case-insensitive)
@@ -430,27 +431,9 @@ class DatabaseHandler(ToolHandler):
         path = Path(export_path).expanduser().resolve()
 
         # Safety check: don't write to sensitive locations
-        sensitive_patterns = [
-            ".bashrc",
-            ".zshrc",
-            ".profile",
-            ".bash_profile",
-            ".ssh/",
-            ".gnupg/",
-            ".aws/",
-            ".config/",
-            "/etc/",
-            "/usr/",
-            "/bin/",
-            "/sbin/",
-        ]
-        path_str_lower = str(path).lower()
-        for pattern in sensitive_patterns:
-            if pattern in path_str_lower:
-                return ToolOutput(
-                    content=f"Cannot write to sensitive location: {path}",
-                    success=False,
-                )
+        sensitive, reason = is_path_sensitive(path)
+        if sensitive:
+            return ToolOutput(content=reason, success=False)
 
         # Fail fast: check if file exists before running query
         if path.exists():
