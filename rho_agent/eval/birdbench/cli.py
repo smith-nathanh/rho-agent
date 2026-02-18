@@ -3,7 +3,7 @@
 import asyncio
 import os
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 from dotenv import load_dotenv
 
@@ -41,7 +41,7 @@ def bird(
         typer.Option("--model", "-m", help="Model to use"),
     ] = os.getenv("OPENAI_MODEL", "gpt-5-mini"),
     base_url: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--base-url", help="API base URL"),
     ] = os.getenv("OPENAI_BASE_URL"),
     max_turns: Annotated[
@@ -53,19 +53,19 @@ def bird(
         typer.Option("--parallel", "-p", help="Number of parallel tasks"),
     ] = 1,
     output: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--output", "-o", help="Output directory"),
     ] = None,
     resume: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--resume", "-r", help="Resume from previous run directory"),
     ] = None,
     system_prompt: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--system-prompt", help="Path to custom system prompt file"),
     ] = None,
     limit: Annotated[
-        Optional[int],
+        int | None,
         typer.Option("--limit", "-n", help="Limit number of tasks"),
     ] = None,
     offset: Annotated[
@@ -73,7 +73,7 @@ def bird(
         typer.Option("--offset", help="Skip first N tasks"),
     ] = 0,
     difficulty: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--difficulty", help="Filter by difficulty: simple, moderate, challenging"),
     ] = None,
     no_evidence: Annotated[
@@ -81,7 +81,7 @@ def bird(
         typer.Option("--no-evidence", help="Withhold evidence hints (harder mode)"),
     ] = False,
     service_tier: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--service-tier", help="OpenAI service tier (flex, auto)"),
     ] = None,
     verbose: Annotated[

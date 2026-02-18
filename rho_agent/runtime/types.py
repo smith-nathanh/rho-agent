@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..core.agent import Agent, AgentEvent
 from ..core.session import Session
@@ -14,11 +14,14 @@ from ..observability.processor import ObservabilityProcessor
 from ..tools.registry import ToolRegistry
 from .options import RuntimeOptions
 
+if TYPE_CHECKING:
+    from .protocol import Runtime
+
 ApprovalCallback = Callable[[str, dict[str, Any]], Awaitable[bool]]
 EventHandler = Callable[[AgentEvent], None | Awaitable[None]]
 
 
-def restore_runtime_state(runtime: Any, state: RunState) -> None:
+def restore_runtime_state(runtime: Runtime, state: RunState) -> None:
     """Mutate a runtime in-place from a serialized run snapshot.
 
     Shared implementation used by both LocalRuntime and DaytonaRuntime.
@@ -37,7 +40,7 @@ def restore_runtime_state(runtime: Any, state: RunState) -> None:
     runtime.session.last_input_tokens = state.last_input_tokens
 
 
-def capture_runtime_state(runtime: Any, interruptions: list[ToolApprovalItem]) -> RunState:
+def capture_runtime_state(runtime: Runtime, interruptions: list[ToolApprovalItem]) -> RunState:
     """Build a serializable run snapshot from a runtime's current session.
 
     Shared implementation used by both LocalRuntime and DaytonaRuntime.

@@ -4,7 +4,7 @@ import json
 import shlex
 from datetime import datetime, timezone
 from time import monotonic, sleep
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
 import typer
 from rich.panel import Panel
@@ -691,7 +691,7 @@ class MonitorSession:
 @app.command()
 def monitor(
     db_path: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--db", help="Path to telemetry database"),
     ] = None,
     limit: Annotated[

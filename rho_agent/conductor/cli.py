@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 
@@ -26,11 +26,11 @@ def conduct(
         typer.Option("--model", "-m", help="Model to use"),
     ] = os.getenv("OPENAI_MODEL", "gpt-5-mini"),
     service_tier: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--service-tier", help="OpenAI service tier (flex, auto)"),
     ] = os.getenv("RHO_AGENT_SERVICE_TIER"),
     state_path: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--state", help="Path to state JSON file"),
     ] = None,
     context_window: Annotated[
@@ -60,15 +60,15 @@ def conduct(
         typer.Option("--max-task-attempts", help="Max retries on check failure"),
     ] = 3,
     test_cmd: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--test-cmd", help="Override test command"),
     ] = None,
     lint_cmd: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--lint-cmd", help="Override lint command"),
     ] = None,
     typecheck_cmd: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--typecheck-cmd", help="Override typecheck command"),
     ] = None,
     no_reviewer: Annotated[
@@ -76,7 +76,7 @@ def conduct(
         typer.Option("--no-reviewer", help="Disable the reviewer gate"),
     ] = False,
     git_branch: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--branch", help="Create and use a git branch"),
     ] = None,
     resume: Annotated[
@@ -84,11 +84,11 @@ def conduct(
         typer.Option("--resume", help="Resume from saved state"),
     ] = False,
     project_id: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--project-id", help="Telemetry project ID"),
     ] = None,
     team_id: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--team-id", help="Telemetry team ID"),
     ] = None,
 ) -> None:

@@ -3,7 +3,7 @@
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 
@@ -17,7 +17,7 @@ from .state import app, console
 @app.command()
 def dashboard(
     db_path: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--db", help="Path to telemetry database"),
     ] = None,
     port: Annotated[
@@ -133,7 +133,7 @@ def ps(
 @app.command()
 def kill(
     prefix: Annotated[
-        Optional[str],
+        str | None,
         typer.Argument(help="Session ID prefix to kill"),
     ] = None,
     all: Annotated[

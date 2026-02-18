@@ -6,7 +6,7 @@ import platform
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 import yaml
@@ -48,7 +48,7 @@ from .state import (
 @app.command()
 def main(
     prompt_arg: Annotated[
-        Optional[str],
+        str | None,
         typer.Argument(
             metavar="PROMPT",
             help="Single prompt to run (omit for interactive mode)",
@@ -59,15 +59,15 @@ def main(
         typer.Option("--model", "-m", help="Model to use"),
     ] = os.getenv("OPENAI_MODEL", "gpt-5-mini"),
     base_url: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--base-url", help="API base URL for OpenAI-compatible endpoints"),
     ] = os.getenv("OPENAI_BASE_URL"),
     reasoning_effort: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--reasoning-effort", help="Reasoning effort: low, medium, high"),
     ] = os.getenv("RHO_AGENT_REASONING_EFFORT"),
     system_prompt_file: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--system-prompt",
             "-s",
@@ -75,7 +75,7 @@ def main(
         ),
     ] = None,
     prompt: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--prompt",
             "-p",
@@ -83,19 +83,19 @@ def main(
         ),
     ] = None,
     var: Annotated[
-        Optional[list[str]],
+        list[str] | None,
         typer.Option("--var", help="Prompt variable (key=value, repeatable)"),
     ] = None,
     vars_file: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--vars-file", help="YAML file with prompt variables"),
     ] = None,
     output: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--output", "-o", help="Write final response to file"),
     ] = None,
     working_dir: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--working-dir", "-w", help="Working directory for shell commands"),
     ] = None,
     auto_approve: Annotated[
@@ -103,7 +103,7 @@ def main(
         typer.Option("--auto-approve", "-y", help="Auto-approve all tool calls"),
     ] = False,
     resume: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--resume",
             "-r",
@@ -119,35 +119,35 @@ def main(
         typer.Option("--preview-lines", help="Lines of tool output to show (0 to disable)"),
     ] = int(os.getenv("RHO_AGENT_PREVIEW_LINES", "6")),
     profile: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--profile",
             help="Capability profile: 'readonly' (default), 'developer', 'eval', or path to YAML",
         ),
     ] = os.getenv("RHO_AGENT_PROFILE"),
     shell_mode: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--shell-mode",
             help="Override shell mode: 'restricted' or 'unrestricted'",
         ),
     ] = None,
     team_id: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--team-id",
             help="Team ID for observability (enables telemetry)",
         ),
     ] = os.getenv("RHO_AGENT_TEAM_ID"),
     project_id: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--project-id",
             help="Project ID for observability (enables telemetry)",
         ),
     ] = os.getenv("RHO_AGENT_PROJECT_ID"),
     observability_config: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--observability-config",
             help="Path to observability config file",
