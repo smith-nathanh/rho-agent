@@ -18,6 +18,44 @@ ApprovalCallback = Callable[[str, dict[str, Any]], Awaitable[bool]]
 EventHandler = Callable[[AgentEvent], None | Awaitable[None]]
 
 
+def restore_runtime_state(runtime: Any, state: RunState) -> None:
+    """Mutate a runtime in-place from a serialized run snapshot.
+
+    Shared implementation used by both LocalRuntime and DaytonaRuntime.
+    """
+    runtime.session_id = state.session_id
+    runtime.options.session_id = state.session_id
+    if runtime.observability:
+        runtime.observability.context.session_id = state.session_id
+    runtime.session.system_prompt = state.system_prompt
+    runtime.session.history = deepcopy(state.history)
+    runtime.session.total_input_tokens = state.total_input_tokens
+    runtime.session.total_output_tokens = state.total_output_tokens
+    runtime.session.total_cached_tokens = state.total_cached_tokens
+    runtime.session.total_reasoning_tokens = state.total_reasoning_tokens
+    runtime.session.total_cost_usd = state.total_cost_usd
+    runtime.session.last_input_tokens = state.last_input_tokens
+
+
+def capture_runtime_state(runtime: Any, interruptions: list[ToolApprovalItem]) -> RunState:
+    """Build a serializable run snapshot from a runtime's current session.
+
+    Shared implementation used by both LocalRuntime and DaytonaRuntime.
+    """
+    return RunState(
+        session_id=runtime.session_id,
+        system_prompt=runtime.session.system_prompt,
+        history=deepcopy(runtime.session.history),
+        total_input_tokens=runtime.session.total_input_tokens,
+        total_output_tokens=runtime.session.total_output_tokens,
+        total_cached_tokens=runtime.session.total_cached_tokens,
+        total_reasoning_tokens=runtime.session.total_reasoning_tokens,
+        total_cost_usd=runtime.session.total_cost_usd,
+        last_input_tokens=runtime.session.last_input_tokens,
+        pending_approvals=interruptions,
+    )
+
+
 @dataclass
 class SessionUsage:
     """Extracted token/cost usage from a session."""
@@ -148,33 +186,11 @@ class LocalRuntime:
 
     def restore_state(self, state: RunState) -> None:
         """Mutate runtime in-place from a serialized run snapshot."""
-        self.session_id = state.session_id
-        self.options.session_id = state.session_id
-        if self.observability:
-            self.observability.context.session_id = state.session_id
-        self.session.system_prompt = state.system_prompt
-        self.session.history = deepcopy(state.history)
-        self.session.total_input_tokens = state.total_input_tokens
-        self.session.total_output_tokens = state.total_output_tokens
-        self.session.total_cached_tokens = state.total_cached_tokens
-        self.session.total_reasoning_tokens = state.total_reasoning_tokens
-        self.session.total_cost_usd = state.total_cost_usd
-        self.session.last_input_tokens = state.last_input_tokens
+        restore_runtime_state(self, state)
 
     def capture_state(self, interruptions: list[ToolApprovalItem]) -> RunState:
         """Build a serializable run snapshot from the current runtime session."""
-        return RunState(
-            session_id=self.session_id,
-            system_prompt=self.session.system_prompt,
-            history=deepcopy(self.session.history),
-            total_input_tokens=self.session.total_input_tokens,
-            total_output_tokens=self.session.total_output_tokens,
-            total_cached_tokens=self.session.total_cached_tokens,
-            total_reasoning_tokens=self.session.total_reasoning_tokens,
-            total_cost_usd=self.session.total_cost_usd,
-            last_input_tokens=self.session.last_input_tokens,
-            pending_approvals=interruptions,
-        )
+        return capture_runtime_state(self, interruptions)
 
 
 @dataclass

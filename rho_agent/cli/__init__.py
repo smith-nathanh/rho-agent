@@ -58,7 +58,6 @@ __all__ = [
     "handle_command",
     "handle_event",
     "main",
-    "monitor",
     "run_interactive",
     "run_single",
     "run_single_with_output",

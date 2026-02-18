@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from copy import deepcopy
 from dataclasses import dataclass, field
 from types import TracebackType
 from typing import Any
@@ -14,7 +13,7 @@ from ..core.session import Session
 from ..observability.processor import ObservabilityProcessor
 from ..tools.registry import ToolRegistry
 from .options import RuntimeOptions
-from .types import ApprovalCallback, RunState, ToolApprovalItem
+from .types import ApprovalCallback, RunState, ToolApprovalItem, capture_runtime_state, restore_runtime_state
 
 
 @dataclass
@@ -73,33 +72,11 @@ class DaytonaRuntime:
 
     def restore_state(self, state: RunState) -> None:
         """Mutate runtime in-place from a serialized run snapshot."""
-        self.session_id = state.session_id
-        self.options.session_id = state.session_id
-        if self.observability:
-            self.observability.context.session_id = state.session_id
-        self.session.system_prompt = state.system_prompt
-        self.session.history = deepcopy(state.history)
-        self.session.total_input_tokens = state.total_input_tokens
-        self.session.total_output_tokens = state.total_output_tokens
-        self.session.total_cached_tokens = state.total_cached_tokens
-        self.session.total_reasoning_tokens = state.total_reasoning_tokens
-        self.session.total_cost_usd = state.total_cost_usd
-        self.session.last_input_tokens = state.last_input_tokens
+        restore_runtime_state(self, state)
 
     def capture_state(self, interruptions: list[ToolApprovalItem]) -> RunState:
         """Build a serializable run snapshot from the current runtime session."""
-        return RunState(
-            session_id=self.session_id,
-            system_prompt=self.session.system_prompt,
-            history=deepcopy(self.session.history),
-            total_input_tokens=self.session.total_input_tokens,
-            total_output_tokens=self.session.total_output_tokens,
-            total_cached_tokens=self.session.total_cached_tokens,
-            total_reasoning_tokens=self.session.total_reasoning_tokens,
-            total_cost_usd=self.session.total_cost_usd,
-            last_input_tokens=self.session.last_input_tokens,
-            pending_approvals=interruptions,
-        )
+        return capture_runtime_state(self, interruptions)
 
     # ------------------------------------------------------------------
     # Construction helper

@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..runtime import create_runtime, run_prompt, session_usage
 from ..runtime.types import SessionUsage
 from .models import ConductorConfig, Task, TaskDAG
-from .prompts import REVIEWER_SYSTEM_PROMPT, REVIEWER_USER_TEMPLATE
-from .worker import _format_acceptance_criteria, _format_verification
+from .prompts import (
+    REVIEWER_SYSTEM_PROMPT,
+    REVIEWER_USER_TEMPLATE,
+    format_acceptance_criteria,
+    format_verification,
+)
 
 
 @dataclass
@@ -17,11 +21,7 @@ class ReviewResult:
     """Result from a reviewer session."""
 
     summary: str
-    usage: SessionUsage = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        if self.usage is None:
-            self.usage = SessionUsage()
+    usage: SessionUsage = field(default_factory=SessionUsage)
 
 
 async def run_reviewer(
@@ -50,9 +50,9 @@ async def run_reviewer(
     prompt = REVIEWER_USER_TEMPLATE.format(
         task_id=task.id,
         task_title=task.title,
-        acceptance_criteria=_format_acceptance_criteria(task.acceptance_criteria),
+        acceptance_criteria=format_acceptance_criteria(task.acceptance_criteria),
         diff_text=diff_text,
-        verification_commands=_format_verification(dag.verification),
+        verification_commands=format_verification(dag.verification),
     )
 
     async with runtime:

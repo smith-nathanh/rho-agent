@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from typing import Any
 
 from ..runtime import create_runtime, run_prompt, session_usage
@@ -111,7 +112,7 @@ async def run_planner(
     prd_text: str,
     config: ConductorConfig,
     *,
-    cancel_check: callable | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[TaskDAG, dict[str, int]]:
     """Run the planner agent to decompose a PRD into a task DAG.
 

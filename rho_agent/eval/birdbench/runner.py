@@ -106,8 +106,6 @@ class BirdRunner:
             submit_handler = SubmitSqlHandler(on_submit=capture_sql)
             runtime.registry.register(submit_handler)
 
-            await runtime.start()
-
             # Run the task
             prompt = task.get_prompt()
             status = TaskStatus.COMPLETED
@@ -115,49 +113,53 @@ class BirdRunner:
             consecutive_timeouts = 0
             turn_timeout = 600 if self.config.service_tier == "flex" else 120
 
-            for turn in range(self.config.max_turns):
-                turns += 1
-
-                if submit_handler.is_submitted:
-                    break
-
-                turn_input = prompt if turn == 0 else "Continue working on the task."
-
-                try:
-                    async with asyncio.timeout(turn_timeout):
-                        result = await run_prompt(runtime, turn_input)
-
-                    consecutive_timeouts = 0
-
-                    if result.status == "error":
-                        print(
-                            f"[Task {task.index}] API Error in turn {turn}",
-                            file=sys.stderr,
-                        )
+            runtime.close_status = "completed"
+            async with runtime:
+                for turn in range(self.config.max_turns):
+                    turns += 1
 
                     if submit_handler.is_submitted:
                         break
 
-                except TimeoutError:
-                    consecutive_timeouts += 1
-                    print(
-                        f"[Task {task.index}] Turn {turn} timed out ({consecutive_timeouts}/3)",
-                        file=sys.stderr,
-                    )
-                    if consecutive_timeouts >= 3:
-                        raise EvalAbortedError(
-                            "Aborting: 3 consecutive turn timeouts.",
-                            consecutive_timeouts,
-                        )
-                except Exception as e:
-                    if "context" in str(e).lower():
-                        status = TaskStatus.AGENT_CONTEXT_LIMIT
-                    else:
-                        status = TaskStatus.TASK_ERROR
-                    break
+                    turn_input = prompt if turn == 0 else "Continue working on the task."
 
-            if turns >= self.config.max_turns and not submit_handler.is_submitted:
-                status = TaskStatus.TASK_LIMIT_REACHED
+                    try:
+                        async with asyncio.timeout(turn_timeout):
+                            result = await run_prompt(runtime, turn_input)
+
+                        consecutive_timeouts = 0
+
+                        if result.status == "error":
+                            print(
+                                f"[Task {task.index}] API Error in turn {turn}",
+                                file=sys.stderr,
+                            )
+
+                        if submit_handler.is_submitted:
+                            break
+
+                    except TimeoutError:
+                        consecutive_timeouts += 1
+                        print(
+                            f"[Task {task.index}] Turn {turn} timed out ({consecutive_timeouts}/3)",
+                            file=sys.stderr,
+                        )
+                        if consecutive_timeouts >= 3:
+                            runtime.close_status = "error"
+                            raise EvalAbortedError(
+                                "Aborting: 3 consecutive turn timeouts.",
+                                consecutive_timeouts,
+                            )
+                    except Exception as e:
+                        if "context" in str(e).lower():
+                            status = TaskStatus.AGENT_CONTEXT_LIMIT
+                        else:
+                            status = TaskStatus.TASK_ERROR
+                        runtime.close_status = "error"
+                        break
+
+                if turns >= self.config.max_turns and not submit_handler.is_submitted:
+                    status = TaskStatus.TASK_LIMIT_REACHED
 
             # Evaluate: run both SQL on the ORIGINAL database (read-only)
             bird_result = self._evaluator.evaluate(
@@ -188,8 +190,6 @@ class BirdRunner:
             )
 
         finally:
-            if runtime:
-                await runtime.close(status="completed")
             if handler:
                 handler.close()
             if tmp_db_path and Path(tmp_db_path).exists():

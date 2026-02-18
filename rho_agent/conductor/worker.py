@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..runtime import create_runtime, run_prompt, session_usage
 from ..runtime.types import SessionUsage
@@ -14,6 +14,8 @@ from .prompts import (
     WORKER_HANDOFF_PROMPT,
     WORKER_RETRY_TEMPLATE,
     WORKER_RESUME_TEMPLATE,
+    format_acceptance_criteria,
+    format_verification,
 )
 
 
@@ -24,26 +26,7 @@ class WorkerResult:
     status: str  # "completed", "handoff", "incomplete"
     text: str
     handoff_doc: str | None = None
-    usage: SessionUsage = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        if self.usage is None:
-            self.usage = SessionUsage()
-
-
-def _format_verification(verification: VerificationConfig) -> str:
-    lines = []
-    if verification.test_cmd:
-        lines.append(f"- Test: `{verification.test_cmd}`")
-    if verification.lint_cmd:
-        lines.append(f"- Lint: `{verification.lint_cmd}`")
-    if verification.typecheck_cmd:
-        lines.append(f"- Typecheck: `{verification.typecheck_cmd}`")
-    return "\n".join(lines) if lines else "No verification commands configured."
-
-
-def _format_acceptance_criteria(criteria: list[str]) -> str:
-    return "\n".join(f"- {c}" for c in criteria)
+    usage: SessionUsage = field(default_factory=SessionUsage)
 
 
 def _build_initial_prompt(
@@ -56,10 +39,10 @@ def _build_initial_prompt(
         task_id=task.id,
         task_title=task.title,
         task_description=task.description,
-        acceptance_criteria=_format_acceptance_criteria(task.acceptance_criteria),
+        acceptance_criteria=format_acceptance_criteria(task.acceptance_criteria),
         working_dir=config.working_dir,
         prd_summary=f"Project: {dag.project_name}\n\n{prd_text}" if prd_text else f"Project: {dag.project_name}",
-        verification_commands=_format_verification(dag.verification),
+        verification_commands=format_verification(dag.verification),
     )
 
 
@@ -73,8 +56,8 @@ def _build_resume_prompt(
         task_id=task.id,
         task_title=task.title,
         task_description=task.description,
-        acceptance_criteria=_format_acceptance_criteria(task.acceptance_criteria),
-        verification_commands=_format_verification(dag.verification),
+        acceptance_criteria=format_acceptance_criteria(task.acceptance_criteria),
+        verification_commands=format_verification(dag.verification),
     )
 
 
