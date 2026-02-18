@@ -15,11 +15,15 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from rho_agent.client.model import ModelClient
-from rho_agent.core.agent import Agent
-from rho_agent.core.session import Session
+from rho_agent.capabilities import (
+    ApprovalMode,
+    CapabilityProfile,
+    DatabaseMode,
+    FileWriteMode,
+    ShellMode,
+)
 from rho_agent.prompts import load_prompt
-from rho_agent.tools.registry import ToolRegistry
+from rho_agent.runtime import RuntimeOptions, close_runtime, create_runtime, run_prompt, start_runtime
 
 from .config import BirdMetrics, EvalAbortedError, EvalConfig, TaskResult, TaskStatus
 from .evaluator import BirdEvaluator
@@ -39,13 +43,6 @@ class BirdRunner:
         self.config = config
         self._evaluator = BirdEvaluator()
 
-    def _create_client(self) -> ModelClient:
-        return ModelClient(
-            model=self.config.model,
-            base_url=self.config.base_url,
-            service_tier=self.config.service_tier,
-        )
-
     def _get_system_prompt(self) -> str:
         if self.config.system_prompt_file:
             try:
@@ -64,6 +61,7 @@ class BirdRunner:
         """
         tmp_db_path = None
         handler = None
+        runtime = None
 
         try:
             # Copy database to temp file (agent safety)
@@ -74,10 +72,30 @@ class BirdRunner:
             os.close(tmp_fd)
             shutil.copy2(task.db_path, tmp_db_path)
 
-            # Create tool registry
-            registry = ToolRegistry()
+            # Build runtime with minimal profile (only custom tools needed)
+            system_prompt = self._get_system_prompt()
+            profile = CapabilityProfile(
+                name="birdbench",
+                description="BIRD-Bench SQL evaluation profile",
+                shell=ShellMode.RESTRICTED,
+                file_write=FileWriteMode.OFF,
+                database=DatabaseMode.READONLY,
+                approval=ApprovalMode.NONE,
+            )
+            options = RuntimeOptions(
+                model=self.config.model,
+                base_url=self.config.base_url,
+                service_tier=self.config.service_tier,
+                profile=profile,
+                auto_approve=True,
+                enable_delegate=False,
+            )
+            runtime = create_runtime(system_prompt, options=options)
+            runtime.registry.clear()
+
+            # Register BIRD-specific tools
             handler = BirdSqliteHandler(db_path=tmp_db_path)
-            registry.register(handler)
+            runtime.registry.register(handler)
 
             submitted_sql: str | None = None
 
@@ -86,18 +104,9 @@ class BirdRunner:
                 submitted_sql = sql
 
             submit_handler = SubmitSqlHandler(on_submit=capture_sql)
-            registry.register(submit_handler)
+            runtime.registry.register(submit_handler)
 
-            # Create session and agent
-            system_prompt = self._get_system_prompt()
-            session = Session(system_prompt=system_prompt)
-            client = self._create_client()
-            agent = Agent(
-                session=session,
-                registry=registry,
-                client=client,
-                auto_compact=False,
-            )
+            await start_runtime(runtime)
 
             # Run the task
             prompt = task.get_prompt()
@@ -116,17 +125,15 @@ class BirdRunner:
 
                 try:
                     async with asyncio.timeout(turn_timeout):
-                        async for event in agent.run_turn(turn_input):
-                            if event.type == "error":
-                                print(
-                                    f"[Task {task.index}] API Error: {event.content}",
-                                    file=sys.stderr,
-                                )
-                            if event.type == "tool_end" and submit_handler.is_submitted:
-                                agent.request_cancel()
-                                break
+                        result = await run_prompt(runtime, turn_input)
 
                     consecutive_timeouts = 0
+
+                    if result.status == "error":
+                        print(
+                            f"[Task {task.index}] API Error in turn {turn}",
+                            file=sys.stderr,
+                        )
 
                     if submit_handler.is_submitted:
                         break
@@ -164,7 +171,7 @@ class BirdRunner:
             return TaskResult(
                 index=task.index,
                 status=status,
-                history=session.history.copy(),
+                history=runtime.session.history.copy(),
                 time=TaskResult.create_time(),
                 result=bird_result,
             )
@@ -181,6 +188,8 @@ class BirdRunner:
             )
 
         finally:
+            if runtime:
+                await close_runtime(runtime, status="completed")
             if handler:
                 handler.close()
             if tmp_db_path and Path(tmp_db_path).exists():
