@@ -72,13 +72,18 @@ class ToolFactory:
         from ..tools.handlers.glob import GlobHandler
         from ..tools.handlers.grep import GrepHandler
         from ..tools.handlers.list import ListHandler
-        from ..tools.handlers.read_excel import ReadExcelHandler
 
         registry.register(ReadHandler())
         registry.register(GlobHandler())
         registry.register(GrepHandler())
         registry.register(ListHandler())
-        registry.register(ReadExcelHandler())
+
+        try:
+            from ..tools.handlers.read_excel import ReadExcelHandler
+
+            registry.register(ReadExcelHandler())
+        except ImportError:
+            pass
 
     def _register_bash_tool(self, registry: ToolRegistry, working_dir: str) -> None:
         """Register the bash tool with appropriate restrictions."""

@@ -29,6 +29,17 @@ def dashboard(
     import subprocess
     import sys
 
+    try:
+        import streamlit  # noqa: F401
+    except ImportError:
+        console.print(
+            _markup(
+                "Streamlit not installed. Install with: pip install 'rho-agent[dashboard]'",
+                THEME.error,
+            )
+        )
+        raise typer.Exit(1)
+
     # Set database path in environment
     resolved_db = db_path or str(DEFAULT_TELEMETRY_DB)
     env = os.environ.copy()

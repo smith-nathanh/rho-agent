@@ -5,20 +5,12 @@ description = "An agent harness and CLI with readonly and developer modes."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "mysql-connector-python>=8.0",
     "openai>=2.14.0",
-    "openpyxl>=3.1.0",
-    "oracledb>=3.4.1",
     "prompt-toolkit>=3.0.52",
     "pyyaml>=6.0.2",
     "python-dotenv>=1.2.1",
     "rich>=14.2.0",
     "typer>=0.21.0",
-    "vertica-python>=1.4.0",
-    "psycopg>=3.3.2",
-    "cerebras-cloud-sdk>=1.64.1",
-    "streamlit>=1.40",
-    "pandas>=2.0",
     "jinja2>=3.1.6",
 ]
 
@@ -31,6 +23,19 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.optional-dependencies]
+# Database drivers
+db-postgres = ["psycopg>=3.3.2"]
+db-mysql = ["mysql-connector-python>=8.0"]
+db-oracle = ["oracledb>=3.4.1"]
+db-vertica = ["vertica-python>=1.4.0"]
+db = ["rho-agent[db-postgres,db-mysql,db-oracle,db-vertica]"]
+
+# Dashboard (Streamlit + pandas)
+dashboard = ["streamlit>=1.40", "pandas>=2.0"]
+
+# Excel file support
+excel = ["openpyxl>=3.1.0"]
+
 # Harbor integration for TerminalBench evaluation
 # Install harbor from: https://github.com/laude-institute/harbor
 harbor = []  # Harbor is installed separately via pip install -e ~/proj/harbor
@@ -56,6 +61,9 @@ redis = [
 
 # Optional: Daytona cloud sandbox integration
 daytona = ["daytona>=0.1.0"]
+
+# Everything
+all = ["rho-agent[db,dashboard,excel,daytona,observability,otlp,redis,evals]"]
 
 [dependency-groups]
 dev = [

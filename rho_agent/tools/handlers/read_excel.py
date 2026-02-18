@@ -1,11 +1,18 @@
 """Read Excel file contents handler."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any
 
-from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.worksheet import Worksheet
+try:
+    from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.worksheet import Worksheet
+
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
 
@@ -53,6 +60,10 @@ def format_cell_value(value: Any) -> str:
 
 class ReadExcelHandler(ToolHandler):
     """Read and inspect Excel files (.xlsx, .xls)."""
+
+    @property
+    def is_enabled(self) -> bool:
+        return OPENPYXL_AVAILABLE
 
     @property
     def name(self) -> str:

@@ -185,23 +185,6 @@ wheels = [
 ]
 
 [[package]]
-name = "cerebras-cloud-sdk"
-version = "1.64.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "anyio" },
-    { name = "distro" },
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "sniffio" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/52/98/96fa7704e101b5b33c7030a61d081f07c6c117f96d742852d7e06da56345/cerebras_cloud_sdk-1.64.1.tar.gz", hash = "sha256:7200b0cbafaff32e4e6bcb88d5342fc19295435a7a7681fa10156018d79ae67a", size = 131448, upload-time = "2025-12-31T17:54:55.402Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f3/96/138ed6ecf48f3b17f68ca06bb5c2b506d34c84d73502c9e3a620da7d44a9/cerebras_cloud_sdk-1.64.1-py3-none-any.whl", hash = "sha256:c9c049586e89dcc4e4a8d726d4725bdba28acb9e8b0f2a9640138b24b92444a0", size = 97798, upload-time = "2025-12-31T17:54:54.072Z" },
-]
-
-[[package]]
 name = "certifi"
 version = "2025.11.12"
 source = { registry = "https://pypi.org/simple" }
@@ -2043,29 +2026,61 @@ name = "rho-agent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "cerebras-cloud-sdk" },
     { name = "jinja2" },
-    { name = "mysql-connector-python" },
     { name = "openai" },
-    { name = "openpyxl" },
-    { name = "oracledb" },
-    { name = "pandas" },
     { name = "prompt-toolkit" },
-    { name = "psycopg" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "rich" },
-    { name = "streamlit" },
     { name = "typer" },
-    { name = "vertica-python" },
 ]
 
 [package.optional-dependencies]
+all = [
+    { name = "daytona" },
+    { name = "litellm" },
+    { name = "mysql-connector-python" },
+    { name = "openpyxl" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-exporter-otlp" },
+    { name = "opentelemetry-sdk" },
+    { name = "oracledb" },
+    { name = "pandas" },
+    { name = "psycopg" },
+    { name = "redis" },
+    { name = "streamlit" },
+    { name = "vertica-python" },
+]
+dashboard = [
+    { name = "pandas" },
+    { name = "streamlit" },
+]
 daytona = [
     { name = "daytona" },
 ]
+db = [
+    { name = "mysql-connector-python" },
+    { name = "oracledb" },
+    { name = "psycopg" },
+    { name = "vertica-python" },
+]
+db-mysql = [
+    { name = "mysql-connector-python" },
+]
+db-oracle = [
+    { name = "oracledb" },
+]
+db-postgres = [
+    { name = "psycopg" },
+]
+db-vertica = [
+    { name = "vertica-python" },
+]
 evals = [
     { name = "litellm" },
+]
+excel = [
+    { name = "openpyxl" },
 ]
 observability = [
     { name = "opentelemetry-api" },
@@ -2088,29 +2103,30 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cerebras-cloud-sdk", specifier = ">=1.64.1" },
     { name = "daytona", marker = "extra == 'daytona'", specifier = ">=0.1.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "litellm", marker = "extra == 'evals'", specifier = ">=1.50.0" },
-    { name = "mysql-connector-python", specifier = ">=8.0" },
+    { name = "mysql-connector-python", marker = "extra == 'db-mysql'", specifier = ">=8.0" },
     { name = "openai", specifier = ">=2.14.0" },
-    { name = "openpyxl", specifier = ">=3.1.0" },
+    { name = "openpyxl", marker = "extra == 'excel'", specifier = ">=3.1.0" },
     { name = "opentelemetry-api", marker = "extra == 'observability'", specifier = ">=1.20.0" },
     { name = "opentelemetry-exporter-otlp", marker = "extra == 'otlp'", specifier = ">=1.20.0" },
     { name = "opentelemetry-sdk", marker = "extra == 'observability'", specifier = ">=1.20.0" },
-    { name = "oracledb", specifier = ">=3.4.1" },
-    { name = "pandas", specifier = ">=2.0" },
+    { name = "oracledb", marker = "extra == 'db-oracle'", specifier = ">=3.4.1" },
+    { name = "pandas", marker = "extra == 'dashboard'", specifier = ">=2.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
-    { name = "psycopg", specifier = ">=3.3.2" },
+    { name = "psycopg", marker = "extra == 'db-postgres'", specifier = ">=3.3.2" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0.0" },
+    { name = "rho-agent", extras = ["db", "dashboard", "excel", "daytona", "observability", "otlp", "redis", "evals"], marker = "extra == 'all'" },
+    { name = "rho-agent", extras = ["db-postgres", "db-mysql", "db-oracle", "db-vertica"], marker = "extra == 'db'" },
     { name = "rich", specifier = ">=14.2.0" },
-    { name = "streamlit", specifier = ">=1.40" },
+    { name = "streamlit", marker = "extra == 'dashboard'", specifier = ">=1.40" },
     { name = "typer", specifier = ">=0.21.0" },
-    { name = "vertica-python", specifier = ">=1.4.0" },
+    { name = "vertica-python", marker = "extra == 'db-vertica'", specifier = ">=1.4.0" },
 ]
-provides-extras = ["harbor", "evals", "observability", "otlp", "redis", "daytona"]
+provides-extras = ["db-postgres", "db-mysql", "db-oracle", "db-vertica", "db", "dashboard", "excel", "harbor", "evals", "observability", "otlp", "redis", "daytona", "all"]
 
 [package.metadata.requires-dev]
 dev = [
