@@ -186,11 +186,13 @@ A `SandboxManager` lazily provisions a sandbox on the first tool call and tears 
 
 Database tools continue to run locally even under the `daytona` profile.
 
-## Delegation tool
+## Sub-agent tools
 
-### `delegate`
+rho-agent supports two patterns for spawning child agents. Both create independent runtimes and disable further delegation to prevent unbounded recursion.
 
-Spawn a child agent to execute a focused subtask. See [Architecture](architecture/) for details on multi-agent coordination.
+### `delegate` (ad-hoc delegation)
+
+Spawn a child agent to execute a focused subtask. The LLM decides at runtime when to delegate. See [Architecture](architecture/) for details on multi-agent coordination.
 
 | Parameter | Type | Description |
 |---|---|---|
@@ -198,3 +200,42 @@ Spawn a child agent to execute a focused subtask. See [Architecture](architectur
 | `full_context` | boolean | Copy parent conversation history to child |
 
 The child agent inherits the parent's profile, model, and working directory. Delegation is single-level — child agents cannot delegate further. Parent cancellation propagates to children automatically.
+
+### Agent-as-tool (pre-configured specialists)
+
+Wrap a pre-configured agent as a named tool with typed parameters. Unlike `delegate`, the child has its own system prompt, profile, and model — configured at setup time, not derived from the parent.
+
+```python
+from rho_agent.tools.handlers import AgentToolHandler
+from rho_agent.runtime.options import RuntimeOptions
+
+sql_agent = AgentToolHandler(
+    tool_name="generate_sql",
+    tool_description="Generate SQL from a natural language question.",
+    system_prompt="You are an expert SQL developer. ...",
+    options=RuntimeOptions(model="gpt-5-mini", profile="readonly"),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "question": {"type": "string", "description": "Natural language question"},
+            "dialect": {"type": "string", "enum": ["sqlite", "postgres", "mysql"]},
+        },
+        "required": ["question"],
+    },
+)
+
+# Register on an existing runtime's registry
+runtime.registry.register(sql_agent)
+```
+
+The parent LLM sees `generate_sql(question, dialect)` as a first-class tool. Each invocation spawns an independent runtime — no conversation history is shared.
+
+| Constructor parameter | Type | Description |
+|---|---|---|
+| `tool_name` | string | Tool name the LLM sees (required) |
+| `tool_description` | string | Description for the LLM (required) |
+| `system_prompt` | string | Child agent's system prompt (required) |
+| `options` | RuntimeOptions | Child's model, profile, etc. |
+| `input_schema` | dict | JSON Schema for typed parameters |
+| `input_formatter` | callable | Custom `(args) -> instruction` mapper |
+| `requires_approval` | bool | Whether parent needs approval before calling |

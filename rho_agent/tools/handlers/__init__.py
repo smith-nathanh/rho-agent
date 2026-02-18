@@ -14,6 +14,7 @@ Mode-dependent Tools:
 - WriteHandler (write) - File writing (off, create-only, or full)
 - EditHandler (edit) - Surgical file editing (only with file_write=full)
 - DelegateHandler (delegate) - Spawn one child agent for focused sub-work
+- AgentToolHandler - Wrap a pre-configured agent as a named tool
 
 Database Tools (enabled via env vars):
 - OracleHandler (oracle)
@@ -35,6 +36,7 @@ from .bash import BashHandler
 from .write import WriteHandler
 from .delegate import DelegateHandler
 from .edit import EditHandler
+from .agent_tool import AgentToolHandler
 
 # Database tools
 from .mysql import MysqlHandler
@@ -55,6 +57,7 @@ __all__ = [
     "WriteHandler",
     "EditHandler",
     "DelegateHandler",
+    "AgentToolHandler",
     # Database handlers
     "MysqlHandler",
     "OracleHandler",
