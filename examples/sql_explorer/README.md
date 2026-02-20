@@ -6,10 +6,10 @@ A Streamlit web app demonstrating rho-agent's database exploration capabilities.
 
 ```bash
 # 1. Seed the sample database (one-time)
-python demo/seed_database.py
+python examples/sql_explorer/seed_database.py
 
 # 2. Launch the app
-uv run streamlit run demo/app.py
+uv run streamlit run examples/sql_explorer/app.py
 ```
 
 The app opens at http://localhost:8501

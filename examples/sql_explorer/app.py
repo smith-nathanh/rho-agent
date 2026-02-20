@@ -3,13 +3,13 @@
 
 Launch instructions:
     # First, seed the sample database (one-time setup)
-    python demo/seed_database.py
+    python examples/sql_explorer/seed_database.py
 
     # Then launch the Streamlit app
-    streamlit run demo/app.py
+    streamlit run examples/sql_explorer/app.py
 
     # Or with uv
-    uv run streamlit run demo/app.py
+    uv run streamlit run examples/sql_explorer/app.py
 
 The app will open at http://localhost:8501
 
@@ -365,7 +365,7 @@ def main() -> None:
     # Check database exists
     if not DB_PATH.exists():
         st.error(f"Database not found at {DB_PATH}")
-        st.info("Run `python demo/seed_database.py` to create the sample database.")
+        st.info("Run `python examples/sql_explorer/seed_database.py` to create the sample database.")
         return
 
     ensure_demo_db_config()

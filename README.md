@@ -104,12 +104,14 @@ asyncio.run(main())
 
 ### Web UI
 
-For a graphical interface, see the [SQL Explorer Demo](demo/README.md)—a Streamlit app for chatting with an agent to explore a database and export queries and results:
+For a graphical interface, see the [SQL Explorer Demo](examples/sql_explorer/README.md)—a Streamlit app for chatting with an agent to explore a database and export queries and results:
 
 ```bash
-python demo/seed_database.py      # seed sample database
-uv run streamlit run demo/app.py  # launch app
+python examples/sql_explorer/seed_database.py      # seed sample database
+uv run streamlit run examples/sql_explorer/app.py   # launch app
 ```
+
+See [`examples/`](examples/README.md) for more runtime API usage patterns.
 
 ## Examples
 

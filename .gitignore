@@ -17,6 +17,7 @@ wheels/
 !README.md
 !ARCHITECTURE.md
 !rho_agent/prompts/*.md
+!examples/**/*.md
 !docs/site/
 !docs/site/**/*.md
 plans
@@ -24,7 +25,7 @@ plans
 .rho_agent_history
 test_data.db
 results/
-demo/*db
+examples/sql_explorer/*db
 *.jpg
 *.png
 

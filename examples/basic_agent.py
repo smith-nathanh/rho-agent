@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Example: programmatic usage via rho_agent.runtime.
+"""Example: basic single-agent usage via rho_agent.runtime.
 
 Example:
-    uv run python demo/programmatic_usage.py ~/some/project "Summarize the error handling"
+    uv run python examples/basic_agent.py ~/some/project "Summarize the error handling"
 """
 
 import asyncio
