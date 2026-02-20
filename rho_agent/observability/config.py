@@ -41,12 +41,22 @@ class OtlpBackendConfig:
 
 
 @dataclass
+class PostgresBackendConfig:
+    """Postgres backend configuration."""
+
+    dsn: str = ""
+    min_connections: int = 2
+    max_connections: int = 10
+
+
+@dataclass
 class BackendConfig:
     """Backend configuration."""
 
-    type: str = "sqlite"  # "sqlite" or "otlp"
+    type: str = "sqlite"  # "sqlite" | "postgres" | "otlp"
     sqlite: SqliteBackendConfig = field(default_factory=SqliteBackendConfig)
     otlp: OtlpBackendConfig = field(default_factory=OtlpBackendConfig)
+    postgres: PostgresBackendConfig = field(default_factory=PostgresBackendConfig)
 
 
 @dataclass
@@ -59,6 +69,17 @@ class CaptureConfig:
     tool_results: bool = False  # Can be large, disabled by default
 
 
+def _parse_labels_env(value: str) -> dict[str, str]:
+    """Parse ``key=val,key=val`` format from RHO_AGENT_LABELS env var."""
+    labels: dict[str, str] = {}
+    for pair in value.split(","):
+        pair = pair.strip()
+        if "=" in pair:
+            k, v = pair.split("=", 1)
+            labels[k.strip()] = v.strip()
+    return labels
+
+
 @dataclass
 class ObservabilityConfig:
     """Main observability configuration."""
@@ -67,6 +88,7 @@ class ObservabilityConfig:
     tenant: TenantConfig | None = None
     backend: BackendConfig = field(default_factory=BackendConfig)
     capture: CaptureConfig = field(default_factory=CaptureConfig)
+    labels: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ObservabilityConfig:
@@ -102,6 +124,14 @@ class ObservabilityConfig:
                     headers=otlp_data.get("headers", {}),
                 )
 
+            if "postgres" in backend_data:
+                pg_data = backend_data["postgres"]
+                backend.postgres = PostgresBackendConfig(
+                    dsn=pg_data.get("dsn", ""),
+                    min_connections=pg_data.get("min_connections", 2),
+                    max_connections=pg_data.get("max_connections", 10),
+                )
+
         # Parse capture config
         capture = CaptureConfig()
         if "capture" in obs_data:
@@ -111,11 +141,20 @@ class ObservabilityConfig:
             capture.tool_arguments = capture_data.get("tool_arguments", True)
             capture.tool_results = capture_data.get("tool_results", False)
 
+        # Parse labels: env var first, YAML overrides
+        labels: dict[str, str] = {}
+        env_labels = os.getenv("RHO_AGENT_LABELS", "")
+        if env_labels:
+            labels.update(_parse_labels_env(env_labels))
+        if "labels" in obs_data and isinstance(obs_data["labels"], dict):
+            labels.update({str(k): str(v) for k, v in obs_data["labels"].items()})
+
         return cls(
             enabled=obs_data.get("enabled", True),
             tenant=tenant,
             backend=backend,
             capture=capture,
+            labels=labels,
         )
 
     @classmethod
@@ -144,33 +183,53 @@ class ObservabilityConfig:
         resolved_team_id = team_id or os.getenv("RHO_AGENT_TEAM_ID")
         resolved_project_id = project_id or os.getenv("RHO_AGENT_PROJECT_ID")
 
-        # If no tenant info provided, observability is disabled
-        if not resolved_team_id or not resolved_project_id:
-            return cls(enabled=False)
+        # Check for DSN-based postgres config
+        dsn = os.getenv("RHO_AGENT_OBSERVABILITY_DSN", "")
 
-        tenant = TenantConfig(
-            team_id=resolved_team_id,
-            project_id=resolved_project_id,
-        )
+        # If no tenant info provided and no DSN, observability is disabled
+        if not resolved_team_id or not resolved_project_id:
+            if not dsn:
+                return cls(enabled=False)
+
+        tenant = None
+        if resolved_team_id and resolved_project_id:
+            tenant = TenantConfig(
+                team_id=resolved_team_id,
+                project_id=resolved_project_id,
+            )
 
         # Check for config file
         config_path = os.getenv("RHO_AGENT_OBSERVABILITY_CONFIG")
         if config_path:
             config = cls.from_yaml(config_path)
-            # Override tenant from CLI/env
-            config.tenant = tenant
+            if tenant:
+                config.tenant = tenant
             return config
 
         # Check default config location
         if DEFAULT_CONFIG_FILE.exists():
             config = cls.from_yaml(DEFAULT_CONFIG_FILE)
-            config.tenant = tenant
+            if tenant:
+                config.tenant = tenant
             return config
 
-        # Use defaults with provided tenant
+        # Build config from env vars
+        backend = BackendConfig()
+        if dsn:
+            backend.type = "postgres"
+            backend.postgres = PostgresBackendConfig(dsn=dsn)
+
+        # Parse labels from env
+        labels: dict[str, str] = {}
+        env_labels = os.getenv("RHO_AGENT_LABELS", "")
+        if env_labels:
+            labels.update(_parse_labels_env(env_labels))
+
         return cls(
             enabled=True,
             tenant=tenant,
+            backend=backend,
+            labels=labels,
         )
 
     @classmethod

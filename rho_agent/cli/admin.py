@@ -9,11 +9,19 @@ from typing import Annotated
 
 import typer
 
+from ..control.services.control_plane import ControlPlane
+from ..control.services.local_signal_transport import LocalSignalTransport
 from ..observability.config import DEFAULT_TELEMETRY_DB
 from ..signals import SignalManager
 from .theme import THEME
 from .formatting import _markup
 from .state import app, console
+
+
+def _default_control_plane() -> tuple[ControlPlane, SignalManager]:
+    """Build the default local control plane."""
+    sm = SignalManager()
+    return ControlPlane(LocalSignalTransport(sm)), sm
 
 
 @app.command()
@@ -89,7 +97,7 @@ def ps(
     ] = False,
 ) -> None:
     """List running rho-agent sessions."""
-    sm = SignalManager()
+    control_plane, sm = _default_control_plane()
 
     if cleanup:
         cleaned = sm.cleanup_stale()
@@ -100,35 +108,36 @@ def ps(
         else:
             console.print("[dim]No stale entries found[/dim]")
 
-    agents = sm.list_running()
+    agents = control_plane.list_running()
     if not agents:
         console.print("[dim]No running agents[/dim]")
         raise typer.Exit(0)
 
     now = datetime.now(timezone.utc)
-    for info in agents:
-        short_id = info.session_id[:8]
-        paused = sm.is_paused(info.session_id)
+    for agent in agents:
+        short_id = agent.session_id[:8]
         try:
-            started = datetime.fromisoformat(info.started_at)
-            elapsed = now - started
-            secs = int(elapsed.total_seconds())
+            if agent.started_at:
+                elapsed = now - agent.started_at.astimezone(timezone.utc)
+                secs = int(elapsed.total_seconds())
+            else:
+                secs = 0
             if secs < 60:
                 duration = f"{secs}s"
             elif secs < 3600:
                 duration = f"{secs // 60}m{secs % 60}s"
             else:
                 duration = f"{secs // 3600}h{(secs % 3600) // 60}m"
-        except ValueError:
+        except (ValueError, TypeError):
             duration = "?"
-        preview = info.instruction_preview[:50]
-        if len(info.instruction_preview) > 50:
+        preview = agent.instruction_preview[:50]
+        if len(agent.instruction_preview) > 50:
             preview += "..."
-        state = "paused" if paused else "running"
-        state_color = THEME.warning if paused else THEME.success
+        state = agent.status.value
+        state_color = THEME.warning if state == "paused" else THEME.success
         console.print(
             f"  {_markup(short_id, THEME.accent)}  {_markup(state, state_color)}  "
-            f"{_markup(f'{info.model:<14}', THEME.muted)}  {duration:>6}  {preview}"
+            f"{_markup(f'{agent.model:<14}', THEME.muted)}  {duration:>6}  {preview}"
         )
 
 
@@ -144,26 +153,22 @@ def kill(
     ] = False,
 ) -> None:
     """Kill running rho-agent sessions by session ID prefix."""
-    sm = SignalManager()
+    control_plane, _sm = _default_control_plane()
 
-    if all:
-        cancelled = sm.cancel_all()
-        if cancelled:
-            for sid in cancelled:
-                console.print(_markup(f"Cancelled: {sid[:8]}", THEME.warning))
-            console.print(_markup(f"Sent cancel signal to {len(cancelled)} agents", THEME.success))
-        else:
-            console.print("[dim]No running agents to kill[/dim]")
-        return
-
-    if not prefix:
+    target = "all" if all else (prefix or "")
+    if not target:
         console.print(_markup("Provide a session ID prefix, or use --all", THEME.error))
         raise typer.Exit(1)
 
-    cancelled = sm.cancel_by_prefix(prefix)
-    if cancelled:
-        for sid in cancelled:
+    outcome = control_plane.kill(target)
+    if outcome.ok:
+        for sid in outcome.acted_session_ids:
             console.print(_markup(f"Cancelled: {sid[:8]}", THEME.warning))
-    else:
-        console.print(_markup(f"No running agents matching prefix '{prefix}'", THEME.error))
+        count = len(outcome.acted_session_ids)
+        if all:
+            console.print(_markup(f"Sent cancel signal to {count} agents", THEME.success))
+    elif outcome.error:
+        console.print(_markup(outcome.error, THEME.error))
         raise typer.Exit(1)
+    else:
+        console.print("[dim]No running agents to kill[/dim]")

@@ -6,13 +6,13 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 from ..context import TelemetryContext, TurnContext, ToolExecutionContext
+from .protocol import SessionSummary, SessionDetail, ToolStats, CostSummary
 
 SQLITE_BUSY_TIMEOUT_MS = 5000
 
@@ -73,73 +73,6 @@ CREATE INDEX IF NOT EXISTS idx_turns_session_id ON turns(session_id);
 CREATE INDEX IF NOT EXISTS idx_tool_executions_turn_id ON tool_executions(turn_id);
 CREATE INDEX IF NOT EXISTS idx_tool_executions_tool_name ON tool_executions(tool_name);
 """
-
-
-@dataclass
-class SessionSummary:
-    """Summary of a session for listing."""
-
-    session_id: str
-    team_id: str
-    project_id: str
-    model: str
-    started_at: datetime
-    ended_at: datetime | None
-    status: str
-    total_input_tokens: int
-    total_output_tokens: int
-    total_reasoning_tokens: int
-    total_tool_calls: int
-    context_size: int
-    turn_count: int
-
-
-@dataclass
-class SessionDetail:
-    """Detailed session information including turns and tool executions."""
-
-    session_id: str
-    team_id: str
-    project_id: str
-    agent_id: str | None
-    environment: str | None
-    profile: str | None
-    model: str
-    started_at: datetime
-    ended_at: datetime | None
-    status: str
-    total_input_tokens: int
-    total_output_tokens: int
-    total_reasoning_tokens: int
-    total_tool_calls: int
-    context_size: int
-    metadata: dict[str, Any]
-    turns: list[dict[str, Any]]
-
-
-@dataclass
-class ToolStats:
-    """Statistics for tool usage."""
-
-    tool_name: str
-    total_calls: int
-    success_count: int
-    failure_count: int
-    avg_duration_ms: float
-    total_duration_ms: int
-
-
-@dataclass
-class CostSummary:
-    """Cost/token summary for a time period."""
-
-    team_id: str
-    project_id: str
-    total_sessions: int
-    total_input_tokens: int
-    total_output_tokens: int
-    total_reasoning_tokens: int
-    total_tool_calls: int
 
 
 class TelemetryStorage:

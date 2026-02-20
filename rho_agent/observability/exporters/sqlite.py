@@ -169,6 +169,11 @@ def create_exporter(config: ObservabilityConfig) -> Exporter:
     if backend_type == "sqlite":
         return SQLiteExporter(config=config)
 
+    elif backend_type == "postgres":
+        from .postgres import PostgresExporter
+
+        return PostgresExporter(config=config)
+
     elif backend_type == "otlp":
         # OTLP exporter would be implemented here
         # For now, fall back to SQLite

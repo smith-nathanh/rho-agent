@@ -25,6 +25,8 @@ class RunningAgent:
     instruction_preview: str
     started_at: datetime | None
     status: AgentStatus
+    labels: dict[str, str] = field(default_factory=dict)
+    heartbeat_at: datetime | None = None
 
 
 @dataclass(slots=True)

@@ -9,7 +9,8 @@ from pathlib import Path
 import streamlit as st
 
 from rho_agent.observability.config import DEFAULT_TELEMETRY_DB
-from rho_agent.observability.storage.sqlite import TelemetryStorage, SessionSummary, SessionDetail
+from rho_agent.observability.storage.protocol import SessionDetail, SessionSummary
+from rho_agent.observability.storage.sqlite import TelemetryStorage
 
 
 def get_storage() -> TelemetryStorage:

@@ -94,6 +94,10 @@ class TelemetryContext:
 
         env = environment or os.getenv("RHO_AGENT_ENVIRONMENT", "development")
 
+        metadata: dict[str, Any] = {}
+        if config.labels:
+            metadata["labels"] = dict(config.labels)
+
         return cls(
             team_id=config.tenant.team_id,
             project_id=config.tenant.project_id,
@@ -101,6 +105,7 @@ class TelemetryContext:
             profile=profile,
             environment=env,
             agent_id=agent_id,
+            metadata=metadata,
         )
 
     def start_turn(self) -> str:

@@ -15,6 +15,7 @@ from rich.table import Table
 from ..control.services.control_plane import ControlPlane
 from ..control.services.local_signal_transport import LocalSignalTransport
 from ..observability.config import DEFAULT_TELEMETRY_DB
+from ..observability.storage.protocol import TelemetryStore
 from ..observability.storage.sqlite import TelemetryStorage
 from ..signals import SignalManager
 from .theme import THEME
@@ -32,7 +33,7 @@ class MonitorSession:
 
     def __init__(
         self,
-        storage: TelemetryStorage,
+        storage: TelemetryStore,
         sm: SignalManager,
         control_plane: ControlPlane,
         resolved_db: str,
