@@ -1,8 +1,6 @@
-"""Execution-based SQL evaluator for BIRD-Bench.
+"""Execution-based SQL evaluator for BIRD-Bench."""
 
-Compares predicted and gold SQL by executing both against the database
-and checking whether the result sets match (order-insensitive).
-"""
+from __future__ import annotations
 
 import sqlite3
 import signal
@@ -188,8 +186,8 @@ class BirdEvaluator:
             signal.signal(signal.SIGALRM, old_handler)
 
 
-def _normalize_value(val):
-    """Normalize a value for comparison. Treats None consistently."""
+def _normalize_value(val: object) -> object:
+    """Normalize a value for comparison."""
     if val is None:
         return None
     # Normalize numeric types for consistent comparison
@@ -229,7 +227,7 @@ def _compare_results(
         return Counter(pred_normalized) == Counter(gold_normalized)
 
 
-def _stringify(result: list[tuple], max_rows: int = 20) -> str:
+def _stringify(result: list[tuple[object, ...]], max_rows: int = 20) -> str:
     """Convert query result to a string for logging."""
     if not result:
         return "(empty result set)"

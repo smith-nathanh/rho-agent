@@ -34,10 +34,8 @@ from dotenv import load_dotenv
 from rho_agent.runtime import (
     AgentHandle,
     RuntimeOptions,
-    close_runtime,
     create_runtime,
     dispatch_prompt,
-    start_runtime,
 )
 
 
@@ -309,7 +307,7 @@ async def run_dispatcher(args: argparse.Namespace) -> int:
             },
         )
         runtime = create_runtime(system_prompt, options=options)
-        await start_runtime(runtime)
+        await runtime.start()
 
         user_prompt = build_user_prompt(incident)
         handle = dispatch_prompt(runtime, user_prompt)
@@ -358,7 +356,7 @@ async def run_dispatcher(args: argparse.Namespace) -> int:
 
     # Close all runtimes
     for _, handle in handles:
-        await close_runtime(handle.runtime, handle.status)
+        await handle.runtime.close(handle.status)
 
     # Build consolidated report
     consolidated = {

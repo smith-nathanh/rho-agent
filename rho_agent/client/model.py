@@ -1,5 +1,7 @@
 """Model client for streaming API calls via OpenAI-compatible API."""
 
+from __future__ import annotations
+
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -55,10 +57,7 @@ class Prompt:
 
 
 class ModelClient:
-    """Client for streaming API calls via OpenAI-compatible API.
-
-    Works with OpenAI, vLLM, or any OpenAI-compatible endpoint.
-    """
+    """Streaming model client for OpenAI-compatible APIs."""
 
     def __init__(
         self,
@@ -69,9 +68,11 @@ class ModelClient:
         service_tier: str | None = None,
         temperature: float | None = None,
         reasoning_effort: str | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> None:
         self._temperature = temperature
         self._reasoning_effort = reasoning_effort
+        self._response_format = response_format
         # For flex processing, use longer timeout (15 min) per OpenAI docs
         if timeout is None:
             timeout = 900.0 if service_tier == "flex" else 60.0
@@ -131,6 +132,9 @@ class ModelClient:
 
         if self._service_tier:
             kwargs["service_tier"] = self._service_tier
+
+        if self._response_format:
+            kwargs["response_format"] = self._response_format
 
         try:
             # Track tool calls being built
@@ -206,10 +210,7 @@ class ModelClient:
             yield StreamEvent(type="error", content=str(e))
 
     async def _stream_via_complete(self, prompt: Prompt) -> AsyncIterator[StreamEvent]:
-        """Non-streaming tool calling that yields StreamEvents.
-
-        Used for providers like Cerebras that don't support streaming with tools.
-        """
+        """Non-streaming fallback for providers that don't stream tool calls."""
         messages = self._build_messages(prompt)
 
         kwargs: dict[str, Any] = {
@@ -229,6 +230,9 @@ class ModelClient:
 
         if self._service_tier:
             kwargs["service_tier"] = self._service_tier
+
+        if self._response_format:
+            kwargs["response_format"] = self._response_format
 
         try:
             response = await self._client.chat.completions.create(**kwargs)
@@ -271,10 +275,7 @@ class ModelClient:
             yield StreamEvent(type="error", content=str(e))
 
     async def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
-        """Non-streaming completion for simple requests like summarization.
-
-        Returns (content, usage_dict).
-        """
+        """Non-streaming completion returning (content, usage_dict)."""
         try:
             kwargs: dict[str, Any] = {
                 "model": self._model,
@@ -288,6 +289,8 @@ class ModelClient:
                 kwargs["temperature"] = self._temperature
             if self._service_tier:
                 kwargs["service_tier"] = self._service_tier
+            if self._response_format:
+                kwargs["response_format"] = self._response_format
 
             response = await self._client.chat.completions.create(**kwargs)
             content = response.choices[0].message.content or ""

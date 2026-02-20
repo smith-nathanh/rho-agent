@@ -1,9 +1,6 @@
-"""Tool handlers for BIRD-Bench evaluation.
+"""Tool handlers for BIRD-Bench evaluation."""
 
-Two tools are provided to the agent:
-- execute_sql: Run SQL queries against the task database (read-write on a copy)
-- submit_sql: Submit the final SQL query for evaluation
-"""
+from __future__ import annotations
 
 import asyncio
 import sqlite3
@@ -74,6 +71,7 @@ class BirdSqliteHandler(ToolHandler):
         return self._connection
 
     def close(self) -> None:
+        """Close the underlying SQLite connection."""
         if self._connection is not None:
             self._connection.close()
             self._connection = None

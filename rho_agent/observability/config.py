@@ -1,5 +1,7 @@
 """Configuration for observability."""
 
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -67,7 +69,7 @@ class ObservabilityConfig:
     capture: CaptureConfig = field(default_factory=CaptureConfig)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ObservabilityConfig":
+    def from_dict(cls, data: dict[str, Any]) -> ObservabilityConfig:
         """Create config from dictionary (e.g., parsed YAML)."""
         obs_data = data.get("observability", data)
 
@@ -117,7 +119,7 @@ class ObservabilityConfig:
         )
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "ObservabilityConfig":
+    def from_yaml(cls, path: str | Path) -> ObservabilityConfig:
         """Load config from YAML file."""
         path = Path(path).expanduser()
         if not path.exists():
@@ -133,7 +135,7 @@ class ObservabilityConfig:
         cls,
         team_id: str | None = None,
         project_id: str | None = None,
-    ) -> "ObservabilityConfig":
+    ) -> ObservabilityConfig:
         """Create config from environment variables and CLI arguments.
 
         CLI arguments take precedence over environment variables.
@@ -177,7 +179,7 @@ class ObservabilityConfig:
         config_path: str | None = None,
         team_id: str | None = None,
         project_id: str | None = None,
-    ) -> "ObservabilityConfig":
+    ) -> ObservabilityConfig:
         """Load config with precedence: explicit path > CLI args > env vars > defaults.
 
         Args:

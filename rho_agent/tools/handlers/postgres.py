@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...config.databases import DatabaseConfig
+from .database_config import DatabaseConfig
 from .database import DatabaseHandler
 
 # Check for psycopg availability (prefer psycopg3, fallback to psycopg2)

@@ -20,7 +20,7 @@ class DaytonaReadHandler(ToolHandler):
     Standard agentic tool name: 'read'
     """
 
-    def __init__(self, manager: SandboxManager):
+    def __init__(self, manager: SandboxManager) -> None:
         self._manager = manager
 
     @property
@@ -56,6 +56,7 @@ class DaytonaReadHandler(ToolHandler):
         }
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Read file contents from the remote sandbox."""
         path_str = invocation.arguments.get("path", "")
         start_line = invocation.arguments.get("start_line", 1)
         end_line = invocation.arguments.get("end_line")
@@ -147,4 +148,3 @@ class DaytonaReadHandler(ToolHandler):
 
         except Exception as e:
             return ToolOutput(content=f"Error reading file: {e}", success=False)
-

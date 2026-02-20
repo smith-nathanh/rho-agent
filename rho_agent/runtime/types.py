@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import Any
+from copy import deepcopy
+from dataclasses import dataclass, field
+from types import TracebackType
+from typing import TYPE_CHECKING, Any
 
 from ..core.agent import Agent, AgentEvent
 from ..core.session import Session
@@ -12,13 +14,147 @@ from ..observability.processor import ObservabilityProcessor
 from ..tools.registry import ToolRegistry
 from .options import RuntimeOptions
 
+if TYPE_CHECKING:
+    from .protocol import Runtime
+
 ApprovalCallback = Callable[[str, dict[str, Any]], Awaitable[bool]]
 EventHandler = Callable[[AgentEvent], None | Awaitable[None]]
 
 
+def restore_runtime_state(runtime: Runtime, state: RunState) -> None:
+    """Mutate a runtime in-place from a serialized run snapshot.
+
+    Shared implementation used by both LocalRuntime and DaytonaRuntime.
+    """
+    runtime.session_id = state.session_id
+    runtime.options.session_id = state.session_id
+    if runtime.observability:
+        runtime.observability.context.session_id = state.session_id
+    runtime.session.system_prompt = state.system_prompt
+    runtime.session.history = deepcopy(state.history)
+    runtime.session.total_input_tokens = state.total_input_tokens
+    runtime.session.total_output_tokens = state.total_output_tokens
+    runtime.session.total_cached_tokens = state.total_cached_tokens
+    runtime.session.total_reasoning_tokens = state.total_reasoning_tokens
+    runtime.session.total_cost_usd = state.total_cost_usd
+    runtime.session.last_input_tokens = state.last_input_tokens
+
+
+def capture_runtime_state(runtime: Runtime, interruptions: list[ToolApprovalItem]) -> RunState:
+    """Build a serializable run snapshot from a runtime's current session.
+
+    Shared implementation used by both LocalRuntime and DaytonaRuntime.
+    """
+    return RunState(
+        session_id=runtime.session_id,
+        system_prompt=runtime.session.system_prompt,
+        history=deepcopy(runtime.session.history),
+        total_input_tokens=runtime.session.total_input_tokens,
+        total_output_tokens=runtime.session.total_output_tokens,
+        total_cached_tokens=runtime.session.total_cached_tokens,
+        total_reasoning_tokens=runtime.session.total_reasoning_tokens,
+        total_cost_usd=runtime.session.total_cost_usd,
+        last_input_tokens=runtime.session.last_input_tokens,
+        pending_approvals=interruptions,
+    )
+
+
 @dataclass
-class AgentRuntime:
-    """Runtime bundle for execution."""
+class SessionUsage:
+    """Extracted token/cost usage from a session."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+def session_usage(session: Session) -> SessionUsage:
+    """Extract usage from a Session into a SessionUsage."""
+    return SessionUsage(
+        input_tokens=session.total_input_tokens,
+        output_tokens=session.total_output_tokens,
+        cost_usd=session.total_cost_usd,
+    )
+
+
+@dataclass
+class ToolApprovalItem:
+    """Tool call paused for out-of-band approval."""
+
+    tool_call_id: str
+    tool_name: str
+    tool_args: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON persistence."""
+        return {
+            "tool_call_id": self.tool_call_id,
+            "tool_name": self.tool_name,
+            "tool_args": self.tool_args,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ToolApprovalItem:
+        """Deserialize from a plain dict."""
+        return cls(
+            tool_call_id=str(data["tool_call_id"]),
+            tool_name=str(data["tool_name"]),
+            tool_args=dict(data.get("tool_args", {})),
+        )
+
+
+@dataclass
+class RunState:
+    """Serializable state envelope for interrupted runs."""
+
+    session_id: str
+    system_prompt: str
+    history: list[dict[str, Any]]
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cached_tokens: int = 0
+    total_reasoning_tokens: int = 0
+    total_cost_usd: float = 0.0
+    last_input_tokens: int = 0
+    pending_approvals: list[ToolApprovalItem] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON persistence."""
+        return {
+            "session_id": self.session_id,
+            "system_prompt": self.system_prompt,
+            "history": self.history,
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "total_cached_tokens": self.total_cached_tokens,
+            "total_reasoning_tokens": self.total_reasoning_tokens,
+            "total_cost_usd": self.total_cost_usd,
+            "last_input_tokens": self.last_input_tokens,
+            "pending_approvals": [item.to_dict() for item in self.pending_approvals],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RunState:
+        """Deserialize from a plain dict."""
+        return cls(
+            session_id=str(data["session_id"]),
+            system_prompt=str(data["system_prompt"]),
+            history=[dict(message) for message in data.get("history", [])],
+            total_input_tokens=int(data.get("total_input_tokens", 0)),
+            total_output_tokens=int(data.get("total_output_tokens", 0)),
+            total_cached_tokens=int(data.get("total_cached_tokens", 0)),
+            total_reasoning_tokens=int(data.get("total_reasoning_tokens", 0)),
+            total_cost_usd=float(data.get("total_cost_usd", 0.0)),
+            last_input_tokens=int(data.get("last_input_tokens", 0)),
+            pending_approvals=[
+                ToolApprovalItem.from_dict(item) for item in data.get("pending_approvals", [])
+            ],
+        )
+
+
+@dataclass
+class LocalRuntime:
+    """Concrete local runtime — satisfies the ``Runtime`` protocol."""
 
     agent: Agent
     session: Session
@@ -30,6 +166,38 @@ class AgentRuntime:
     approval_callback: ApprovalCallback | None = None
     cancel_check: Callable[[], bool] | None = None
     observability: ObservabilityProcessor | None = None
+    close_status: str = "completed"
+
+    async def __aenter__(self) -> LocalRuntime:
+        await self.start()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        status = "error" if exc_type is not None else self.close_status
+        await self.close(status)
+
+    async def start(self) -> None:
+        """Start runtime-level telemetry session if configured."""
+        if self.observability:
+            await self.observability.start_session()
+
+    async def close(self, status: str = "completed") -> None:
+        """Close runtime-level telemetry session if configured."""
+        if self.observability:
+            await self.observability.end_session(status)
+
+    def restore_state(self, state: RunState) -> None:
+        """Mutate runtime in-place from a serialized run snapshot."""
+        restore_runtime_state(self, state)
+
+    def capture_state(self, interruptions: list[ToolApprovalItem]) -> RunState:
+        """Build a serializable run snapshot from the current runtime session."""
+        return capture_runtime_state(self, interruptions)
 
 
 @dataclass
@@ -39,4 +207,6 @@ class RunResult:
     text: str
     events: list[AgentEvent]
     status: str
-    usage: dict[str, int]
+    usage: dict[str, int | float]
+    interruptions: list[ToolApprovalItem] = field(default_factory=list)
+    state: RunState | None = None

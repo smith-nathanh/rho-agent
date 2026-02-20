@@ -17,7 +17,7 @@ class DaytonaGlobHandler(ToolHandler):
     Standard agentic tool name: 'glob'
     """
 
-    def __init__(self, manager: SandboxManager):
+    def __init__(self, manager: SandboxManager) -> None:
         self._manager = manager
 
     @property
@@ -50,6 +50,7 @@ class DaytonaGlobHandler(ToolHandler):
         }
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Find files matching a glob pattern in the remote sandbox."""
         glob_pattern = invocation.arguments.get("pattern", "")
         path_str = invocation.arguments.get("path", "")
         max_results = invocation.arguments.get("max_results", DEFAULT_MAX_RESULTS)
@@ -76,7 +77,9 @@ class DaytonaGlobHandler(ToolHandler):
             # If pattern contains /, use -path; otherwise use -name
             if "/" in glob_pattern:
                 match_flag = "-path"
-                find_pattern = f"*/{glob_pattern}" if not glob_pattern.startswith("*") else glob_pattern
+                find_pattern = (
+                    f"*/{glob_pattern}" if not glob_pattern.startswith("*") else glob_pattern
+                )
             else:
                 match_flag = "-name"
                 find_pattern = glob_pattern
@@ -93,7 +96,9 @@ class DaytonaGlobHandler(ToolHandler):
                 output = (response.result or "").strip()
                 if "No such file" in output:
                     return ToolOutput(content=f"Directory not found: {path_str}", success=False)
-                return ToolOutput(content=f"Find failed: {output or 'Unknown error'}", success=False)
+                return ToolOutput(
+                    content=f"Find failed: {output or 'Unknown error'}", success=False
+                )
 
             output = response.result.strip()
             if not output:
@@ -135,4 +140,3 @@ class DaytonaGlobHandler(ToolHandler):
 
         except Exception as e:
             return ToolOutput(content=f"Error finding files: {e}", success=False)
-

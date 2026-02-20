@@ -22,7 +22,7 @@ class DaytonaEditHandler(ToolHandler):
     Standard agentic tool name: 'edit'
     """
 
-    def __init__(self, manager: SandboxManager):
+    def __init__(self, manager: SandboxManager) -> None:
         self._manager = manager
 
     @property
@@ -63,6 +63,7 @@ class DaytonaEditHandler(ToolHandler):
         }
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Download, edit, and re-upload a remote file."""
         path_str = invocation.arguments.get("path", "")
         old_string = invocation.arguments.get("old_string", "")
         new_string = invocation.arguments.get("new_string", "")

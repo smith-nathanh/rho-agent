@@ -18,7 +18,7 @@ class DaytonaGrepHandler(ToolHandler):
     Standard agentic tool name: 'grep'
     """
 
-    def __init__(self, manager: SandboxManager):
+    def __init__(self, manager: SandboxManager) -> None:
         self._manager = manager
         self._has_rg: bool | None = None  # Cached after first check
 
@@ -67,6 +67,7 @@ class DaytonaGrepHandler(ToolHandler):
         }
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Search for a pattern in remote sandbox files."""
         pattern = invocation.arguments.get("pattern", "")
         path_str = invocation.arguments.get("path", "")
         glob_pattern = invocation.arguments.get("glob")
@@ -84,8 +85,13 @@ class DaytonaGrepHandler(ToolHandler):
 
             # Try rg first (faster), fall back to grep
             cmd = await self._build_command(
-                sandbox, pattern, path_str, glob_pattern,
-                ignore_case, context_lines, max_matches,
+                sandbox,
+                pattern,
+                path_str,
+                glob_pattern,
+                ignore_case,
+                context_lines,
+                max_matches,
             )
 
             response = await sandbox.process.exec(cmd, timeout=30)
@@ -144,7 +150,7 @@ class DaytonaGrepHandler(ToolHandler):
 
     async def _build_command(
         self,
-        sandbox,
+        sandbox: Any,
         pattern: str,
         path: str,
         glob_pattern: str | None,
@@ -168,7 +174,13 @@ class DaytonaGrepHandler(ToolHandler):
         )
 
     def _build_rg_command(
-        self, pattern, path, glob_pattern, ignore_case, context_lines, max_matches
+        self,
+        pattern: str,
+        path: str,
+        glob_pattern: str | None,
+        ignore_case: bool,
+        context_lines: int,
+        max_matches: int,
     ) -> str:
         parts = ["rg", "--line-number", "--with-filename", "--no-heading", "--color=never"]
 
@@ -189,7 +201,13 @@ class DaytonaGrepHandler(ToolHandler):
         return " ".join(parts)
 
     def _build_grep_command(
-        self, pattern, path, glob_pattern, ignore_case, context_lines, max_matches
+        self,
+        pattern: str,
+        path: str,
+        glob_pattern: str | None,
+        ignore_case: bool,
+        context_lines: int,
+        max_matches: int,
     ) -> str:
         parts = ["grep", "-rn", "--color=never"]
 
@@ -228,5 +246,3 @@ def _is_context_line(line: str) -> bool:
     if colon_pos == -1:
         return True
     return dash_pos < colon_pos
-
-

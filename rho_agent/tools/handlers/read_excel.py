@@ -1,11 +1,17 @@
 """Read Excel file contents handler."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any
 
-from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.worksheet import Worksheet
+try:
+    from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
+
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
 
@@ -13,7 +19,7 @@ from ..base import ToolHandler, ToolInvocation, ToolOutput
 DEFAULT_MAX_ROWS = 500
 
 
-def is_row_visible(ws: Worksheet, row: int) -> bool:
+def is_row_visible(ws: Any, row: int) -> bool:
     """Check if a row is visible (not hidden or in a collapsed group)."""
     rd = ws.row_dimensions.get(row)
     if rd is None:
@@ -26,7 +32,7 @@ def is_row_visible(ws: Worksheet, row: int) -> bool:
     return True
 
 
-def is_col_visible(ws: Worksheet, col: int) -> bool:
+def is_col_visible(ws: Any, col: int) -> bool:
     """Check if a column is visible (not hidden or in a collapsed group)."""
     col_letter = get_column_letter(col)
     cd = ws.column_dimensions.get(col_letter)
@@ -53,6 +59,10 @@ def format_cell_value(value: Any) -> str:
 
 class ReadExcelHandler(ToolHandler):
     """Read and inspect Excel files (.xlsx, .xls)."""
+
+    @property
+    def is_enabled(self) -> bool:
+        return OPENPYXL_AVAILABLE
 
     @property
     def name(self) -> str:
@@ -103,6 +113,7 @@ class ReadExcelHandler(ToolHandler):
         }
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Dispatch to the requested Excel action."""
         path_str = invocation.arguments.get("path", "")
         action = invocation.arguments.get("action", "")
 
@@ -137,7 +148,7 @@ class ReadExcelHandler(ToolHandler):
         except Exception as e:
             return ToolOutput(content=f"Error reading Excel file: {e}", success=False)
 
-    def _list_sheets(self, wb) -> ToolOutput:
+    def _list_sheets(self, wb: Any) -> ToolOutput:
         """List all sheet names."""
         sheets = wb.sheetnames
         content = f"Sheets ({len(sheets)}):\n"
@@ -149,7 +160,7 @@ class ReadExcelHandler(ToolHandler):
             metadata={"sheet_count": len(sheets), "sheets": sheets},
         )
 
-    def _get_info(self, wb, path: Path) -> ToolOutput:
+    def _get_info(self, wb: Any, path: Path) -> ToolOutput:
         """Get workbook metadata."""
         lines = [f"File: {path.name}", f"Sheets: {len(wb.sheetnames)}", ""]
 
@@ -166,7 +177,7 @@ class ReadExcelHandler(ToolHandler):
             metadata={"sheets": wb.sheetnames},
         )
 
-    def _read_sheet(self, wb, args: dict[str, Any]) -> ToolOutput:
+    def _read_sheet(self, wb: Any, args: dict[str, Any]) -> ToolOutput:
         """Read contents of a sheet."""
         sheet_name = args.get("sheet")
         start_row = args.get("start_row", 1)

@@ -37,12 +37,10 @@ import streamlit as st
 
 from rho_agent.runtime import (
     RuntimeOptions,
-    close_runtime,
     create_runtime,
     run_prompt,
-    start_runtime,
 )
-from rho_agent.runtime.types import AgentRuntime
+from rho_agent.runtime.types import LocalRuntime
 
 # Config
 DB_PATH = Path(__file__).parent / "sample_data.db"
@@ -83,7 +81,7 @@ def ensure_demo_db_config() -> None:
     os.environ["RHO_AGENT_DB_CONFIG"] = str(DB_CONFIG_PATH)
 
 
-def get_runtime() -> AgentRuntime:
+def get_runtime() -> LocalRuntime:
     """Get or create the session runtime."""
     runtime = st.session_state.runtime
     if runtime is None:
@@ -185,7 +183,7 @@ def render_chat_tab() -> None:
                 async def stream_events():
                     nonlocal response_text, tool_calls, current_tool_placeholder
                     runtime = get_runtime()
-                    await start_runtime(runtime)
+                    await runtime.start()
 
                     async def on_event(event):
                         nonlocal response_text, tool_calls, current_tool_placeholder
@@ -403,7 +401,7 @@ def main() -> None:
         if st.button("Clear Conversation"):
             runtime = st.session_state.get("runtime")
             if runtime is not None:
-                asyncio.run(close_runtime(runtime, "completed"))
+                asyncio.run(runtime.close("completed"))
                 st.session_state.runtime = None
             st.session_state.messages = []
             st.rerun()

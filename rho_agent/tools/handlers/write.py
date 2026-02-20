@@ -1,30 +1,12 @@
-"""File writing handler with configurable restrictions.
+"""File writing handler with configurable restrictions."""
 
-Supports two modes:
-- CREATE_ONLY: Can only create new files, blocks overwrites and sensitive paths
-- FULL: Full write access for sandboxed container environments
-"""
+from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
-
-# Sensitive paths blocked in CREATE_ONLY mode
-SENSITIVE_PATTERNS = [
-    ".bashrc",
-    ".zshrc",
-    ".profile",
-    ".bash_profile",
-    ".ssh/",
-    ".gnupg/",
-    ".aws/",
-    ".config/",
-    "/etc/",
-    "/usr/",
-    "/bin/",
-    "/sbin/",
-]
+from .paths import is_path_sensitive
 
 
 class WriteHandler(ToolHandler):
@@ -97,6 +79,7 @@ class WriteHandler(ToolHandler):
         }
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Write content to a file."""
         path_str = invocation.arguments.get("path", "")
         content = invocation.arguments.get("content", "")
 
@@ -111,13 +94,9 @@ class WriteHandler(ToolHandler):
         # Safety checks for create_only mode
         if self._create_only:
             # Check sensitive paths
-            path_str_lower = str(path).lower()
-            for pattern in SENSITIVE_PATTERNS:
-                if pattern in path_str_lower:
-                    return ToolOutput(
-                        content=f"Cannot write to sensitive location: {path}",
-                        success=False,
-                    )
+            sensitive, reason = is_path_sensitive(path)
+            if sensitive:
+                return ToolOutput(content=reason, success=False)
 
             # Check if file already exists
             if path.exists():

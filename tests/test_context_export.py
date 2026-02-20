@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from rho_agent.context_export import serialize_session, write_context_file
+from rho_agent.cli.context_export import serialize_session, write_context_file
 
 
 def test_serialize_session_empty_messages() -> None:

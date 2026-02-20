@@ -2,54 +2,73 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 from ..capabilities import CapabilityProfile
-from ..capabilities.factory import ToolFactory
-from .factory import resolve_profile
-from .registry_extensions import register_runtime_tools
-from .types import AgentRuntime
+from .builder import build_runtime_registry
+from .factory import _auto_approve, _reject_all
+from .types import ApprovalCallback, LocalRuntime
+
+
+def _resolve_reconfigured_approval_callback(
+    current_callback: ApprovalCallback | None,
+    auto_approve: bool | None,
+) -> ApprovalCallback | None:
+    """Adjust default approval callback when auto_approve is reconfigured."""
+    if auto_approve is None:
+        return current_callback
+
+    if current_callback in (_auto_approve, _reject_all, None):
+        return _auto_approve if auto_approve else _reject_all
+
+    return current_callback
 
 
 def reconfigure_runtime(
-    runtime: AgentRuntime,
+    runtime: LocalRuntime,
     *,
     profile: str | CapabilityProfile | None = None,
     working_dir: str | None = None,
     auto_approve: bool | None = None,
     enable_delegate: bool | None = None,
 ) -> CapabilityProfile:
-    """Rebuild runtime registry/options and atomically swap active tool set."""
-    capability_profile = resolve_profile(profile if profile is not None else runtime.options.profile)
-    updated_options = replace(
-        runtime.options,
-        profile=capability_profile,
-        working_dir=runtime.options.working_dir if working_dir is None else working_dir,
-        auto_approve=runtime.options.auto_approve if auto_approve is None else auto_approve,
-        enable_delegate=(
-            runtime.options.enable_delegate if enable_delegate is None else enable_delegate
-        ),
-    )
+    """Rebuild runtime registry/options via shared builder and swap active tool set."""
+    # Daytona requires a different runtime type; cannot switch to/from it via reconfigure.
+    resolved_name = profile if isinstance(profile, str) else getattr(profile, "name", None)
+    if resolved_name == "daytona" or runtime.profile_name == "daytona":
+        raise ValueError(
+            "Cannot reconfigure to/from 'daytona' profile. "
+            "Daytona requires a dedicated runtime; restart with --profile daytona instead."
+        )
 
-    registry = ToolFactory(capability_profile).create_registry(working_dir=updated_options.working_dir)
     parent_agent_cancel_check = getattr(runtime.agent, "is_cancelled", None)
     if not callable(parent_agent_cancel_check):
         parent_agent_cancel_check = None
-    register_runtime_tools(
-        registry,
-        runtime_session=runtime.session,
-        runtime_options=updated_options,
-        approval_callback=runtime.approval_callback,
-        cancel_check=runtime.cancel_check,
-        parent_agent_cancel_check=parent_agent_cancel_check,
+    updated_approval_callback = _resolve_reconfigured_approval_callback(
+        runtime.approval_callback,
+        auto_approve,
     )
 
-    runtime.registry = registry
-    runtime.agent.set_registry(registry)
-    runtime.profile_name = capability_profile.name
-    runtime.options = updated_options
+    build = build_runtime_registry(
+        runtime_session=runtime.session,
+        runtime_options=runtime.options,
+        approval_callback=updated_approval_callback,
+        cancel_check=runtime.cancel_check,
+        parent_agent_cancel_check=parent_agent_cancel_check,
+        profile=profile,
+        working_dir=working_dir,
+        auto_approve=auto_approve,
+        enable_delegate=enable_delegate,
+    )
+
+    runtime.registry = build.registry
+    runtime.agent.set_registry(build.registry)
+    runtime.profile_name = build.capability_profile.name
+    runtime.options = build.runtime_options
+    runtime.approval_callback = updated_approval_callback
+    set_approval_callback = getattr(runtime.agent, "set_approval_callback", None)
+    if callable(set_approval_callback):
+        set_approval_callback(updated_approval_callback)
 
     if runtime.observability and runtime.observability.context:
-        runtime.observability.context.profile = capability_profile.name
+        runtime.observability.context.profile = build.capability_profile.name
 
-    return capability_profile
+    return build.capability_profile

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Mapping
+from typing import Any, Mapping
 
 
 class SandboxManager:
@@ -35,7 +35,7 @@ class SandboxManager:
     def working_dir(self) -> str:
         return self._working_dir
 
-    async def get_sandbox(self):
+    async def get_sandbox(self) -> Any:
         """Lazily create and return the sandbox (thread-safe)."""
         if self._sandbox is not None:
             return self._sandbox
@@ -91,7 +91,7 @@ class SandboxManager:
         cls,
         working_dir: str = "/home/daytona",
         env: Mapping[str, str] | None = None,
-    ) -> "SandboxManager":
+    ) -> SandboxManager:
         """Create a SandboxManager configured from environment variables."""
         resolved_env = env if env is not None else os.environ
         image = resolved_env.get("DAYTONA_SANDBOX_IMAGE", "ubuntu:latest")

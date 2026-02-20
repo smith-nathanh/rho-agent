@@ -1,37 +1,13 @@
-"""Entry point for running rho-agent inside Harbor containers.
+"""Entry point for running rho-agent inside Harbor containers."""
 
-This module runs rho-agent with unrestricted eval-mode tools using the
-capability profile system. The container provides sandboxing, so tool-level
-restrictions are unnecessary.
-
-Usage:
-    python -m rho_agent.eval.harbor.runner "<instruction>" [working_dir] [--bash-only]
-
-Options:
-    --bash-only           Only provide bash tool (no Read, Grep, etc.)
-
-Environment variables:
-    OPENAI_MODEL              - Model to use (default: gpt-5-mini)
-    OPENAI_BASE_URL           - API base URL (default: OpenAI)
-    RHO_AGENT_MODEL           - Override for OPENAI_MODEL
-    RHO_AGENT_BASE_URL        - Override for OPENAI_BASE_URL
-    RHO_AGENT_SERVICE_TIER    - OpenAI service tier: "flex" for lower cost (default: None)
-    RHO_AGENT_REASONING_EFFORT - Reasoning effort: "low", "medium", "high" (default: None)
-    RHO_AGENT_CHUNK_TIMEOUT   - Streaming chunk timeout in seconds (default: 180)
-    RHO_AGENT_INITIAL_TIMEOUT - Initial response timeout in seconds (default: 600)
-    RHO_AGENT_COST_CEILING_USD - Max cost per task in USD, 0 = disabled (default: 0)
-    OPENAI_API_KEY            - API key (required)
-    RHO_AGENT_ENABLE_REVIEWER - Set to "1" to enable post-execution review
-    RHO_AGENT_REVIEWER_MAX_ITERATIONS - Max review-revise loops (default: 1)
-    RHO_AGENT_CONFIRM_DONE    - Set to "1" to require CONFIRM_DONE after actor completes
-    RHO_AGENT_CONFIRM_DONE_MAX - Max confirm retries before proceeding (default: 3)
-"""
+from __future__ import annotations
 
 import asyncio
 import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -70,7 +46,7 @@ You are a code reviewer evaluating whether an AI agent successfully completed a 
 Be concise and direct. Focus on whether the task requirements were met."""
 
 
-def format_tool_call(name: str, args: dict | None) -> str:
+def format_tool_call(name: str, args: dict[str, Any] | None) -> str:
     """Format tool name and args for console logging."""
     if not args:
         return f"[Tool: {name}]"
@@ -101,7 +77,7 @@ def format_event_trace(events: list[AgentEvent]) -> str:
     return "\n\n".join(lines)
 
 
-async def auto_approve(tool_name: str, tool_args: dict) -> bool:
+async def auto_approve(tool_name: str, tool_args: dict[str, Any]) -> bool:
     """Auto-approve all tool calls in eval mode."""
     return True
 

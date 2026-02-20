@@ -13,10 +13,8 @@ from dotenv import load_dotenv
 
 from rho_agent.runtime import (
     RuntimeOptions,
-    close_runtime,
     create_runtime,
     run_prompt,
-    start_runtime,
 )
 
 
@@ -49,7 +47,7 @@ async def run_agent_with_tools(
     tool_calls = []
 
     status = "completed"
-    await start_runtime(runtime)
+    await runtime.start()
     try:
         result = await run_prompt(runtime, task)
         status = result.status
@@ -57,7 +55,7 @@ async def run_agent_with_tools(
         status = "error"
         raise
     finally:
-        await close_runtime(runtime, status)
+        await runtime.close(status)
     for event in result.events:
         if event.type == "text" and event.content:
             print(event.content, end="", flush=True)

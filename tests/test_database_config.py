@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from rho_agent.config.databases import (
+from rho_agent.tools.handlers.database_config import (
     DatabaseConfig,
     load_database_config,
     _interpolate_env_vars,

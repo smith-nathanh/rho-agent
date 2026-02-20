@@ -74,6 +74,7 @@ class DelegateHandler(ToolHandler):
         return self._requires_approval
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Spawn a child runtime and return its final output."""
         instruction = str(invocation.arguments.get("instruction", "")).strip()
         full_context = bool(invocation.arguments.get("full_context", False))
 
@@ -96,7 +97,6 @@ class DelegateHandler(ToolHandler):
 
         # Local import to avoid runtime import cycles during bootstrap.
         from ...runtime.factory import create_runtime
-        from ...runtime.lifecycle import close_runtime, start_runtime
         from ...runtime.run import run_prompt
 
         signal_manager = SignalManager()
@@ -136,25 +136,24 @@ class DelegateHandler(ToolHandler):
             )
             child_registered = True
 
-        status = "error"
         started = monotonic()
         try:
             if child_registered:
                 # Approval has already happened at this point; child execution starts now.
                 print(f"[delegate] Sub-agent {child_session_id[:8]} started", flush=True)
-            await start_runtime(child_runtime)
-            result = await run_prompt(child_runtime, instruction)
-            status = result.status
-            return ToolOutput(
-                content=result.text,
-                success=result.status == "completed",
-                metadata={
-                    "child_usage": result.usage,
-                    "child_status": result.status,
-                    "child_session_id": child_session_id,
-                    "duration_seconds": round(monotonic() - started, 2),
-                },
-            )
+            async with child_runtime:
+                result = await run_prompt(child_runtime, instruction)
+                child_runtime.close_status = result.status
+                return ToolOutput(
+                    content=result.text,
+                    success=result.status == "completed",
+                    metadata={
+                        "child_usage": result.usage,
+                        "child_status": result.status,
+                        "child_session_id": child_session_id,
+                        "duration_seconds": round(monotonic() - started, 2),
+                    },
+                )
         except Exception as exc:
             return ToolOutput(
                 content=f"Delegate child failed: {type(exc).__name__}: {exc}",
@@ -166,6 +165,5 @@ class DelegateHandler(ToolHandler):
                 },
             )
         finally:
-            await close_runtime(child_runtime, status=status)
             if child_registered:
                 signal_manager.deregister(child_session_id)

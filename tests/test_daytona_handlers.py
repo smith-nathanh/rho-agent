@@ -137,7 +137,9 @@ class TestDaytonaBashHandler:
         h = DaytonaBashHandler(manager)
         await h.handle(_invocation("bash", command="ls", working_dir="/tmp"))
         sandbox.process.exec.assert_called_once_with(
-            "ls", cwd="/tmp", timeout=300,
+            "ls",
+            cwd="/tmp",
+            timeout=300,
         )
 
 
@@ -296,9 +298,7 @@ class TestDaytonaGlobHandler:
             "/workspace/src/main.py\n/workspace/src/utils.py\n", 0
         )
         h = DaytonaGlobHandler(manager)
-        result = await h.handle(
-            _invocation("glob", pattern="*.py", path="/workspace")
-        )
+        result = await h.handle(_invocation("glob", pattern="*.py", path="/workspace"))
         assert result.success is True
         assert "src/main.py" in result.content
         assert "2 files found" in result.content
@@ -306,9 +306,7 @@ class TestDaytonaGlobHandler:
     async def test_no_files(self, manager, sandbox):
         sandbox.process.exec.return_value = _make_exec_response("", 0)
         h = DaytonaGlobHandler(manager)
-        result = await h.handle(
-            _invocation("glob", pattern="*.xyz", path="/workspace")
-        )
+        result = await h.handle(_invocation("glob", pattern="*.xyz", path="/workspace"))
         assert result.success is True
         assert "No files found" in result.content
 
@@ -337,9 +335,7 @@ class TestDaytonaGrepHandler:
             _make_exec_response("src/main.py:10:import os\n", 0),
         ]
         h = DaytonaGrepHandler(manager)
-        result = await h.handle(
-            _invocation("grep", pattern="import os", path="/workspace")
-        )
+        result = await h.handle(_invocation("grep", pattern="import os", path="/workspace"))
         assert result.success is True
         assert "import os" in result.content
         assert "1 matches" in result.content
@@ -350,9 +346,7 @@ class TestDaytonaGrepHandler:
             _make_exec_response("", 1),
         ]
         h = DaytonaGrepHandler(manager)
-        result = await h.handle(
-            _invocation("grep", pattern="nonexistent", path="/workspace")
-        )
+        result = await h.handle(_invocation("grep", pattern="nonexistent", path="/workspace"))
         assert result.success is True
         assert "No matches" in result.content
 
@@ -363,9 +357,7 @@ class TestDaytonaGrepHandler:
             _make_exec_response("file.py:5:match\n", 0),
         ]
         h = DaytonaGrepHandler(manager)
-        result = await h.handle(
-            _invocation("grep", pattern="match", path="/workspace")
-        )
+        result = await h.handle(_invocation("grep", pattern="match", path="/workspace"))
         assert result.success is True
         # Verify grep was used (second call)
         call_args = sandbox.process.exec.call_args_list[1]

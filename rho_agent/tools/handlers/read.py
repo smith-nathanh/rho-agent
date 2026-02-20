@@ -1,5 +1,7 @@
 """Read file contents handler."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any
 
@@ -114,6 +116,7 @@ class ReadHandler(ToolHandler):
         }
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Read file contents with optional line range."""
         path_str = invocation.arguments.get("path", "")
         start_line = invocation.arguments.get("start_line", 1)
         end_line = invocation.arguments.get("end_line")

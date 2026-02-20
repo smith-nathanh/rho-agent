@@ -1,8 +1,6 @@
-"""Daytona cloud sandbox handlers.
+"""Daytona cloud sandbox handlers."""
 
-All tool execution happens in a remote Daytona VM while the agent
-process stays local (LLM conversation loop + tool dispatch only).
-"""
+from __future__ import annotations
 
 from .bash import DaytonaBashHandler
 from .edit import DaytonaEditHandler

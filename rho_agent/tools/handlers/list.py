@@ -1,5 +1,7 @@
 """List directory contents handler."""
 
+from __future__ import annotations
+
 import os
 import stat
 from datetime import datetime
@@ -52,6 +54,7 @@ class ListHandler(ToolHandler):
         }
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """List directory contents."""
         path_str = invocation.arguments.get("path", "")
         show_hidden = invocation.arguments.get("show_hidden", False)
         recursive = invocation.arguments.get("recursive", False)

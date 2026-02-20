@@ -1,18 +1,6 @@
-"""Bash execution handler with configurable restrictions.
+"""Bash execution handler with configurable restrictions."""
 
-Supports two modes:
-- RESTRICTED: Only allowlisted read-only commands (grep, cat, find, etc.)
-- UNRESTRICTED: Any command allowed (for sandboxed container environments)
-
-Output format Codex-style JSON with stdout+stderr combined, exit code, and duration:
-{
-  "output": "<stdout + stderr>",
-  "metadata": {
-    "exit_code": 0,
-    "duration_seconds": 1.2
-  }
-}
-"""
+from __future__ import annotations
 
 import asyncio
 import json
@@ -321,7 +309,7 @@ class BashHandler(ToolHandler):
         }
 
     def _format_output(self, output: str, exit_code: int, duration_seconds: float) -> str:
-        """Format output as JSON"""
+        """Format output as Codex-style JSON."""
         return json.dumps(
             {
                 "output": output,

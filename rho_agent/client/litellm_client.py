@@ -1,17 +1,6 @@
-"""LiteLLM client for multi-provider model support with cost tracking.
+"""LiteLLM client for multi-provider model support with cost tracking."""
 
-This client wraps LiteLLM to provide the same interface as ModelClient
-while adding support for:
-- Multiple providers (OpenAI, Anthropic, Google, etc.)
-- Automatic cost tracking via LiteLLM's pricing database
-- Provider-specific parameter handling
-- Chunk timeout for long-running requests (reasoning_effort)
-
-Usage:
-    client = LiteLLMClient(model="anthropic/claude-3-5-sonnet-20241022")
-    async for event in client.stream(prompt):
-        ...
-"""
+from __future__ import annotations
 
 import asyncio
 import json
@@ -22,14 +11,7 @@ from .model import Prompt, StreamEvent, ToolCall
 
 
 class LiteLLMClient:
-    """Client for API calls via LiteLLM.
-
-    Provides the same interface as ModelClient but uses LiteLLM
-    for multi-provider support and cost tracking.
-
-    Uses streaming with chunk timeout to handle long-running requests
-    (e.g., reasoning_effort=high) while still detecting stuck APIs.
-    """
+    """Multi-provider model client via LiteLLM with cost tracking."""
 
     # Default chunk timeout: how long to wait for next chunk before aborting
     DEFAULT_CHUNK_TIMEOUT: float = 180.0  # 3 minutes between chunks
@@ -45,17 +27,8 @@ class LiteLLMClient:
         initial_timeout: float | None = None,
         temperature: float | None = None,
         reasoning_effort: str | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> None:
-        """Initialize the LiteLLM client.
-
-        Args:
-            model: Model identifier (e.g., "openai/gpt-5-mini", "anthropic/claude-3-5-sonnet").
-            api_key: Optional API key (falls back to environment variables).
-            chunk_timeout: Max seconds to wait for next chunk (default: 180).
-            initial_timeout: Max seconds to wait for first chunk (default: 600).
-            temperature: Sampling temperature.
-            reasoning_effort: Reasoning effort level for compatible models.
-        """
         try:
             import litellm
 
@@ -72,6 +45,7 @@ class LiteLLMClient:
         self._initial_timeout = initial_timeout or self.DEFAULT_INITIAL_TIMEOUT
         self._temperature = temperature
         self._reasoning_effort = reasoning_effort
+        self._response_format = response_format
 
         # Disable LiteLLM's internal logging to reduce noise
         litellm.suppress_debug_info = True
@@ -122,15 +96,13 @@ class LiteLLMClient:
         if prompt and prompt.tools:
             kwargs["tools"] = prompt.tools
 
+        if self._response_format:
+            kwargs["response_format"] = self._response_format
+
         return kwargs
 
     def _extract_usage(self, usage_obj: Any, response: Any = None) -> dict[str, Any]:
-        """Extract usage dict from usage object including cost.
-
-        Args:
-            usage_obj: The usage object from the API response.
-            response: Optional full response object for cost calculation.
-        """
+        """Extract usage dict from usage object including cost."""
         usage: dict[str, Any] = {
             "input_tokens": 0,
             "output_tokens": 0,
@@ -180,12 +152,7 @@ class LiteLLMClient:
         return usage
 
     async def stream(self, prompt: Prompt) -> AsyncIterator[StreamEvent]:
-        """Process a prompt and yield events with streaming.
-
-        Uses chunk timeout to handle long-running requests while
-        detecting stuck APIs. If no chunk is received within chunk_timeout
-        seconds, the request is aborted.
-        """
+        """Stream a response from the model, with per-chunk timeout."""
         kwargs = self._build_kwargs(prompt=prompt, stream=True)
 
         try:
@@ -256,11 +223,7 @@ class LiteLLMClient:
             yield StreamEvent(type="error", content=str(e))
 
     async def _iter_with_timeout(self, response: Any) -> AsyncIterator[Any]:
-        """Iterate over streaming response with chunk timeout.
-
-        Raises asyncio.TimeoutError if no chunk is received within
-        chunk_timeout seconds.
-        """
+        """Iterate over streaming response with chunk timeout."""
         aiter = response.__aiter__()
         while True:
             try:
@@ -273,10 +236,7 @@ class LiteLLMClient:
                 break
 
     async def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
-        """Non-streaming completion for simple requests.
-
-        Returns (content, usage_dict) where usage_dict may include cost_usd.
-        """
+        """Non-streaming completion returning (content, usage_dict)."""
         try:
             kwargs = self._build_kwargs(messages=messages, stream=False)
             # Add a generous timeout for non-streaming calls

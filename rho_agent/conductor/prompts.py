@@ -1,6 +1,26 @@
-"""Prompt templates for conductor agents (planner, worker, reviewer)."""
+"""Prompt templates and formatting helpers for conductor agents."""
 
 from __future__ import annotations
+
+from .models import VerificationConfig
+
+
+def format_verification(verification: VerificationConfig) -> str:
+    """Format verification commands for prompt templates."""
+    lines = []
+    if verification.test_cmd:
+        lines.append(f"- Test: `{verification.test_cmd}`")
+    if verification.lint_cmd:
+        lines.append(f"- Lint: `{verification.lint_cmd}`")
+    if verification.typecheck_cmd:
+        lines.append(f"- Typecheck: `{verification.typecheck_cmd}`")
+    return "\n".join(lines) if lines else "No verification commands configured."
+
+
+def format_acceptance_criteria(criteria: list[str]) -> str:
+    """Format acceptance criteria for prompt templates."""
+    return "\n".join(f"- {c}" for c in criteria)
+
 
 PLANNER_SYSTEM_PROMPT = """\
 You are a software project planner. Given a Product Requirements Document (PRD) \

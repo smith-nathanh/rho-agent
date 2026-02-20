@@ -1,5 +1,7 @@
 """Observability processor that wraps agent event streams."""
 
+from __future__ import annotations
+
 import uuid
 from collections.abc import AsyncIterator
 

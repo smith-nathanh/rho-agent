@@ -1,5 +1,7 @@
 """Single-agent sequential conductor for PRD-driven implementation."""
 
+from __future__ import annotations
+
 from .models import (
     ConductorConfig,
     ConductorState,

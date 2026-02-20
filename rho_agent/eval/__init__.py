@@ -1,6 +1,3 @@
-"""Evaluation benchmarks for rho-agent.
+"""Evaluation benchmarks for rho-agent."""
 
-This package contains integrations for:
-- AgentBench: DB Bench and OS Interaction tasks
-- Harbor: TerminalBench and other Harbor benchmarks
-"""
+from __future__ import annotations

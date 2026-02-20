@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from typing import Any
 
-from ..runtime import RuntimeOptions, create_runtime, start_runtime, run_prompt, close_runtime
+from ..runtime import create_runtime, run_prompt, session_usage
+from ..runtime.types import SessionUsage
 from .models import ConductorConfig, Task, TaskDAG, VerificationConfig
 from .prompts import PLANNER_SYSTEM_PROMPT, PLANNER_USER_TEMPLATE
 
@@ -77,9 +79,7 @@ def _build_dag(raw: dict[str, Any], config: ConductorConfig) -> TaskDAG:
     for task in tasks.values():
         bad_deps = set(task.depends_on) - all_ids
         if bad_deps:
-            raise ValueError(
-                f"Task {task.id} depends on unknown tasks: {bad_deps}"
-            )
+            raise ValueError(f"Task {task.id} depends on unknown tasks: {bad_deps}")
 
     # Validate: no cycles (topological sort check)
     visited: set[str] = set()
@@ -110,22 +110,15 @@ async def run_planner(
     prd_text: str,
     config: ConductorConfig,
     *,
-    cancel_check: callable | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[TaskDAG, dict[str, int]]:
     """Run the planner agent to decompose a PRD into a task DAG.
 
     Returns (TaskDAG, usage_dict).
     """
-    options = RuntimeOptions(
-        model=config.model,
-        service_tier=config.service_tier,
+    options = config.runtime_options(
         profile="readonly",
-        working_dir=config.working_dir,
-        auto_approve=True,
-        enable_delegate=False,
-        team_id=config.team_id,
-        project_id=config.project_id,
-        telemetry_metadata={"source": "conductor_planner"},
+        metadata={"source": "conductor_planner"},
     )
     runtime = create_runtime(
         PLANNER_SYSTEM_PROMPT,
@@ -139,21 +132,14 @@ async def run_planner(
         project_tree=project_tree,
     )
 
-    status = "completed"
-    await start_runtime(runtime)
-    try:
+    async with runtime:
         result = await run_prompt(runtime, user_prompt)
         raw = _extract_json(result.text)
         dag = _build_dag(raw, config)
-    except Exception:
-        status = "error"
-        raise
-    finally:
-        await close_runtime(runtime, status)
 
-    usage = {
-        "input_tokens": runtime.session.total_input_tokens,
-        "output_tokens": runtime.session.total_output_tokens,
-        "cost_usd": runtime.session.total_cost_usd,
+    usage = session_usage(runtime.session)
+    return dag, {
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "cost_usd": usage.cost_usd,
     }
-    return dag, usage

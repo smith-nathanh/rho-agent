@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from rho_agent.command_center.models import AgentStatus
-from rho_agent.command_center.services.local_signal_transport import LocalSignalTransport
+from rho_agent.control.models import AgentStatus
+from rho_agent.control.services.local_signal_transport import LocalSignalTransport
 from rho_agent.signals import AgentInfo, SignalManager
 
 

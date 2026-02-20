@@ -1,7 +1,7 @@
 # eval.yaml - Evaluation profile for sandboxed containers
 #
 # This profile provides unrestricted access for running evaluations
-# (AgentBench, TerminalBench, etc.) in sandboxed Docker containers.
+# (BIRD-Bench, TerminalBench, etc.) in sandboxed environments.
 # The container isolation provides security, not tool-level restrictions.
 
 profile: eval

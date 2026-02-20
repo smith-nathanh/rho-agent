@@ -1,7 +1,6 @@
-"""Output truncation utilities to prevent context bloat.
+"""Output truncation utilities to prevent context bloat."""
 
-Uses token-based truncation with ...N tokens truncated... marker format
-"""
+from __future__ import annotations
 
 # Approximate bytes-per-token heuristic
 APPROX_BYTES_PER_TOKEN = 4

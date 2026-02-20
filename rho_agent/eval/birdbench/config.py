@@ -1,5 +1,7 @@
 """Configuration and result dataclasses for BIRD-Bench evaluation."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -9,6 +11,8 @@ from .evaluator import BirdResult
 
 
 class TaskStatus(str, Enum):
+    """Possible outcomes for a single evaluation task."""
+
     COMPLETED = "completed"
     AGENT_CONTEXT_LIMIT = "agent context limit"
     TASK_LIMIT_REACHED = "task limit reached"
@@ -16,13 +20,17 @@ class TaskStatus(str, Enum):
 
 
 class EvalAbortedError(Exception):
-    def __init__(self, message: str, consecutive_errors: int):
+    """Raised when too many consecutive errors abort the evaluation."""
+
+    def __init__(self, message: str, consecutive_errors: int) -> None:
         super().__init__(message)
         self.consecutive_errors = consecutive_errors
 
 
 @dataclass
 class EvalConfig:
+    """Runtime configuration for a BIRD-Bench evaluation run."""
+
     model: str = "gpt-5-mini"
     base_url: str | None = None
     max_turns: int = 20
@@ -36,6 +44,8 @@ class EvalConfig:
 
 @dataclass
 class TaskResult:
+    """Result of running a single BIRD-Bench task through the agent."""
+
     index: int
     status: TaskStatus
     history: list[dict[str, Any]]
@@ -44,6 +54,7 @@ class TaskResult:
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-compatible dictionary."""
         data: dict[str, Any] = {
             "index": self.index,
             "status": self.status.value,
@@ -67,6 +78,7 @@ class TaskResult:
 
     @staticmethod
     def create_time() -> dict[str, Any]:
+        """Return a timestamp dict with epoch and human-readable values."""
         now = datetime.now()
         return {
             "timestamp": int(now.timestamp()),

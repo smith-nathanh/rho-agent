@@ -8,8 +8,9 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any
 
-from ...config.databases import DatabaseConfig
+from .database_config import DatabaseConfig
 from ..base import ToolHandler, ToolInvocation, ToolOutput
+from .paths import is_path_sensitive
 
 
 # SQL patterns that indicate write operations (case-insensitive)
@@ -98,7 +99,7 @@ class DatabaseHandler(ToolHandler):
 
     def __init__(
         self,
-        configs: list["DatabaseConfig"],
+        configs: list[DatabaseConfig],
         row_limit: int = DEFAULT_ROW_LIMIT,
         readonly: bool = True,
         requires_approval: bool = True,
@@ -123,7 +124,7 @@ class DatabaseHandler(ToolHandler):
             except Exception:
                 pass
 
-    def __enter__(self) -> "DatabaseHandler":
+    def __enter__(self) -> DatabaseHandler:
         """Context manager entry - returns self."""
         return self
 
@@ -220,7 +221,7 @@ class DatabaseHandler(ToolHandler):
             "required": required,
         }
 
-    def _get_config(self, alias: str) -> "DatabaseConfig":
+    def _get_config(self, alias: str) -> DatabaseConfig:
         """Get config for a database alias."""
         if alias not in self._configs:
             available = ", ".join(sorted(self._configs.keys())) or "none"
@@ -430,27 +431,9 @@ class DatabaseHandler(ToolHandler):
         path = Path(export_path).expanduser().resolve()
 
         # Safety check: don't write to sensitive locations
-        sensitive_patterns = [
-            ".bashrc",
-            ".zshrc",
-            ".profile",
-            ".bash_profile",
-            ".ssh/",
-            ".gnupg/",
-            ".aws/",
-            ".config/",
-            "/etc/",
-            "/usr/",
-            "/bin/",
-            "/sbin/",
-        ]
-        path_str_lower = str(path).lower()
-        for pattern in sensitive_patterns:
-            if pattern in path_str_lower:
-                return ToolOutput(
-                    content=f"Cannot write to sensitive location: {path}",
-                    success=False,
-                )
+        sensitive, reason = is_path_sensitive(path)
+        if sensitive:
+            return ToolOutput(content=reason, success=False)
 
         # Fail fast: check if file exists before running query
         if path.exists():

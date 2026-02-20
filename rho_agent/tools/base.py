@@ -1,5 +1,7 @@
 """Base classes for the tool system."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -47,6 +49,15 @@ class ToolHandler(ABC):
     def parameters(self) -> dict[str, Any]:
         """JSON Schema for the tool's parameters."""
         ...
+
+    @property
+    def is_enabled(self) -> bool:
+        """Whether this tool is currently available to the LLM.
+
+        Override to implement dynamic enablement based on handler state.
+        Default: always enabled.
+        """
+        return True
 
     @property
     def requires_approval(self) -> bool:

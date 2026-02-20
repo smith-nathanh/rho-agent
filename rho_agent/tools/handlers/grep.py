@@ -1,5 +1,7 @@
 """Search file contents using ripgrep."""
 
+from __future__ import annotations
+
 import asyncio
 import shutil
 from pathlib import Path
@@ -22,7 +24,7 @@ class GrepHandler(ToolHandler):
     loading files into memory. Suitable for searching large log files.
     """
 
-    def __init__(self, timeout: int = DEFAULT_TIMEOUT):
+    def __init__(self, timeout: int = DEFAULT_TIMEOUT) -> None:
         self._timeout = timeout
         self._rg_path = shutil.which("rg")
 
@@ -71,6 +73,7 @@ class GrepHandler(ToolHandler):
         }
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Search for a pattern in file contents."""
         # Check if rg is available
         if not self._rg_path:
             return ToolOutput(
