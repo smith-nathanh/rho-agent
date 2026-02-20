@@ -1,5 +1,7 @@
 """Interactive REPL session."""
 
+from __future__ import annotations
+
 import asyncio
 import platform
 import signal
@@ -17,7 +19,7 @@ from ..core.agent import AgentEvent
 from ..core.conversations import ConversationStore
 from ..runtime.types import LocalRuntime
 from ..signals import SignalManager
-from ..ui.theme import THEME
+from .theme import THEME
 from .completion import create_completer
 from .errors import InvalidProfileError
 from .events import ApprovalHandler, handle_command, handle_event, switch_runtime_profile
@@ -64,6 +66,7 @@ class InteractiveSession:
         self.interactive_tty = _is_interactive_terminal()
 
     async def run(self) -> None:
+        """Run the interactive REPL loop until exit or error."""
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         await self.runtime.start()
 
@@ -111,7 +114,9 @@ class InteractiveSession:
                     if not await _wait_while_paused(self.signal_manager, self.session_id):
                         self.session_status = "cancelled"
                         if self.runtime.observability:
-                            self.runtime.observability.context.metadata["cancel_source"] = "kill_command"
+                            self.runtime.observability.context.metadata["cancel_source"] = (
+                                "kill_command"
+                            )
                         console.print(_markup("Killed by rho-agent kill", THEME.warning))
                         break
 
@@ -125,7 +130,7 @@ class InteractiveSession:
                         break
 
                     if self.signal_manager.has_export_request(self.session_id):
-                        from ..context_export import write_context_file
+                        from .context_export import write_context_file
 
                         write_context_file(
                             self.signal_manager.context_path(self.session_id),
@@ -200,6 +205,7 @@ class InteractiveSession:
                 console.print(_markup("\nGoodbye!", THEME.muted))
 
     async def _execute_turn(self, user_input: str) -> None:
+        """Run one agent turn, streaming events to the console."""
         loop = asyncio.get_event_loop()
         response_chunks: list[str] = []
 
@@ -240,10 +246,16 @@ class InteractiveSession:
                         status_ctx = None
                 if event.type == "cancelled":
                     _sync_token_status_from_session(self.token_status, self.runtime.session)
-                    if self.signal_manager and self.session_id and self.signal_manager.is_cancelled(self.session_id):
+                    if (
+                        self.signal_manager
+                        and self.session_id
+                        and self.signal_manager.is_cancelled(self.session_id)
+                    ):
                         self.session_status = "cancelled"
                         if self.runtime.observability:
-                            self.runtime.observability.context.metadata["cancel_source"] = "kill_command"
+                            self.runtime.observability.context.metadata["cancel_source"] = (
+                                "kill_command"
+                            )
                         console.print(_markup("Killed by rho-agent kill", THEME.warning))
                     else:
                         console.print(_markup("Turn cancelled", THEME.muted))
@@ -266,6 +278,7 @@ class InteractiveSession:
                 loop.remove_signal_handler(signal.SIGINT)
 
     def _handle_file_write_toggle(self, cmd: str) -> None:
+        """Toggle the create-only write tool in readonly mode."""
         if self.mode_name != "readonly":
             console.print(
                 _markup(
@@ -340,6 +353,7 @@ class InteractiveSession:
 
     @staticmethod
     def _resolve_resume_id(raw: str, conversations: list[Any]) -> str | None:
+        """Resolve user input (number, 'latest', id, or prefix) to a conversation ID."""
         target = raw.strip()
         if not target:
             return None
@@ -359,6 +373,7 @@ class InteractiveSession:
         return None
 
     def _handle_resume(self, cmd: str) -> None:
+        """Handle /resume: list or select a saved conversation to restore."""
         conversations = self.conversation_store.list_conversations(limit=20)
         if not conversations:
             console.print(_markup("No saved conversations to resume.", THEME.error))
@@ -446,6 +461,7 @@ class InteractiveSession:
         )
 
     def _handle_mode_switch(self, cmd: str) -> None:
+        """Handle /mode: display or switch the active capability profile."""
         parts = cmd.split(maxsplit=1)
         if len(parts) == 1 or parts[1].strip().lower() in ("status", "current"):
             console.print(_markup(f"Current mode: {self.mode_name}", THEME.accent))

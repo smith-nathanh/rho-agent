@@ -1,5 +1,7 @@
 """Model client for streaming API calls via OpenAI-compatible API."""
 
+from __future__ import annotations
+
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -55,10 +57,7 @@ class Prompt:
 
 
 class ModelClient:
-    """Client for streaming API calls via OpenAI-compatible API.
-
-    Works with OpenAI, vLLM, or any OpenAI-compatible endpoint.
-    """
+    """Streaming model client for OpenAI-compatible APIs."""
 
     def __init__(
         self,
@@ -211,10 +210,7 @@ class ModelClient:
             yield StreamEvent(type="error", content=str(e))
 
     async def _stream_via_complete(self, prompt: Prompt) -> AsyncIterator[StreamEvent]:
-        """Non-streaming tool calling that yields StreamEvents.
-
-        Used for providers like Cerebras that don't support streaming with tools.
-        """
+        """Non-streaming fallback for providers that don't stream tool calls."""
         messages = self._build_messages(prompt)
 
         kwargs: dict[str, Any] = {
@@ -279,10 +275,7 @@ class ModelClient:
             yield StreamEvent(type="error", content=str(e))
 
     async def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
-        """Non-streaming completion for simple requests like summarization.
-
-        Returns (content, usage_dict).
-        """
+        """Non-streaming completion returning (content, usage_dict)."""
         try:
             kwargs: dict[str, Any] = {
                 "model": self._model,

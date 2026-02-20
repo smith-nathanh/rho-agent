@@ -1,10 +1,6 @@
-"""Unified CLI for all rho-agent evaluations.
+"""Unified CLI for all rho-agent evaluations."""
 
-Entry point: rho-eval
-
-Commands:
-  bird             - BIRD-Bench text-to-SQL evaluation
-"""
+from __future__ import annotations
 
 import typer
 

@@ -1,5 +1,7 @@
 """Tool registry for storing and dispatching to handlers."""
 
+from __future__ import annotations
+
 import asyncio
 from typing import Any
 

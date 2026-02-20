@@ -73,7 +73,9 @@ def serialize_session(
                     if not isinstance(function, dict):
                         continue
                     name = str(function.get("name", "unknown"))
-                    args = _truncate(_stringify_content(function.get("arguments", "")), max_tool_args_chars)
+                    args = _truncate(
+                        _stringify_content(function.get("arguments", "")), max_tool_args_chars
+                    )
                     if args:
                         lines.append(f"[tool:{name}] {args}")
                     else:

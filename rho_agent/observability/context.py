@@ -1,5 +1,7 @@
 """Telemetry context for tracking sessions and spans."""
 
+from __future__ import annotations
+
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -69,7 +71,7 @@ class TelemetryContext:
         profile: str = "readonly",
         environment: str | None = None,
         agent_id: str = "",
-    ) -> "TelemetryContext":
+    ) -> TelemetryContext:
         """Create context from observability config.
 
         Args:

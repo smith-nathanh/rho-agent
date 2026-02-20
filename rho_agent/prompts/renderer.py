@@ -1,8 +1,10 @@
 """Render prompts with Jinja2 templating."""
 
+from __future__ import annotations
+
 from typing import Any
 
-from jinja2 import Environment, BaseLoader, TemplateSyntaxError, UndefinedError
+from jinja2 import BaseLoader, Environment, TemplateSyntaxError, UndefinedError
 
 from .loader import Prompt
 

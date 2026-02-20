@@ -16,7 +16,7 @@ class DaytonaBashHandler(ToolHandler):
     Standard agentic tool name: 'bash'
     """
 
-    def __init__(self, manager: SandboxManager):
+    def __init__(self, manager: SandboxManager) -> None:
         self._manager = manager
 
     @property
@@ -52,6 +52,7 @@ class DaytonaBashHandler(ToolHandler):
         }
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Execute a shell command in the remote sandbox."""
         command = invocation.arguments.get("command", "")
         working_dir = invocation.arguments.get("working_dir", self._manager.working_dir)
         timeout = invocation.arguments.get("timeout", 300)

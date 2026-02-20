@@ -1,5 +1,7 @@
 """Display utilities, token tracking, and formatting helpers."""
 
+from __future__ import annotations
+
 import asyncio
 import importlib.metadata
 import json
@@ -12,15 +14,17 @@ from rich.markup import escape
 
 from ..runtime import ObservabilityInitializationError
 from ..signals import SignalManager
-from ..ui.theme import THEME
+from .theme import THEME
 from .state import MARKDOWN_THEME, console, settings
 
 
 def _markup(text: str, color: str) -> str:
+    """Wrap text in Rich markup with the given color, escaping special chars."""
     return f"[{color}]{escape(text)}[/{color}]"
 
 
 def _is_interactive_terminal() -> bool:
+    """Return True when running in an interactive TTY."""
     return console.is_terminal and sys.stdin.isatty() and sys.stdout.isatty()
 
 
@@ -61,6 +65,7 @@ def _format_observability_init_error(exc: ObservabilityInitializationError) -> s
 
 
 def _get_version() -> str:
+    """Return the installed package version or 'dev' if not installed."""
     try:
         return importlib.metadata.version("rho-agent")
     except importlib.metadata.PackageNotFoundError:
@@ -76,6 +81,7 @@ class TokenStatus:
         self.total_output_tokens = output_tokens
 
     def update(self, usage: dict[str, int] | None) -> None:
+        """Update counters from a turn usage dict."""
         if not usage:
             return
         self.context_size = usage.get("context_size", self.context_size)
@@ -83,6 +89,7 @@ class TokenStatus:
         self.total_output_tokens = usage.get("total_output_tokens", self.total_output_tokens)
 
     def render(self) -> str:
+        """Render token metrics as a compact status-bar string."""
         return (
             f"context:{self.context_size} "
             f"in:{self.total_input_tokens} "
@@ -98,6 +105,7 @@ def _sync_token_status_from_session(token_status: TokenStatus, session: Any) -> 
 
 
 def _format_token_count(tokens: int) -> str:
+    """Format a token count as a human-readable string (e.g. '1.2K', '3.4M')."""
     if tokens >= 1_000_000:
         return f"{tokens / 1_000_000:.1f}M"
     if tokens >= 1_000:
@@ -106,6 +114,7 @@ def _format_token_count(tokens: int) -> str:
 
 
 def _format_elapsed(started_at: datetime, ended_at: datetime | None = None) -> str:
+    """Format the elapsed time between two datetimes as a compact string."""
     end = ended_at or datetime.now(timezone.utc)
     elapsed = end - started_at
     secs = int(elapsed.total_seconds())
@@ -123,7 +132,9 @@ async def _wait_while_paused(signal_manager: SignalManager, session_id: str) -> 
         if signal_manager.is_cancelled(session_id):
             return False
         if not announced:
-            console.print(_markup("Paused by rho-agent monitor; waiting for resume...", THEME.warning))
+            console.print(
+                _markup("Paused by rho-agent monitor; waiting for resume...", THEME.warning)
+            )
             announced = True
         await asyncio.sleep(0.5)
     if announced:

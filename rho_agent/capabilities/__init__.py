@@ -1,11 +1,6 @@
-"""Capability system for configurable tool profiles.
+"""Capability system for configurable tool profiles."""
 
-This module provides the core abstractions for rho-agent's capability toggle system:
-- Enums defining the available modes for shell, file writing, and database access
-- CapabilityProfile dataclass that bundles all configuration into a single object
-- Factory methods for common profile configurations (readonly, developer, eval)
-- YAML loading for custom profiles
-"""
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -112,7 +107,7 @@ class CapabilityProfile:
     bash_only: bool = False  # If True, only bash tool is registered (no Read, Grep, etc.)
 
     @classmethod
-    def readonly(cls) -> "CapabilityProfile":
+    def readonly(cls) -> CapabilityProfile:
         """Default read-only profile for research and inspection."""
         return cls(
             name="readonly",
@@ -124,7 +119,7 @@ class CapabilityProfile:
         )
 
     @classmethod
-    def developer(cls) -> "CapabilityProfile":
+    def developer(cls) -> CapabilityProfile:
         """Developer profile with full file editing and unrestricted shell."""
         return cls(
             name="developer",
@@ -138,7 +133,7 @@ class CapabilityProfile:
         )
 
     @classmethod
-    def eval(cls, working_dir: str = "/app") -> "CapabilityProfile":
+    def eval(cls, working_dir: str = "/app") -> CapabilityProfile:
         """Evaluation profile for sandboxed containers - no restrictions."""
         return cls(
             name="eval",
@@ -153,7 +148,7 @@ class CapabilityProfile:
         )
 
     @classmethod
-    def daytona(cls, working_dir: str = "/home/daytona") -> "CapabilityProfile":
+    def daytona(cls, working_dir: str = "/home/daytona") -> CapabilityProfile:
         """Remote sandbox profile - all tools execute in a Daytona cloud VM."""
         return cls(
             name="daytona",
@@ -167,7 +162,7 @@ class CapabilityProfile:
         )
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "CapabilityProfile":
+    def from_yaml(cls, path: str | Path) -> CapabilityProfile:
         """Load a profile from a YAML file."""
         path = Path(path).expanduser().resolve()
 
@@ -180,7 +175,7 @@ class CapabilityProfile:
         return cls.from_dict(data)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CapabilityProfile":
+    def from_dict(cls, data: dict[str, Any]) -> CapabilityProfile:
         """Create a profile from a dictionary (parsed YAML)."""
         # Extract shell settings
         shell_config = data.get("shell", {})

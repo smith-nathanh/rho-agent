@@ -33,9 +33,7 @@ def save_state(path: Path, state: ConductorState) -> None:
     """Atomically write state to JSON file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     data = json.dumps(state.to_dict(), indent=2)
-    with NamedTemporaryFile(
-        "w", encoding="utf-8", dir=path.parent, delete=False
-    ) as tmp:
+    with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as tmp:
         tmp.write(data)
         tmp_path = Path(tmp.name)
     tmp_path.replace(path)

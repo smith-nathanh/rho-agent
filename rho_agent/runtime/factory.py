@@ -47,6 +47,7 @@ def _build_observability(
     profile_name: str,
     session_id: str,
 ) -> ObservabilityProcessor | None:
+    """Create an observability processor from runtime options, or None if disabled."""
     try:
         config = ObservabilityConfig.load(
             config_path=options.observability_config,
@@ -145,7 +146,9 @@ def create_runtime(
 
         manager = DaytonaRuntime.register_daytona_tools(
             registry,
-            working_dir=capability_profile.shell_working_dir or options.working_dir or "/home/daytona",
+            working_dir=capability_profile.shell_working_dir
+            or options.working_dir
+            or "/home/daytona",
         )
         return DaytonaRuntime(
             agent=agent,

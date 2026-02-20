@@ -79,9 +79,7 @@ def _build_dag(raw: dict[str, Any], config: ConductorConfig) -> TaskDAG:
     for task in tasks.values():
         bad_deps = set(task.depends_on) - all_ids
         if bad_deps:
-            raise ValueError(
-                f"Task {task.id} depends on unknown tasks: {bad_deps}"
-            )
+            raise ValueError(f"Task {task.id} depends on unknown tasks: {bad_deps}")
 
     # Validate: no cycles (topological sort check)
     visited: set[str] = set()

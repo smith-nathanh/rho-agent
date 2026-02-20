@@ -12,11 +12,7 @@ def _resolve_reconfigured_approval_callback(
     current_callback: ApprovalCallback | None,
     auto_approve: bool | None,
 ) -> ApprovalCallback | None:
-    """Adjust default approval callback when auto_approve is reconfigured.
-
-    Explicit callbacks are preserved. Only default callbacks created by
-    create_runtime are switched when auto_approve changes.
-    """
+    """Adjust default approval callback when auto_approve is reconfigured."""
     if auto_approve is None:
         return current_callback
 
@@ -35,6 +31,14 @@ def reconfigure_runtime(
     enable_delegate: bool | None = None,
 ) -> CapabilityProfile:
     """Rebuild runtime registry/options via shared builder and swap active tool set."""
+    # Daytona requires a different runtime type; cannot switch to/from it via reconfigure.
+    resolved_name = profile if isinstance(profile, str) else getattr(profile, "name", None)
+    if resolved_name == "daytona" or runtime.profile_name == "daytona":
+        raise ValueError(
+            "Cannot reconfigure to/from 'daytona' profile. "
+            "Daytona requires a dedicated runtime; restart with --profile daytona instead."
+        )
+
     parent_agent_cancel_check = getattr(runtime.agent, "is_cancelled", None)
     if not callable(parent_agent_cancel_check):
         parent_agent_cancel_check = None

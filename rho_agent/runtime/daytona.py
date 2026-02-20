@@ -13,7 +13,13 @@ from ..core.session import Session
 from ..observability.processor import ObservabilityProcessor
 from ..tools.registry import ToolRegistry
 from .options import RuntimeOptions
-from .types import ApprovalCallback, RunState, ToolApprovalItem, capture_runtime_state, restore_runtime_state
+from .types import (
+    ApprovalCallback,
+    RunState,
+    ToolApprovalItem,
+    capture_runtime_state,
+    restore_runtime_state,
+)
 
 
 @dataclass

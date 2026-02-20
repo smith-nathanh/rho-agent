@@ -21,6 +21,7 @@ def format_acceptance_criteria(criteria: list[str]) -> str:
     """Format acceptance criteria for prompt templates."""
     return "\n".join(f"- {c}" for c in criteria)
 
+
 PLANNER_SYSTEM_PROMPT = """\
 You are a software project planner. Given a Product Requirements Document (PRD) \
 and the current state of a code repository, decompose the work into a task DAG \

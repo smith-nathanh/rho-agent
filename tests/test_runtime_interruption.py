@@ -161,7 +161,9 @@ async def test_run_prompt_resume_denied_approval_halts_action_set() -> None:
     assert resumed.interruptions == []
     assert runtime.options.session_id == "session-1"
 
-    tool_messages = [message for message in runtime.session.history if message.get("role") == "tool"]
+    tool_messages = [
+        message for message in runtime.session.history if message.get("role") == "tool"
+    ]
     assert len(tool_messages) == 2
     assert tool_messages[0]["tool_call_id"] == "tool-1"
     assert tool_messages[0]["content"] == "Command rejected by user. Awaiting new instructions."
@@ -169,7 +171,9 @@ async def test_run_prompt_resume_denied_approval_halts_action_set() -> None:
     assert tool_messages[1]["content"] == "Command skipped - user rejected previous command."
     assert not any(message.get("content") == "executed:rm a.txt" for message in tool_messages)
     assert not any(message.get("content") == "executed:rm b.txt" for message in tool_messages)
-    assert any(event.type == "tool_blocked" and event.tool_call_id == "tool-1" for event in resumed.events)
+    assert any(
+        event.type == "tool_blocked" and event.tool_call_id == "tool-1" for event in resumed.events
+    )
 
 
 @pytest.mark.asyncio

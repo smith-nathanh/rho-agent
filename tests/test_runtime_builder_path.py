@@ -19,7 +19,9 @@ def test_create_runtime_uses_shared_registry_builder(monkeypatch) -> None:
         called = True
         return real_builder(**kwargs)
 
-    monkeypatch.setattr("rho_agent.runtime.factory.build_runtime_registry", wrapped_build_runtime_registry)
+    monkeypatch.setattr(
+        "rho_agent.runtime.factory.build_runtime_registry", wrapped_build_runtime_registry
+    )
 
     runtime = create_runtime(
         "system",

@@ -95,9 +95,7 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
     """Run the sequential conductor loop."""
     run_id = str(uuid.uuid4())[:12]
     requested_state_path = (
-        Path(config.state_path).expanduser().resolve()
-        if config.state_path
-        else None
+        Path(config.state_path).expanduser().resolve() if config.state_path else None
     )
     sp = requested_state_path if requested_state_path else state_path_for_run(run_id)
     sm = SignalManager()
@@ -145,14 +143,11 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
         if state.dag is None:
             console.print(f"[bold]Planning tasks from:[/bold] {prd_path.name}")
 
-            dag, planner_usage = await run_planner(
-                prd_text, config, cancel_check=_cancel_check
-            )
+            dag, planner_usage = await run_planner(prd_text, config, cancel_check=_cancel_check)
             state.dag = dag
             save_state(sp, state)
             console.print(
-                f"[green]Planned {len(dag.tasks)} tasks "
-                f"for project '{dag.project_name}'[/green]"
+                f"[green]Planned {len(dag.tasks)} tasks for project '{dag.project_name}'[/green]"
             )
             for t in sorted(dag.tasks.values(), key=lambda t: t.id):
                 deps = f" (depends: {', '.join(t.depends_on)})" if t.depends_on else ""
@@ -199,17 +194,10 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
                     console.print("[bold green]All tasks completed![/bold green]")
                 else:
                     state.status = "failed"
-                    failed = [
-                        t for t in dag.tasks.values()
-                        if t.status == TaskStatus.FAILED
-                    ]
-                    blocked = [
-                        t for t in dag.tasks.values()
-                        if t.status == TaskStatus.PENDING
-                    ]
+                    failed = [t for t in dag.tasks.values() if t.status == TaskStatus.FAILED]
+                    blocked = [t for t in dag.tasks.values() if t.status == TaskStatus.PENDING]
                     console.print(
-                        f"[red]No ready tasks. "
-                        f"{len(failed)} failed, {len(blocked)} blocked.[/red]"
+                        f"[red]No ready tasks. {len(failed)} failed, {len(blocked)} blocked.[/red]"
                     )
                 break
 
@@ -309,9 +297,7 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
                 # Retry loop
                 while task.attempts < config.max_task_attempts:
                     task.attempts += 1
-                    console.print(
-                        f"  [yellow]Retrying (attempt {task.attempts})...[/yellow]"
-                    )
+                    console.print(f"  [yellow]Retrying (attempt {task.attempts})...[/yellow]")
                     retry_result = await run_worker_retry(
                         task,
                         dag,
@@ -325,14 +311,10 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
                     usage.worker_sessions += 1
                     if retry_result.status != "completed":
                         task.status = TaskStatus.FAILED
-                        task.error = (
-                            "Retry worker did not signal completion with "
-                            "'TASK COMPLETE'"
-                        )
+                        task.error = "Retry worker did not signal completion with 'TASK COMPLETE'"
                         save_state(sp, state)
                         console.print(
-                            f"  [red]Task {task.id} FAILED: retry worker did not "
-                            "complete[/red]"
+                            f"  [red]Task {task.id} FAILED: retry worker did not complete[/red]"
                         )
                         break
 
@@ -343,9 +325,7 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
                     if retry_sha:
                         task.commit_sha = retry_sha
 
-                    check_result = await run_checks(
-                        dag.verification, config.working_dir
-                    )
+                    check_result = await run_checks(dag.verification, config.working_dir)
                     if check_result.passed:
                         console.print("  [green]Checks passed after retry[/green]")
                         break
@@ -358,8 +338,7 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
                     task.error = check_result.output[:2000]
                     save_state(sp, state)
                     console.print(
-                        f"  [red]Task {task.id} FAILED after "
-                        f"{task.attempts} attempts[/red]"
+                        f"  [red]Task {task.id} FAILED after {task.attempts} attempts[/red]"
                     )
                     continue
             else:
@@ -389,21 +368,17 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
                     if review_sha:
                         task.review_sha = review_sha
                         console.print(
-                            f"  [green]Reviewer committed fixes: "
-                            f"{review_sha[:8]}[/green]"
+                            f"  [green]Reviewer committed fixes: {review_sha[:8]}[/green]"
                         )
 
                     # Re-check after reviewer fixes
-                    post_review_check = await run_checks(
-                        dag.verification, config.working_dir
-                    )
+                    post_review_check = await run_checks(dag.verification, config.working_dir)
                     if not post_review_check.passed:
                         task.status = TaskStatus.FAILED
                         task.error = post_review_check.output[:2000]
                         save_state(sp, state)
                         console.print(
-                            f"  [red]Task {task.id} FAILED: "
-                            f"checks failed after reviewer[/red]"
+                            f"  [red]Task {task.id} FAILED: checks failed after reviewer[/red]"
                         )
                         continue
 

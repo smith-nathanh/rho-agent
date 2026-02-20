@@ -32,7 +32,9 @@ async def test_run_single_sets_error_status_on_error_event(monkeypatch: pytest.M
     monkeypatch.setattr("rho_agent.cli.single.handle_event", lambda event, **kwargs: None)
     monkeypatch.setattr("rho_agent.cli.single.platform.system", lambda: "Windows")
 
-    runtime = SimpleNamespace(agent=ErrorAgent(), observability=None, start=fake_start, close=fake_close)
+    runtime = SimpleNamespace(
+        agent=ErrorAgent(), observability=None, start=fake_start, close=fake_close
+    )
     await run_single(runtime, "prompt")
 
     assert statuses == ["error"]
@@ -54,7 +56,9 @@ async def test_run_single_with_output_returns_false_and_sets_error_status(
     monkeypatch.setattr("rho_agent.cli.single.handle_event", lambda event, **kwargs: None)
     monkeypatch.setattr("rho_agent.cli.single.platform.system", lambda: "Windows")
 
-    runtime = SimpleNamespace(agent=ErrorAgent(), observability=None, start=fake_start, close=fake_close)
+    runtime = SimpleNamespace(
+        agent=ErrorAgent(), observability=None, start=fake_start, close=fake_close
+    )
     output_path = tmp_path / "response.txt"
 
     result = await run_single_with_output(runtime, "prompt", str(output_path))

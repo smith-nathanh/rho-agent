@@ -11,6 +11,8 @@ from ..runtime.options import RuntimeOptions
 
 
 class TaskStatus(str, Enum):
+    """Status of a task in the conductor DAG."""
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     DONE = "done"
@@ -72,15 +74,13 @@ class TaskDAG:
         return sorted(ready, key=lambda t: t.id)[0]
 
     def all_done(self) -> bool:
-        return bool(self.tasks) and all(
-            t.status == TaskStatus.DONE for t in self.tasks.values()
-        )
+        """Return True if every task in the DAG is DONE."""
+        return bool(self.tasks) and all(t.status == TaskStatus.DONE for t in self.tasks.values())
 
     def has_remaining_work(self) -> bool:
         """True if there are tasks that could still run (not DONE, not FAILED)."""
         return any(
-            t.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS)
-            for t in self.tasks.values()
+            t.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS) for t in self.tasks.values()
         )
 
 
@@ -104,9 +104,7 @@ class ConductorConfig:
 
     prd_path: str
     working_dir: str = "."
-    model: str = field(
-        default_factory=lambda: os.getenv("OPENAI_MODEL", "gpt-5-mini")
-    )
+    model: str = field(default_factory=lambda: os.getenv("OPENAI_MODEL", "gpt-5-mini"))
     service_tier: str | None = field(default_factory=lambda: os.getenv("RHO_AGENT_SERVICE_TIER"))
     state_path: str | None = None
     context_window: int = 400_000
@@ -151,18 +149,18 @@ class ConductorState:
     status: str = "running"
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize state to a plain dict for JSON persistence."""
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ConductorState:
+        """Deserialize state from a plain dict."""
         config = ConductorConfig(**data["config"])
         dag = None
         if data.get("dag"):
             dag_data = data["dag"]
             tasks = {
-                k: Task(
-                    **{**v, "status": TaskStatus(v["status"])}
-                )
+                k: Task(**{**v, "status": TaskStatus(v["status"])})
                 for k, v in dag_data["tasks"].items()
             }
             verification = VerificationConfig(**dag_data["verification"])
@@ -171,9 +169,7 @@ class ConductorState:
                 tasks=tasks,
                 verification=verification,
             )
-        usage = {
-            k: TaskUsage(**v) for k, v in data.get("usage", {}).items()
-        }
+        usage = {k: TaskUsage(**v) for k, v in data.get("usage", {}).items()}
         return cls(
             run_id=data["run_id"],
             config=config,

@@ -1,5 +1,7 @@
 """Find files by name or path pattern using ripgrep."""
 
+from __future__ import annotations
+
 import asyncio
 import shutil
 from pathlib import Path
@@ -17,7 +19,7 @@ class GlobHandler(ToolHandler):
     Standard agentic tool name: 'glob'
     """
 
-    def __init__(self, timeout: int = DEFAULT_TIMEOUT):
+    def __init__(self, timeout: int = DEFAULT_TIMEOUT) -> None:
         self._timeout = timeout
         self._rg_path = shutil.which("rg")
 
@@ -51,6 +53,7 @@ class GlobHandler(ToolHandler):
         }
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Find files matching a glob pattern."""
         if not self._rg_path:
             return ToolOutput(
                 content="ripgrep (rg) is not installed. Install it with: brew install ripgrep (macOS) or apt install ripgrep (Linux)",

@@ -41,7 +41,9 @@ def _build_initial_prompt(
         task_description=task.description,
         acceptance_criteria=format_acceptance_criteria(task.acceptance_criteria),
         working_dir=config.working_dir,
-        prd_summary=f"Project: {dag.project_name}\n\n{prd_text}" if prd_text else f"Project: {dag.project_name}",
+        prd_summary=f"Project: {dag.project_name}\n\n{prd_text}"
+        if prd_text
+        else f"Project: {dag.project_name}",
         verification_commands=format_verification(dag.verification),
     )
 

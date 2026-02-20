@@ -1,5 +1,7 @@
 """Conversation storage and retrieval."""
 
+from __future__ import annotations
+
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -47,7 +49,7 @@ class Conversation:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Conversation":
+    def from_dict(cls, data: dict[str, Any]) -> Conversation:
         """Create from dictionary."""
         return cls(
             id=data["id"],

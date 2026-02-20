@@ -26,7 +26,9 @@ def register_runtime_tools(
 
     profile = runtime_options.profile
     if not isinstance(profile, CapabilityProfile):
-        raise TypeError("runtime_options.profile must be a CapabilityProfile before extension registration")
+        raise TypeError(
+            "runtime_options.profile must be a CapabilityProfile before extension registration"
+        )
 
     from ..tools.handlers.delegate import DelegateHandler
 

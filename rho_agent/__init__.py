@@ -1,5 +1,7 @@
 """rho-agent: An agent harness with first-class CLI and programmatic APIs."""
 
+from __future__ import annotations
+
 __version__ = "0.1.0"
 
 from .runtime import (

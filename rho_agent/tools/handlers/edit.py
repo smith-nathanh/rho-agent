@@ -1,7 +1,6 @@
-"""Surgical file editing using search-and-replace.
+"""Surgical file editing using search-and-replace."""
 
-Uses a search-and-replace approach with fuzzy matching for robustness.
-"""
+from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
@@ -23,7 +22,7 @@ class EditHandler(ToolHandler):
     3. Indentation-flexible match (leading whitespace normalized)
     """
 
-    def __init__(self, requires_approval: bool = False):
+    def __init__(self, requires_approval: bool = False) -> None:
         """Initialize EditHandler.
 
         Args:
@@ -74,6 +73,7 @@ class EditHandler(ToolHandler):
         }
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Apply a search-and-replace edit to a file."""
         path_str = invocation.arguments.get("path", "")
         old_string = invocation.arguments.get("old_string", "")
         new_string = invocation.arguments.get("new_string", "")

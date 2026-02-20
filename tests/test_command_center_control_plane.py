@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from rho_agent.command_center.models import AgentStatus, RunningAgent
-from rho_agent.command_center.services.control_plane import ControlPlane
+from rho_agent.control.models import AgentStatus, RunningAgent
+from rho_agent.control.services.control_plane import ControlPlane
 
 
 @dataclass
@@ -140,6 +140,4 @@ def test_directive_queues_for_single_match() -> None:
 
     assert outcome.error is None
     assert outcome.acted_session_ids == ["abc11111-0000-0000-0000-000000000000"]
-    assert transport.directives == [
-        ("abc11111-0000-0000-0000-000000000000", "review logs")
-    ]
+    assert transport.directives == [("abc11111-0000-0000-0000-000000000000", "review logs")]

@@ -1,9 +1,12 @@
 """Input completion: path and command completers."""
 
+from __future__ import annotations
+
 import os
 import re
 from pathlib import Path
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from prompt_toolkit.completion import (
     Completer,

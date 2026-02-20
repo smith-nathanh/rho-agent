@@ -41,9 +41,7 @@ async def run_prompt(
             )
         except TypeError as exc:
             if isinstance(prompt, RunState):
-                raise TypeError(
-                    "Runtime agent does not support resuming from RunState."
-                ) from exc
+                raise TypeError("Runtime agent does not support resuming from RunState.") from exc
             events = runtime.agent.run_turn(user_input)
     status = "completed"
     collected_text: list[str] = []
@@ -115,12 +113,16 @@ async def run_prompt_stored(
             raise ValueError(f"No persisted run state found for run_id={run_id!r}.")
         prompt = loaded
 
-    result = await run_prompt(
-        runtime,
-        prompt,
-        on_event=on_event,
-        approval_decisions=approval_decisions,
-    )
+    try:
+        result = await run_prompt(
+            runtime,
+            prompt,
+            on_event=on_event,
+            approval_decisions=approval_decisions,
+        )
+    except Exception:
+        run_store.delete(run_id)
+        raise
 
     if result.status == "interrupted" and result.state is not None:
         run_store.save(run_id, result.state)

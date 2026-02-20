@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from ...config.databases import DatabaseConfig
+from .database_config import DatabaseConfig
 from .database import DatabaseHandler
 
 

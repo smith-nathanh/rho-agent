@@ -92,6 +92,7 @@ class AgentToolHandler(ToolHandler):
         return self._requires_approval
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Spawn a child agent to execute the instruction."""
         instruction = self._input_formatter(invocation.arguments)
         if not instruction.strip():
             return ToolOutput(

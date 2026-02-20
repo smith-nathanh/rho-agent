@@ -8,7 +8,7 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any
 
-from ...config.databases import DatabaseConfig
+from .database_config import DatabaseConfig
 from ..base import ToolHandler, ToolInvocation, ToolOutput
 from .paths import is_path_sensitive
 
@@ -99,7 +99,7 @@ class DatabaseHandler(ToolHandler):
 
     def __init__(
         self,
-        configs: list["DatabaseConfig"],
+        configs: list[DatabaseConfig],
         row_limit: int = DEFAULT_ROW_LIMIT,
         readonly: bool = True,
         requires_approval: bool = True,
@@ -124,7 +124,7 @@ class DatabaseHandler(ToolHandler):
             except Exception:
                 pass
 
-    def __enter__(self) -> "DatabaseHandler":
+    def __enter__(self) -> DatabaseHandler:
         """Context manager entry - returns self."""
         return self
 
@@ -221,7 +221,7 @@ class DatabaseHandler(ToolHandler):
             "required": required,
         }
 
-    def _get_config(self, alias: str) -> "DatabaseConfig":
+    def _get_config(self, alias: str) -> DatabaseConfig:
         """Get config for a database alias."""
         if alias not in self._configs:
             available = ", ".join(sorted(self._configs.keys())) or "none"

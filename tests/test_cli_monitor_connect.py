@@ -107,7 +107,9 @@ def test_monitor_connect_then_disconnect(monkeypatch) -> None:
     assert "[aaa11111]\nresponse from aaa11111" in task_directives[1]
 
     resume_directives = [
-        d for sid, d in fake_sm.queued_directives if d == "The connect session has ended. Resume your previous work."
+        d
+        for sid, d in fake_sm.queued_directives
+        if d == "The connect session has ended. Resume your previous work."
     ]
     assert len(resume_directives) == 2
     assert fake_sm.clear_export_calls

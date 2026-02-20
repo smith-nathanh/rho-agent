@@ -15,7 +15,7 @@ class DaytonaWriteHandler(ToolHandler):
     Standard agentic tool name: 'write'
     """
 
-    def __init__(self, manager: SandboxManager):
+    def __init__(self, manager: SandboxManager) -> None:
         self._manager = manager
 
     @property
@@ -47,6 +47,7 @@ class DaytonaWriteHandler(ToolHandler):
         }
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Write content to a file in the remote sandbox."""
         path_str = invocation.arguments.get("path", "")
         content = invocation.arguments.get("content", "")
 

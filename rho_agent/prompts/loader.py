@@ -1,6 +1,8 @@
 """Load and parse markdown prompt files with YAML frontmatter."""
 
-from dataclasses import dataclass, field
+from __future__ import annotations
+
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 

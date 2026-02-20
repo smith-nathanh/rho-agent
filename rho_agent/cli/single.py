@@ -1,5 +1,7 @@
 """Single-shot execution: run_single, run_single_with_output."""
 
+from __future__ import annotations
+
 import asyncio
 import platform
 import signal
@@ -8,7 +10,7 @@ from time import monotonic
 
 from ..runtime.types import LocalRuntime
 from ..signals import SignalManager
-from ..ui.theme import THEME
+from .theme import THEME
 from .events import handle_event
 from .formatting import (
     _is_interactive_terminal,

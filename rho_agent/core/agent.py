@@ -1,5 +1,7 @@
 """Core agent loop for rho-agent."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable, Awaitable
@@ -153,7 +155,9 @@ class Agent:
 
     def consume_interrupted_tool_calls(self) -> list[tuple[str, str, dict[str, Any]]]:
         """Return and clear tool calls queued during an approval interruption."""
-        pending = [(call_id, name, dict(args)) for call_id, name, args in self._interrupted_tool_calls]
+        pending = [
+            (call_id, name, dict(args)) for call_id, name, args in self._interrupted_tool_calls
+        ]
         self._interrupted_tool_calls.clear()
         return pending
 
@@ -340,7 +344,9 @@ class Agent:
                 async for event in self._client.stream(prompt):
                     # Check for cancellation during streaming
                     if self.is_cancelled():
-                        yield AgentEvent(type="cancelled", content="Cancelled during model response")
+                        yield AgentEvent(
+                            type="cancelled", content="Cancelled during model response"
+                        )
                         return
 
                     if event.type == "text":

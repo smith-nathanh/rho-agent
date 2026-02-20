@@ -1,5 +1,7 @@
 """CLI package for rho-agent."""
 
+from __future__ import annotations
+
 import sys
 
 from .errors import (
@@ -29,12 +31,17 @@ from . import main_cmd as _main_cmd  # noqa: F401
 from .main_cmd import main
 
 
+_conduct_registered = False
+
+
 def cli() -> None:
     """CLI entrypoint with `main` as the default command."""
-    # Register conductor subcommand (lazy import to avoid circular deps)
-    from ..conductor.cli import conduct as _conduct_fn
+    global _conduct_registered
+    if not _conduct_registered:
+        from ..conductor.cli import conduct as _conduct_fn
 
-    app.command(name="conduct")(_conduct_fn)
+        app.command(name="conduct")(_conduct_fn)
+        _conduct_registered = True
 
     args = sys.argv[1:]
     subcommands = {"main", "dashboard", "monitor", "ps", "kill", "conduct"}

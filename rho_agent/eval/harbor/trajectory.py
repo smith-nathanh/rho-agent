@@ -1,32 +1,6 @@
-"""ATIF trajectory builder for Harbor eval compatibility.
+"""ATIF trajectory builder for Harbor eval compatibility."""
 
-Converts rho-agent's AgentEvent stream to ATIF (Agent Trajectory
-Interchange Format) for use with Harbor's trajectory analysis tools.
-
-ATIF Format:
-    {
-        "steps": [
-            {
-                "source": "user" | "agent",
-                "message": str,  # for user/agent text
-                "tool_calls": [...],  # for agent tool invocations
-                "observations": [...],  # tool results
-                "metrics": {...}  # token counts, cost
-            },
-            ...
-        ],
-        "metadata": {
-            "model": str,
-            "total_input_tokens": int,
-            "total_output_tokens": int,
-            "total_cached_tokens": int,
-            "total_cost_usd": float,
-            "extra": {  # optional, present when reasoning tokens used
-                "total_reasoning_tokens": int
-            }
-        }
-    }
-"""
+from __future__ import annotations
 
 import json
 import uuid

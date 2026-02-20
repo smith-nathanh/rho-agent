@@ -1,5 +1,7 @@
 """Database configuration loading with multi-database support."""
 
+from __future__ import annotations
+
 import os
 import re
 from dataclasses import dataclass, field

@@ -103,10 +103,7 @@ def bench(concurrency: int, turns: int = 8, tools_per_turn: int = 3) -> dict[str
     total_errors = 0
 
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
-        futures = [
-            executor.submit(run_agent, i, turns, tools_per_turn)
-            for i in range(concurrency)
-        ]
+        futures = [executor.submit(run_agent, i, turns, tools_per_turn) for i in range(concurrency)]
         for future in as_completed(futures):
             writes, errors = future.result()
             total_writes += writes

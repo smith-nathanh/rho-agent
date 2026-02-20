@@ -1,28 +1,6 @@
-"""Tool handlers for rho-agent.
+"""Tool handler exports for the standard agentic toolkit."""
 
-This module exports the standard 8-tool agentic toolkit plus database tools:
-
-Core Tools (always available):
-- ReadHandler (read) - Read file contents with line numbers
-- GlobHandler (glob) - Find files by pattern using ripgrep
-- GrepHandler (grep) - Search file contents using ripgrep
-- ListHandler (list) - List directory contents
-- ReadExcelHandler (read_excel) - Read Excel files
-
-Mode-dependent Tools:
-- BashHandler (bash) - Shell execution (restricted or unrestricted)
-- WriteHandler (write) - File writing (off, create-only, or full)
-- EditHandler (edit) - Surgical file editing (only with file_write=full)
-- DelegateHandler (delegate) - Spawn one child agent for focused sub-work
-- AgentToolHandler - Wrap a pre-configured agent as a named tool
-
-Database Tools (enabled via env vars):
-- OracleHandler (oracle)
-- MysqlHandler (mysql)
-- SqliteHandler (sqlite)
-- VerticaHandler (vertica)
-- PostgresHandler (postgres)
-"""
+from __future__ import annotations
 
 # Core tools
 from .read import ReadHandler

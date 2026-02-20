@@ -1,11 +1,6 @@
-"""Evaluation runner for BIRD-Bench tasks.
+"""Evaluation runner for BIRD-Bench tasks."""
 
-For each task:
-1. Copies the database to a temp file (agent works on the copy, original stays safe)
-2. Creates execute_sql + submit_sql tools pointing at the copy
-3. Runs the agent conversation
-4. Evaluates the submitted SQL against gold SQL on the ORIGINAL database (read-only)
-"""
+from __future__ import annotations
 
 import asyncio
 import os
@@ -44,6 +39,7 @@ class BirdRunner:
         self._evaluator = BirdEvaluator()
 
     def _get_system_prompt(self) -> str:
+        """Load the system prompt from a custom file or the default template."""
         if self.config.system_prompt_file:
             try:
                 prompt = load_prompt(self.config.system_prompt_file)

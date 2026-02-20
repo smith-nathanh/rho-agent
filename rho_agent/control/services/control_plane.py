@@ -1,12 +1,12 @@
-"""UI-agnostic control-plane orchestration for command center actions."""
+"""UI-agnostic control-plane orchestration for agent process actions."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from rho_agent.command_center.models import RunningAgent
-from rho_agent.command_center.services.transport import ControlTransport
+from rho_agent.control.models import RunningAgent
+from rho_agent.control.services.transport import ControlTransport
 
 
 @dataclass(slots=True)
@@ -29,15 +29,18 @@ class ControlPlane:
         self._transport = transport
 
     def list_running(self) -> list[RunningAgent]:
+        """Return all currently running agents."""
         return self._transport.list_running()
 
     def resolve_running_prefix(self, prefix: str) -> list[str]:
+        """Return session IDs matching the given prefix or 'all'."""
         agents = self._transport.list_running()
         if prefix == "all":
             return [agent.session_id for agent in agents]
         return [agent.session_id for agent in agents if agent.session_id.startswith(prefix)]
 
     def resolve_single_running(self, prefix: str) -> tuple[str | None, str | None]:
+        """Resolve a prefix to exactly one session ID or return an error."""
         matches = self.resolve_running_prefix(prefix)
         if not matches:
             return None, f"No running agents matching '{prefix}'"
@@ -46,15 +49,19 @@ class ControlPlane:
         return matches[0], None
 
     def kill(self, prefix: str) -> ControlOutcome:
+        """Kill agents matching the prefix."""
         return self._apply_many(prefix, self._transport.kill)
 
     def pause(self, prefix: str) -> ControlOutcome:
+        """Pause agents matching the prefix."""
         return self._apply_many(prefix, self._transport.pause)
 
     def resume(self, prefix: str) -> ControlOutcome:
+        """Resume agents matching the prefix."""
         return self._apply_many(prefix, self._transport.resume)
 
     def directive(self, prefix: str, text: str) -> ControlOutcome:
+        """Send a directive to the single agent matching the prefix."""
         session_id, error = self.resolve_single_running(prefix)
         if error:
             if "multiple sessions" in error:

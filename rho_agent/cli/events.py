@@ -1,5 +1,7 @@
 """Event handling: ApprovalHandler, handle_event, handle_command, switch_runtime_profile."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from rich.markdown import Markdown
@@ -10,7 +12,7 @@ from ..capabilities import CapabilityProfile
 from ..core.agent import AgentEvent
 from ..runtime import reconfigure_runtime
 from ..runtime.types import LocalRuntime
-from ..ui.theme import THEME
+from .theme import THEME
 from .errors import InvalidProfileError
 from .formatting import (
     TokenStatus,

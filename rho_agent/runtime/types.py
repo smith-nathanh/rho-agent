@@ -86,6 +86,7 @@ class ToolApprovalItem:
     tool_args: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON persistence."""
         return {
             "tool_call_id": self.tool_call_id,
             "tool_name": self.tool_name,
@@ -94,6 +95,7 @@ class ToolApprovalItem:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ToolApprovalItem:
+        """Deserialize from a plain dict."""
         return cls(
             tool_call_id=str(data["tool_call_id"]),
             tool_name=str(data["tool_name"]),
@@ -117,6 +119,7 @@ class RunState:
     pending_approvals: list[ToolApprovalItem] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for JSON persistence."""
         return {
             "session_id": self.session_id,
             "system_prompt": self.system_prompt,
@@ -132,6 +135,7 @@ class RunState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RunState:
+        """Deserialize from a plain dict."""
         return cls(
             session_id=str(data["session_id"]),
             system_prompt=str(data["system_prompt"]),

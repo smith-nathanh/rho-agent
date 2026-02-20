@@ -74,6 +74,7 @@ class DelegateHandler(ToolHandler):
         return self._requires_approval
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Spawn a child runtime and return its final output."""
         instruction = str(invocation.arguments.get("instruction", "")).strip()
         full_context = bool(invocation.arguments.get("full_context", False))
 

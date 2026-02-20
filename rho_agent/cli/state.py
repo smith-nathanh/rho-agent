@@ -1,5 +1,7 @@
 """Shared CLI state: console, app, constants, settings."""
 
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -8,7 +10,7 @@ import typer
 from rich.console import Console
 from rich.theme import Theme
 
-from ..ui.theme import THEME
+from .theme import THEME
 
 # Config directory for rho-agent data
 CONFIG_DIR = Path.home() / ".config" / "rho-agent"

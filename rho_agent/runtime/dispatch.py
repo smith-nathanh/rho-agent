@@ -21,7 +21,7 @@ class AgentHandle:
     token: CancellationToken | None = None
 
     def cancel(self, reason: str = "requested") -> None:
-        """Request cooperative cancellation."""
+        """Request cooperative cancellation of the dispatched run."""
         if self.token:
             self.token.cancel(reason=reason)
         if self.runtime.observability:

@@ -1,48 +1,6 @@
-"""Observability module for rho-agent.
+"""Observability module: telemetry capture, export, and dashboard."""
 
-Provides enterprise-grade observability with:
-- Real-time monitoring of running agents
-- Historical analysis and debugging
-- Cost/token tracking
-- Audit trail for compliance
-- Multi-tenancy (team_id, project_id)
-
-Basic Usage:
-    from rho_agent.observability import (
-        ObservabilityConfig,
-        TelemetryContext,
-        ObservabilityProcessor,
-        create_processor,
-    )
-
-    # Create from environment/CLI args
-    processor = create_processor(
-        team_id="my-team",
-        project_id="my-project",
-        model="gpt-5-mini",
-    )
-
-    if processor:
-        await processor.start_session()
-
-        # Wrap agent event streams
-        async for event in processor.wrap_turn(agent.run_turn(user_input), user_input):
-            handle_event(event)
-
-        await processor.end_session()
-
-CLI Usage:
-    # Enable telemetry via CLI flags
-    rho-agent --team-id acme --project-id logs "analyze this error"
-
-    # Or via environment variables
-    export RHO_AGENT_TEAM_ID=acme
-    export RHO_AGENT_PROJECT_ID=logs
-    rho-agent "analyze this error"
-
-    # Launch the dashboard
-    rho-agent dashboard
-"""
+from __future__ import annotations
 
 from .config import (
     ObservabilityConfig,

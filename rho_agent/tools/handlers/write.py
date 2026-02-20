@@ -1,9 +1,6 @@
-"""File writing handler with configurable restrictions.
+"""File writing handler with configurable restrictions."""
 
-Supports two modes:
-- CREATE_ONLY: Can only create new files, blocks overwrites and sensitive paths
-- FULL: Full write access for sandboxed container environments
-"""
+from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
@@ -82,6 +79,7 @@ class WriteHandler(ToolHandler):
         }
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
+        """Write content to a file."""
         path_str = invocation.arguments.get("path", "")
         content = invocation.arguments.get("content", "")
 

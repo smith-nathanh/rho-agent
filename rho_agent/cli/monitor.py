@@ -1,4 +1,6 @@
-"""Monitor command: interactive command center for telemetry and agent controls."""
+"""Monitor command: interactive agent control for telemetry and agent controls."""
+
+from __future__ import annotations
 
 import json
 import shlex
@@ -10,12 +12,12 @@ import typer
 from rich.panel import Panel
 from rich.table import Table
 
-from ..command_center.services.control_plane import ControlPlane
-from ..command_center.services.local_signal_transport import LocalSignalTransport
+from ..control.services.control_plane import ControlPlane
+from ..control.services.local_signal_transport import LocalSignalTransport
 from ..observability.config import DEFAULT_TELEMETRY_DB
 from ..observability.storage.sqlite import TelemetryStorage
 from ..signals import SignalManager
-from ..ui.theme import THEME
+from .theme import THEME
 from .formatting import (
     _format_elapsed,
     _format_tool_preview,
@@ -46,6 +48,7 @@ class MonitorSession:
         self.connection_state: dict[str, Any] | None = None
 
     def run(self) -> None:
+        """Start the interactive monitor command loop."""
         console.print(
             Panel(
                 f"[bold]{_markup('rho-agent monitor', THEME.primary)}[/bold]\n"
@@ -186,22 +189,42 @@ class MonitorSession:
             console.print("[dim]Type 'help' for command list[/dim]")
 
     def _print_help(self) -> None:
+        """Print the monitor help text."""
         console.print(_markup("Commands:", THEME.secondary))
-        console.print("[dim]  overview                                running agents + active sessions[/dim]")
+        console.print(
+            "[dim]  overview                                running agents + active sessions[/dim]"
+        )
         console.print("[dim]  running                                 list running agents[/dim]")
-        console.print(r"[dim]  sessions \[active|completed|all]        browse telemetry sessions (default: all)[/dim]")
+        console.print(
+            r"[dim]  sessions \[active|completed|all]        browse telemetry sessions (default: all)[/dim]"
+        )
         console.print("[dim]  show <id_or_prefix>                     session detail[/dim]")
-        console.print("[dim]  watch <id_or_prefix>                    stream new tools + responses[/dim]")
-        console.print("[dim]  kill <prefix|all>                       cancel running session(s)[/dim]")
-        console.print("[dim]  pause <prefix|all>                      pause running session(s)[/dim]")
-        console.print("[dim]  resume <prefix|all>                     resume paused session(s)[/dim]")
-        console.print("[dim]  directive <prefix> <text>               inject directive into interactive run[/dim]")
-        console.print(r"[dim]  connect <a> <b> \[more...] -- <task>   context-file collaboration[/dim]")
-        console.print("[dim]  disconnect                              end active connect session[/dim]")
+        console.print(
+            "[dim]  watch <id_or_prefix>                    stream new tools + responses[/dim]"
+        )
+        console.print(
+            "[dim]  kill <prefix|all>                       cancel running session(s)[/dim]"
+        )
+        console.print(
+            "[dim]  pause <prefix|all>                      pause running session(s)[/dim]"
+        )
+        console.print(
+            "[dim]  resume <prefix|all>                     resume paused session(s)[/dim]"
+        )
+        console.print(
+            "[dim]  directive <prefix> <text>               inject directive into interactive run[/dim]"
+        )
+        console.print(
+            r"[dim]  connect <a> <b> \[more...] -- <task>   context-file collaboration[/dim]"
+        )
+        console.print(
+            "[dim]  disconnect                              end active connect session[/dim]"
+        )
         console.print("[dim]  help                                    show this help[/dim]")
         console.print("[dim]  quit                                    exit monitor[/dim]")
 
     def _render_running(self) -> None:
+        """Display a table of running agent sessions."""
         agents = self.sm.list_running()
         if not agents:
             console.print("[dim]No running agents[/dim]")
@@ -231,6 +254,7 @@ class MonitorSession:
         console.print(table)
 
     def _render_sessions(self, status: str | None = None) -> None:
+        """Display a table of telemetry sessions, optionally filtered by status."""
         sessions = self.storage.list_sessions(status=status, limit=self.limit)
         if not sessions:
             console.print("[dim]No telemetry sessions found[/dim]")
@@ -259,6 +283,7 @@ class MonitorSession:
         console.print(table)
 
     def _resolve_single_running(self, prefix: str) -> str | None:
+        """Resolve a prefix to a single running session ID, printing errors on ambiguity."""
         session_id, error = self.control_plane.resolve_single_running(prefix)
         if not error:
             return session_id
@@ -267,6 +292,7 @@ class MonitorSession:
         return None
 
     def _resolve_session_id(self, prefix: str) -> str | None:
+        """Resolve a prefix to a telemetry session ID."""
         detail = self.storage.get_session_detail(prefix)
         if detail:
             return prefix
@@ -277,6 +303,7 @@ class MonitorSession:
         return None
 
     def _resolve_watch_session_id(self, prefix: str) -> str | None:
+        """Resolve a prefix for watch, checking telemetry then running agents."""
         telemetry_match = self._resolve_session_id(prefix)
         if telemetry_match:
             return telemetry_match
@@ -287,6 +314,7 @@ class MonitorSession:
 
     @staticmethod
     def _truncate_for_directive(text: str, max_chars: int = 3000) -> str:
+        """Truncate text to fit within a directive payload."""
         if len(text) <= max_chars:
             return text
         return text[:max_chars] + "\n...[truncated]..."
@@ -298,6 +326,7 @@ class MonitorSession:
         after_seq: int,
         timeout_seconds: int = 120,
     ) -> tuple[int, str] | None:
+        """Poll until a new response appears after the given sequence number."""
         deadline = monotonic() + timeout_seconds
         while monotonic() < deadline:
             latest = self.sm.get_last_response(session_id)
@@ -307,6 +336,7 @@ class MonitorSession:
         return None
 
     def _request_fresh_export(self, session_id: str) -> bool:
+        """Request a fresh context export from the given session."""
         self.sm.clear_export(session_id)
         return self.sm.request_export(session_id)
 
@@ -316,6 +346,7 @@ class MonitorSession:
         *,
         timeout_seconds: int = 60,
     ) -> bool:
+        """Block until the context export file is ready or timeout."""
         deadline = monotonic() + timeout_seconds
         while monotonic() < deadline:
             if self.sm.export_ready(session_id):
@@ -324,6 +355,7 @@ class MonitorSession:
         return False
 
     def _clear_connect_exports(self, session_ids: list[str]) -> None:
+        """Remove pending export markers for all sessions in a connect group."""
         for sid in session_ids:
             self.sm.clear_export(sid)
 
@@ -335,8 +367,11 @@ class MonitorSession:
         task: str,
         prior_responses: list[tuple[str, str]],
     ) -> str:
+        """Build the directive payload for one agent in a connect round."""
         peer_lines = [
-            f"- {peer[:8]}: {self.sm.context_path(peer)}" for peer in session_ids if peer != session_id
+            f"- {peer[:8]}: {self.sm.context_path(peer)}"
+            for peer in session_ids
+            if peer != session_id
         ]
         if peer_lines:
             peer_contexts = "\n".join(peer_lines)
@@ -345,7 +380,8 @@ class MonitorSession:
 
         if prior_responses:
             prior_text = "\n\n".join(
-                f"[{peer[:8]}]\n{self._truncate_for_directive(text)}" for peer, text in prior_responses
+                f"[{peer[:8]}]\n{self._truncate_for_directive(text)}"
+                for peer, text in prior_responses
             )
         else:
             prior_text = "(none yet)"
@@ -361,6 +397,7 @@ class MonitorSession:
         )
 
     def _run_connect(self, prefixes: list[str], task: str) -> None:
+        """Orchestrate a connect collaboration round across multiple agents."""
         if self.connection_state is not None:
             console.print(
                 _markup(
@@ -381,7 +418,9 @@ class MonitorSession:
             session_ids.append(resolved)
 
         if len(session_ids) < 2:
-            console.print(_markup("connect requires at least two distinct running agents.", THEME.error))
+            console.print(
+                _markup("connect requires at least two distinct running agents.", THEME.error)
+            )
             return
 
         paused = [sid[:8] for sid in session_ids if self.sm.is_paused(sid)]
@@ -451,7 +490,9 @@ class MonitorSession:
             seq_by_session[sid], response_text = latest
             responses.append((sid, response_text))
 
-            if not self._request_fresh_export(sid) or not self._wait_for_export(sid, timeout_seconds=15):
+            if not self._request_fresh_export(sid) or not self._wait_for_export(
+                sid, timeout_seconds=15
+            ):
                 console.print(
                     _markup(
                         f"Failed to refresh context export for {sid[:8]} after response.",
@@ -477,6 +518,7 @@ class MonitorSession:
 
     @staticmethod
     def _format_tool_args_preview(arguments: object, max_chars: int = 400) -> str:
+        """Format tool arguments as a truncated JSON string for display."""
         if not isinstance(arguments, dict):
             return "{}"
         text = json.dumps(arguments, ensure_ascii=False)
@@ -485,6 +527,7 @@ class MonitorSession:
         return text[:max_chars] + "... [truncated]"
 
     def _watch_session(self, prefix: str, poll_interval_seconds: float = 1.0) -> None:
+        """Stream new tool calls and responses for a session until it ends."""
         session_id = self._resolve_watch_session_id(prefix)
         if not session_id:
             console.print(_markup(f"Session not found for prefix '{prefix}'", THEME.error))
@@ -553,7 +596,10 @@ class MonitorSession:
 
                         for tool in turn.get("tool_executions", []):
                             execution_id = tool.get("execution_id")
-                            if not isinstance(execution_id, str) or execution_id in seen_execution_ids:
+                            if (
+                                not isinstance(execution_id, str)
+                                or execution_id in seen_execution_ids
+                            ):
                                 continue
                             seen_execution_ids.add(execution_id)
 
@@ -616,6 +662,7 @@ class MonitorSession:
             console.print(_markup("Stopped watching.", THEME.muted))
 
     def _show_detail(self, prefix: str) -> None:
+        """Display detailed info and recent turns for a telemetry session."""
         session_id = self._resolve_session_id(prefix)
         if not session_id:
             console.print(_markup(f"Session not found for prefix '{prefix}'", THEME.error))
@@ -625,7 +672,9 @@ class MonitorSession:
             console.print(_markup(f"Session not found: {session_id}", THEME.error))
             return
 
-        running = next((a for a in self.sm.list_running() if a.session_id == detail.session_id), None)
+        running = next(
+            (a for a in self.sm.list_running() if a.session_id == detail.session_id), None
+        )
         paused = self.sm.is_paused(detail.session_id)
         status = "paused" if paused and detail.status == "active" else detail.status
         if status == "active":
@@ -675,6 +724,7 @@ class MonitorSession:
         console.print(table)
 
     def _render_overview(self) -> None:
+        """Display the combined running-agents and active-sessions overview."""
         console.print(_markup("Running agents", THEME.secondary))
         self._render_running()
         console.print()

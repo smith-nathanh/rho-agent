@@ -1,5 +1,7 @@
 """Shared path sensitivity checks for file-writing handlers."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 SENSITIVE_PATTERNS = [

@@ -1,5 +1,7 @@
 """CLI exception classes."""
 
+from __future__ import annotations
+
 
 class CliUsageError(ValueError):
     """Base class for user-facing CLI configuration and usage errors."""

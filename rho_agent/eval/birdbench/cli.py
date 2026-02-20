@@ -1,5 +1,7 @@
 """CLI for running BIRD-Bench evaluations."""
 
+from __future__ import annotations
+
 import asyncio
 import os
 from pathlib import Path

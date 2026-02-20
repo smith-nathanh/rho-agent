@@ -1,5 +1,7 @@
 """Public runtime API."""
 
+from __future__ import annotations
+
 from .cancellation import CancellationToken
 from .dispatch import AgentHandle, dispatch_prompt
 from .factory import ObservabilityInitializationError, create_runtime

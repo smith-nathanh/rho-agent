@@ -48,7 +48,9 @@ def build_runtime_registry(
     session_id: str | None = None,
 ) -> RuntimeRegistryBuild:
     """Resolve options/profile, then build and extend a runtime registry."""
-    capability_profile = resolve_profile(profile if profile is not None else runtime_options.profile)
+    capability_profile = resolve_profile(
+        profile if profile is not None else runtime_options.profile
+    )
     updated_options = replace(
         runtime_options,
         profile=capability_profile,
@@ -60,7 +62,9 @@ def build_runtime_registry(
         session_id=runtime_options.session_id if session_id is None else session_id,
     )
 
-    registry = ToolFactory(capability_profile).create_registry(working_dir=updated_options.working_dir)
+    registry = ToolFactory(capability_profile).create_registry(
+        working_dir=updated_options.working_dir
+    )
     register_runtime_tools(
         registry,
         runtime_session=runtime_session,

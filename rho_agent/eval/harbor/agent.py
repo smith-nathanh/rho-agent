@@ -1,12 +1,4 @@
-"""Harbor BaseInstalledAgent wrapper for rho-agent.
-
-This module provides a Harbor-compatible agent that runs rho-agent
-inside Harbor's container environment for TerminalBench evaluation.
-
-Usage in job.yaml:
-    agents:
-      - import_path: rho_agent.eval.harbor.agent:RhoAgent
-"""
+"""Harbor BaseInstalledAgent wrapper for rho-agent."""
 
 from __future__ import annotations
 

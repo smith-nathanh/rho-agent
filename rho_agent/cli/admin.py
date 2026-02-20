@@ -1,5 +1,7 @@
 """Admin commands: dashboard, ps, kill."""
 
+from __future__ import annotations
+
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,7 +11,7 @@ import typer
 
 from ..observability.config import DEFAULT_TELEMETRY_DB
 from ..signals import SignalManager
-from ..ui.theme import THEME
+from .theme import THEME
 from .formatting import _markup
 from .state import app, console
 

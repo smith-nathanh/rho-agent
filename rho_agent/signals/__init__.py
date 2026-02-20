@@ -12,11 +12,14 @@ Protocol:
 - Agent checks is_cancelled() -> stat() for .cancel file
 """
 
+from __future__ import annotations
+
 import json
 import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import IO
 
 try:
     import fcntl
@@ -44,10 +47,12 @@ class AgentInfo:
     started_at: str  # ISO format
 
     def to_json(self) -> str:
+        """Serialize to JSON string."""
         return json.dumps(asdict(self))
 
     @classmethod
-    def from_json(cls, data: str) -> "AgentInfo":
+    def from_json(cls, data: str) -> AgentInfo:
+        """Deserialize from JSON string."""
         return cls(**json.loads(data))
 
 
@@ -337,15 +342,17 @@ class SignalManager:
             response_seq = 0
         return response_seq, response
 
-    def _lock_file(self, file_obj: object) -> None:
+    def _lock_file(self, file_obj: IO[str]) -> None:
+        """Acquire an exclusive advisory lock on the file."""
         if fcntl is None:
             return
-        fcntl.flock(file_obj.fileno(), fcntl.LOCK_EX)  # type: ignore[union-attr]
+        fcntl.flock(file_obj.fileno(), fcntl.LOCK_EX)
 
-    def _unlock_file(self, file_obj: object) -> None:
+    def _unlock_file(self, file_obj: IO[str]) -> None:
+        """Release the advisory lock on the file."""
         if fcntl is None:
             return
-        fcntl.flock(file_obj.fileno(), fcntl.LOCK_UN)  # type: ignore[union-attr]
+        fcntl.flock(file_obj.fileno(), fcntl.LOCK_UN)
 
     def list_running(self) -> list[AgentInfo]:
         """List all agents with .running files."""

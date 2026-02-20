@@ -39,9 +39,13 @@ class FakeRuntime:
 
 
 @pytest.mark.asyncio
-async def test_empty_instruction_returns_error_without_spawning(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_empty_instruction_returns_error_without_spawning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     parent_session = Session(system_prompt="system")
-    parent_options = RuntimeOptions(profile=CapabilityProfile.readonly(), session_id="parent-session")
+    parent_options = RuntimeOptions(
+        profile=CapabilityProfile.readonly(), session_id="parent-session"
+    )
     handler = DelegateHandler(
         parent_session=parent_session,
         parent_options=parent_options,
@@ -69,7 +73,9 @@ async def test_empty_instruction_returns_error_without_spawning(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
-async def test_delegate_full_context_false_uses_empty_child_history(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_delegate_full_context_false_uses_empty_child_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     parent_session = Session(system_prompt="system")
     parent_session.history = [{"role": "user", "content": "existing context"}]
     parent_options = RuntimeOptions(
@@ -77,6 +83,7 @@ async def test_delegate_full_context_false_uses_empty_child_history(monkeypatch:
         session_id="parent-session",
         telemetry_metadata={"trace_id": "abc123"},
     )
+
     async def parent_approval_callback(tool_name: str, tool_args: dict[str, object]) -> bool:
         return True
 
@@ -112,7 +119,9 @@ async def test_delegate_full_context_false_uses_empty_child_history(monkeypatch:
 
     async def fake_run_prompt(runtime: object, prompt: str) -> RunResult:
         captured["prompt"] = prompt
-        return RunResult(text="child complete", events=[], status="completed", usage={"input_tokens": 1})
+        return RunResult(
+            text="child complete", events=[], status="completed", usage={"input_tokens": 1}
+        )
 
     monkeypatch.setattr("rho_agent.runtime.factory.create_runtime", fake_create_runtime)
     monkeypatch.setattr("rho_agent.runtime.run.run_prompt", fake_run_prompt)
@@ -154,7 +163,9 @@ async def test_delegate_full_context_true_snapshots_parent_history(
     parent_session.history = [
         {"role": "assistant", "tool_calls": [{"id": "abc", "function": {"name": "read"}}]}
     ]
-    parent_options = RuntimeOptions(profile=CapabilityProfile.readonly(), session_id="parent-session")
+    parent_options = RuntimeOptions(
+        profile=CapabilityProfile.readonly(), session_id="parent-session"
+    )
     handler = DelegateHandler(
         parent_session=parent_session,
         parent_options=parent_options,
@@ -203,7 +214,9 @@ async def test_delegate_full_context_true_snapshots_parent_history(
 @pytest.mark.asyncio
 async def test_delegate_failure_still_closes_child_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     parent_session = Session(system_prompt="system")
-    parent_options = RuntimeOptions(profile=CapabilityProfile.readonly(), session_id="parent-session")
+    parent_options = RuntimeOptions(
+        profile=CapabilityProfile.readonly(), session_id="parent-session"
+    )
     handler = DelegateHandler(
         parent_session=parent_session,
         parent_options=parent_options,
@@ -251,7 +264,9 @@ async def test_delegate_child_cancel_check_includes_parent_agent_cancel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent_session = Session(system_prompt="system")
-    parent_options = RuntimeOptions(profile=CapabilityProfile.readonly(), session_id="parent-session")
+    parent_options = RuntimeOptions(
+        profile=CapabilityProfile.readonly(), session_id="parent-session"
+    )
     parent_cancelled = False
 
     def parent_agent_cancel_check() -> bool:
@@ -303,7 +318,9 @@ async def test_delegate_registers_child_session_in_signal_manager(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent_session = Session(system_prompt="system")
-    parent_options = RuntimeOptions(profile=CapabilityProfile.readonly(), session_id="parent-session")
+    parent_options = RuntimeOptions(
+        profile=CapabilityProfile.readonly(), session_id="parent-session"
+    )
     handler = DelegateHandler(
         parent_session=parent_session,
         parent_options=parent_options,

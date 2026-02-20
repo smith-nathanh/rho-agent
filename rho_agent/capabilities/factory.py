@@ -1,11 +1,11 @@
 """Tool factory for creating registries from capability profiles."""
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
-from typing import Any
 
-from ..config.databases import DatabaseConfig, load_database_config
-from ..tools.base import ToolHandler
+from ..tools.handlers.database_config import DatabaseConfig, load_database_config
 from ..tools.registry import ToolRegistry
 from . import (
     CapabilityProfile,
@@ -198,6 +198,7 @@ class ToolFactory:
                 registry.register(handler)
             except ImportError:
                 pass
+
 
 def create_registry_from_profile(
     profile: CapabilityProfile,

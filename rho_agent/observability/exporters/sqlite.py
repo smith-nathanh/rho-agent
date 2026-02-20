@@ -1,5 +1,7 @@
 """SQLite exporter for telemetry data."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import sqlite3
@@ -87,7 +89,9 @@ class SQLiteExporter(Exporter):
         execution: ToolExecutionContext,
     ) -> None:
         """Record a tool execution."""
-        await self._run_write("record_tool_execution", self._storage.record_tool_execution, execution)
+        await self._run_write(
+            "record_tool_execution", self._storage.record_tool_execution, execution
+        )
 
     async def increment_tool_call(self, session_id: str) -> None:
         """Increment session tool call counter."""

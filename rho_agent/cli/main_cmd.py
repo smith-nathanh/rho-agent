@@ -1,5 +1,7 @@
 """Main CLI command: rho-agent entry point."""
 
+from __future__ import annotations
+
 import asyncio
 import os
 import platform
@@ -20,7 +22,7 @@ from ..core.conversations import ConversationStore
 from ..core.session import Session
 from ..runtime import ObservabilityInitializationError, RuntimeOptions, create_runtime
 from ..signals import AgentInfo, SignalManager
-from ..ui.theme import THEME
+from .theme import THEME
 from .errors import (
     InvalidModeError,
     InvalidProfileError,

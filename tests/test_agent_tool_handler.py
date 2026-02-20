@@ -56,8 +56,12 @@ async def test_successful_invocation(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
     def fake_create_runtime(
-        system_prompt: str, *, options: object = None, session: object = None,
-        approval_callback: object = None, cancel_check: object = None,
+        system_prompt: str,
+        *,
+        options: object = None,
+        session: object = None,
+        approval_callback: object = None,
+        cancel_check: object = None,
     ) -> object:
         captured["system_prompt"] = system_prompt
         captured["options"] = options
@@ -66,7 +70,9 @@ async def test_successful_invocation(monkeypatch: pytest.MonkeyPatch) -> None:
 
     async def fake_run_prompt(runtime: object, prompt: str) -> RunResult:
         captured["prompt"] = prompt
-        return RunResult(text="result text", events=[], status="completed", usage={"input_tokens": 10})
+        return RunResult(
+            text="result text", events=[], status="completed", usage={"input_tokens": 10}
+        )
 
     monkeypatch.setattr("rho_agent.runtime.factory.create_runtime", fake_create_runtime)
     monkeypatch.setattr("rho_agent.runtime.run.run_prompt", fake_run_prompt)
@@ -141,7 +147,8 @@ async def test_typed_parameters_formatted(monkeypatch: pytest.MonkeyPatch) -> No
 
     await handler.handle(
         ToolInvocation(
-            call_id="1", tool_name="test_agent",
+            call_id="1",
+            tool_name="test_agent",
             arguments={"question": "How many users?", "dialect": "sqlite"},
         )
     )

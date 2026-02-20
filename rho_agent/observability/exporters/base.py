@@ -1,7 +1,8 @@
 """Base exporter interface for telemetry data."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any
 
 from ..context import TelemetryContext, TurnContext, ToolExecutionContext
 
