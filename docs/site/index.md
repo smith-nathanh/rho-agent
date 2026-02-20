@@ -14,7 +14,7 @@ rho-agent is a configurable runtime for deploying AI agents across software deve
 
 **Multi-agent coordination** lets agents delegate focused subtasks to child agents and lets operators connect running agents for cross-context collaboration through the monitor.
 
-**Built-in observability** tracks sessions, turns, token usage, and tool execution metrics to a SQLite backend or OTLP endpoint, with a Streamlit dashboard and interactive monitor for live inspection.
+**Built-in observability** tracks sessions, turns, token usage, dollar costs, and tool execution metrics to a local SQLite or shared PostgreSQL backend — fully self-hosted, no data leaves your infrastructure. Includes a Streamlit dashboard, interactive monitor, and an operational control plane for managing running agents.
 
 **Prompt templates** with YAML frontmatter and Jinja2 variable substitution make it easy to define repeatable, parameterized agent tasks.
 

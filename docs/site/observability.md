@@ -1,10 +1,14 @@
 ---
 title: Observability
-description: Session telemetry, token tracking, tool metrics, dashboard, and monitor.
+description: Session telemetry, cost tracking, tool metrics, dashboard, and monitor.
 order: 9
 ---
 
-Observability tracks agent sessions, per-turn token usage, and tool execution metrics. It is optional and enabled when `team_id` and `project_id` are provided (via CLI flags, environment variables, or config file).
+Observability tracks agent sessions, per-turn token usage, dollar costs, and tool execution metrics. It is optional and enabled when `team_id` and `project_id` are provided (via CLI flags, environment variables, or config file).
+
+Unlike hosted observability platforms that require sending your data to a third-party SaaS, rho-agent's telemetry is fully self-contained — your data never leaves your infrastructure. And unlike generic LLM tracing SDKs that bolt on via monkey-patching, rho-agent's observability is integrated directly into the agent loop, capturing cost and usage at the source without runtime hooks or wrapper libraries.
+
+rho-agent also goes beyond read-only dashboards. The Postgres backend includes an operational control plane — agent registry, heartbeat liveness, and a signal queue for remote `kill`/`pause`/`resume` — so you can manage running agents, not just watch them.
 
 Two storage backends are available:
 
@@ -130,6 +134,7 @@ Each agent run is a session. Tracked fields include:
 - Start and end timestamps
 - Final status (`completed`, `error`, `cancelled`)
 - Total input, output, and reasoning tokens
+- Total cost in USD (when using the LiteLLM client)
 - Turn count and total tool calls
 - Custom metadata from `telemetry_metadata` and labels
 
@@ -141,6 +146,7 @@ Each user-agent exchange within a session is a turn:
 - User input text
 - Start and end timestamps
 - Input, output, and reasoning token counts
+- Cost in USD for the turn
 - Number of tool calls in the turn
 
 ### Tool executions
@@ -152,6 +158,20 @@ Each tool call within a turn:
 - Success or failure
 - Arguments (when `capture.tool_arguments` is enabled)
 - Result (when `capture.tool_results` is enabled — disabled by default as results can be large)
+
+### Cost tracking
+
+When using the LiteLLM client, dollar costs are computed per API call using LiteLLM's built-in pricing database and persisted at both the turn and session level. This gives you accurate spend attribution across teams, projects, and individual agent runs — without maintaining your own pricing tables.
+
+Cost flows through the pipeline automatically:
+
+1. **LiteLLM client** computes `cost_usd` per API call via `litellm.completion_cost()`
+2. **Agent loop** accumulates cost into session totals alongside token counts
+3. **Observability processor** captures cost from event stream with anti-double-count logic
+4. **Storage** persists `total_cost_usd` on sessions and `cost_usd` on turns
+5. **Dashboard** displays cost in session lists, detail views, and project-level analytics
+
+If the LiteLLM client is not in use (e.g., direct Anthropic client), cost fields default to zero and everything else works normally — no errors, no missing data.
 
 ## Configuration reference
 
@@ -230,9 +250,9 @@ rho-agent dashboard --port 9090 --db /path/to/telemetry.db
 
 Features:
 
-- Session history table with status, model, and profile filters
-- Session detail view with turn-by-turn breakdown and tool execution timeline
-- Token usage analytics by team, project, and time period
+- Session history table with status, model, cost, and profile filters
+- Session detail view with turn-by-turn breakdown, cost per turn, and tool execution timeline
+- Usage and cost analytics by team, project, and time period
 - Tool execution statistics: call frequency, success rate, and average duration
 
 ## Monitor
