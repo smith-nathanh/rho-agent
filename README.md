@@ -86,7 +86,7 @@ Custom profiles are defined in YAML. See [Profiles](docs/site/profiles.md) for t
 - **Native tool handlers** — shell, file read/write/edit, grep, glob, and five database drivers (SQLite, PostgreSQL, MySQL, Oracle, Vertica) with no external plugins or MCP servers
 - **Prompt templates** — Markdown with YAML frontmatter and Jinja2 variables for repeatable, parameterized agent tasks
 - **Multi-agent coordination** — delegate subtasks to child agents or connect running agents for cross-context collaboration through the monitor
-- **Observability** — session tracking, token usage, and tool execution metrics with an interactive CLI monitor (`rho-agent monitor`)
+- **Observability** — session tracking, token usage, and tool execution metrics with SQLite (default) or PostgreSQL backends, session labels, and an interactive CLI monitor (`rho-agent monitor`)
 - **Session management** — list, pause, resume, and kill running agents from another terminal (`rho-agent ps`, `rho-agent kill`)
 - **Remote sandboxing** — execute all tools in a Daytona cloud VM with `--profile daytona`
 - **Evaluation integrations** — [BIRD-Bench](rho_agent/eval/birdbench/) (text-to-SQL) and [TerminalBench](rho_agent/eval/harbor/) via Harbor

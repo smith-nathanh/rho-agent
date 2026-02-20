@@ -81,7 +81,9 @@ This is useful for isolating subtasks that might require many turns or for runni
 
 ### Signal protocol
 
-Agents coordinate through a file-based signal protocol at `~/.config/rho-agent/signals/`:
+By default, agents coordinate through a file-based signal protocol at `~/.config/rho-agent/signals/`. When using the Postgres observability backend, coordination switches to a database-backed transport: agents register in an `agent_registry` table with heartbeats, and signals are delivered via a `signal_queue` table with LISTEN/NOTIFY for instant wakeup. This enables `rho-agent ps` and `rho-agent kill` to work across nodes in a cluster.
+
+**Local mode (default):**
 
 | File | Purpose |
 |---|---|
