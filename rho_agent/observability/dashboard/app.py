@@ -19,6 +19,15 @@ def get_storage() -> TelemetryStorage:
     return TelemetryStorage(db_path)
 
 
+def format_cost(cost: float) -> str:
+    """Format USD cost for display."""
+    if cost >= 1.0:
+        return f"${cost:.2f}"
+    if cost >= 0.01:
+        return f"${cost:.3f}"
+    return f"${cost:.4f}"
+
+
 def format_tokens(tokens: int) -> str:
     """Format token count for display."""
     if tokens >= 1_000_000:
@@ -75,6 +84,8 @@ def render_session_list(sessions: list[SessionSummary]) -> None:
             with col3:
                 total_tokens = session.total_input_tokens + session.total_output_tokens
                 st.metric("Tokens", format_tokens(total_tokens))
+                if session.total_cost_usd > 0:
+                    st.caption(format_cost(session.total_cost_usd))
 
             with col4:
                 status_badge = f":{status_color(session.status)}[{session.status}]"
@@ -97,16 +108,18 @@ def render_session_detail(detail: SessionDetail) -> None:
     st.title(f"Session {detail.session_id[:8]}...")
 
     # Session metadata
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
+    cols = st.columns(5)
+    with cols[0]:
         st.metric("Status", detail.status)
-    with col2:
+    with cols[1]:
         st.metric("Model", detail.model)
-    with col3:
+    with cols[2]:
         st.metric(
             "Total Tokens", format_tokens(detail.total_input_tokens + detail.total_output_tokens)
         )
-    with col4:
+    with cols[3]:
+        st.metric("Cost", format_cost(detail.total_cost_usd))
+    with cols[4]:
         st.metric("Tool Calls", detail.total_tool_calls)
 
     st.markdown("---")
@@ -175,7 +188,7 @@ def render_analytics(
     storage: TelemetryStorage, team_id: str | None, project_id: str | None
 ) -> None:
     """Render analytics view."""
-    st.subheader("Token Usage by Project")
+    st.subheader("Usage & Cost by Project")
 
     cost_summary = storage.get_cost_summary(team_id=team_id, project_id=project_id, days=30)
 
@@ -192,6 +205,7 @@ def render_analytics(
                 "Team/Project": f"{c.team_id}/{c.project_id}",
                 "Input Tokens": c.total_input_tokens,
                 "Output Tokens": c.total_output_tokens,
+                "Cost (USD)": c.total_cost_usd,
                 "Sessions": c.total_sessions,
             }
             for c in cost_summary
@@ -201,7 +215,10 @@ def render_analytics(
     st.bar_chart(df.set_index("Team/Project")[["Input Tokens", "Output Tokens"]])
 
     # Summary table
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(
+        df.style.format({"Cost (USD)": "${:.4f}"}),
+        use_container_width=True,
+    )
 
     # Tool usage
     st.subheader("Tool Usage Statistics")

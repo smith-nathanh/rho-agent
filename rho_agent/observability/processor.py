@@ -56,6 +56,7 @@ class ObservabilityProcessor:
         self._turn_input_tokens = 0
         self._turn_output_tokens = 0
         self._turn_reasoning_tokens = 0
+        self._turn_cost_usd = 0.0
 
         # Session lifecycle state for idempotent runtime reuse.
         self._session_started = False
@@ -128,6 +129,7 @@ class ObservabilityProcessor:
         self._turn_input_tokens = 0
         self._turn_output_tokens = 0
         self._turn_reasoning_tokens = 0
+        self._turn_cost_usd = 0.0
         self._pending_tools = {}
         self._pending_tool_order = []
 
@@ -151,6 +153,7 @@ class ObservabilityProcessor:
                 self._current_turn.input_tokens = self._turn_input_tokens
                 self._current_turn.output_tokens = self._turn_output_tokens
                 self._current_turn.reasoning_tokens = self._turn_reasoning_tokens
+                self._current_turn.cost_usd = self._turn_cost_usd
                 self._current_turn.end()
                 await self._exporter.end_turn(self._current_turn)
                 self._context.end_turn()
@@ -192,11 +195,15 @@ class ObservabilityProcessor:
                 input_tokens = event.usage.get("input_tokens", 0)
                 output_tokens = event.usage.get("output_tokens", 0)
                 reasoning_tokens = event.usage.get("reasoning_tokens", 0)
+                cost_usd = event.usage.get("cost_usd", 0.0)
 
                 self._turn_input_tokens += input_tokens
                 self._turn_output_tokens += output_tokens
                 self._turn_reasoning_tokens += reasoning_tokens
-                self._context.record_tokens(input_tokens, output_tokens, reasoning_tokens)
+                self._turn_cost_usd += cost_usd
+                self._context.record_tokens(
+                    input_tokens, output_tokens, reasoning_tokens, cost_usd
+                )
 
                 # Latency isn't currently emitted by AgentEvent usage.
                 await self._exporter.record_model_call(
@@ -213,20 +220,24 @@ class ObservabilityProcessor:
                 total_input = event.usage.get("total_input_tokens", 0)
                 total_output = event.usage.get("total_output_tokens", 0)
                 total_reasoning = event.usage.get("total_reasoning_tokens", 0)
+                total_cost = event.usage.get("total_cost_usd", 0.0)
 
                 # If turn_complete includes usage not captured in per-call events,
                 # add only the remainder to avoid double counting.
                 remainder_input = max(0, total_input - self._context.total_input_tokens)
                 remainder_output = max(0, total_output - self._context.total_output_tokens)
                 remainder_reasoning = max(0, total_reasoning - self._context.total_reasoning_tokens)
+                remainder_cost = max(0.0, total_cost - self._context.total_cost_usd)
 
                 self._turn_input_tokens += remainder_input
                 self._turn_output_tokens += remainder_output
                 self._turn_reasoning_tokens += remainder_reasoning
+                self._turn_cost_usd += remainder_cost
                 self._context.record_tokens(
                     remainder_input,
                     remainder_output,
                     remainder_reasoning,
+                    remainder_cost,
                 )
 
                 # Extract context_size

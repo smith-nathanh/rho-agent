@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     total_output_tokens INTEGER DEFAULT 0,
     total_reasoning_tokens INTEGER DEFAULT 0,
     total_tool_calls INTEGER DEFAULT 0,
+    total_cost_usd DOUBLE PRECISION DEFAULT 0,
     context_size INTEGER DEFAULT 0,
     metadata JSONB
 );
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS turns (
     input_tokens INTEGER DEFAULT 0,
     output_tokens INTEGER DEFAULT 0,
     reasoning_tokens INTEGER DEFAULT 0,
+    cost_usd DOUBLE PRECISION DEFAULT 0,
     context_size INTEGER DEFAULT 0,
     user_input TEXT
 );

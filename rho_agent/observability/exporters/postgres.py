@@ -66,7 +66,7 @@ class PostgresExporter(Exporter):
                 ended_at = %s, status = %s,
                 total_input_tokens = %s, total_output_tokens = %s,
                 total_reasoning_tokens = %s, total_tool_calls = %s,
-                context_size = %s, metadata = %s
+                total_cost_usd = %s, context_size = %s, metadata = %s
             WHERE session_id = %s
             """,
             (
@@ -76,6 +76,7 @@ class PostgresExporter(Exporter):
                 context.total_output_tokens,
                 context.total_reasoning_tokens,
                 context.total_tool_calls,
+                context.total_cost_usd,
                 context.context_size,
                 json.dumps(context.metadata),
                 context.session_id,
@@ -101,7 +102,7 @@ class PostgresExporter(Exporter):
             """
             UPDATE turns SET
                 ended_at = %s, input_tokens = %s, output_tokens = %s,
-                reasoning_tokens = %s, context_size = %s
+                reasoning_tokens = %s, cost_usd = %s, context_size = %s
             WHERE turn_id = %s
             """,
             (
@@ -109,6 +110,7 @@ class PostgresExporter(Exporter):
                 turn.input_tokens,
                 turn.output_tokens,
                 turn.reasoning_tokens,
+                turn.cost_usd,
                 turn.context_size,
                 turn.turn_id,
             ),

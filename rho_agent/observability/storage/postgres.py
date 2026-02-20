@@ -77,6 +77,7 @@ class PostgresTelemetryStore:
                     total_output_tokens = %s,
                     total_reasoning_tokens = %s,
                     total_tool_calls = %s,
+                    total_cost_usd = %s,
                     context_size = %s,
                     metadata = %s
                 WHERE session_id = %s
@@ -88,6 +89,7 @@ class PostgresTelemetryStore:
                     context.total_output_tokens,
                     context.total_reasoning_tokens,
                     context.total_tool_calls,
+                    context.total_cost_usd,
                     context.context_size,
                     json.dumps(context.metadata),
                     context.session_id,
@@ -165,6 +167,7 @@ class PostgresTelemetryStore:
                     input_tokens = %s,
                     output_tokens = %s,
                     reasoning_tokens = %s,
+                    cost_usd = %s,
                     context_size = %s
                 WHERE turn_id = %s
                 """,
@@ -173,6 +176,7 @@ class PostgresTelemetryStore:
                     turn.input_tokens,
                     turn.output_tokens,
                     turn.reasoning_tokens,
+                    turn.cost_usd,
                     turn.context_size,
                     turn.turn_id,
                 ),
@@ -244,7 +248,7 @@ class PostgresTelemetryStore:
                 s.session_id, s.team_id, s.project_id, s.model,
                 s.started_at, s.ended_at, s.status,
                 s.total_input_tokens, s.total_output_tokens, s.total_reasoning_tokens,
-                s.total_tool_calls, s.context_size,
+                s.total_tool_calls, s.total_cost_usd, s.context_size,
                 COUNT(t.turn_id) as turn_count
             FROM sessions s
             LEFT JOIN turns t ON s.session_id = t.session_id
@@ -278,6 +282,7 @@ class PostgresTelemetryStore:
                     total_output_tokens=r["total_output_tokens"] or 0,
                     total_reasoning_tokens=r["total_reasoning_tokens"] or 0,
                     total_tool_calls=r["total_tool_calls"] or 0,
+                    total_cost_usd=r["total_cost_usd"] or 0.0,
                     context_size=r["context_size"] or 0,
                     turn_count=r["turn_count"] or 0,
                 )
@@ -308,7 +313,7 @@ class PostgresTelemetryStore:
             cur = conn.execute(
                 """
                 SELECT turn_id, turn_index, started_at, ended_at,
-                       input_tokens, output_tokens, reasoning_tokens, context_size, user_input
+                       input_tokens, output_tokens, reasoning_tokens, cost_usd, context_size, user_input
                 FROM turns WHERE session_id = %s ORDER BY turn_index
                 """,
                 (session_id,),
@@ -353,6 +358,7 @@ class PostgresTelemetryStore:
                         "input_tokens": t.get("input_tokens") or 0,
                         "output_tokens": t.get("output_tokens") or 0,
                         "reasoning_tokens": t.get("reasoning_tokens") or 0,
+                        "cost_usd": t.get("cost_usd") or 0.0,
                         "context_size": t.get("context_size") or 0,
                         "user_input": t.get("user_input"),
                         "tool_executions": tool_executions,
@@ -383,6 +389,7 @@ class PostgresTelemetryStore:
                 total_output_tokens=s.get("total_output_tokens") or 0,
                 total_reasoning_tokens=s.get("total_reasoning_tokens") or 0,
                 total_tool_calls=s.get("total_tool_calls") or 0,
+                total_cost_usd=s.get("total_cost_usd") or 0.0,
                 context_size=s.get("context_size") or 0,
                 metadata=metadata,
                 turns=turns,
@@ -463,7 +470,8 @@ class PostgresTelemetryStore:
                 SUM(total_input_tokens) as total_input_tokens,
                 SUM(total_output_tokens) as total_output_tokens,
                 SUM(total_reasoning_tokens) as total_reasoning_tokens,
-                SUM(total_tool_calls) as total_tool_calls
+                SUM(total_tool_calls) as total_tool_calls,
+                SUM(total_cost_usd) as total_cost_usd
             FROM sessions
             WHERE {where_clause}
             GROUP BY team_id, project_id
@@ -482,6 +490,7 @@ class PostgresTelemetryStore:
                     total_output_tokens=r["total_output_tokens"] or 0,
                     total_reasoning_tokens=r["total_reasoning_tokens"] or 0,
                     total_tool_calls=r["total_tool_calls"] or 0,
+                    total_cost_usd=r["total_cost_usd"] or 0.0,
                 )
                 for row in cur.fetchall()
                 for r in [dict(zip(columns, row))]

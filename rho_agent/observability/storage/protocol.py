@@ -27,6 +27,7 @@ class SessionSummary:
     total_output_tokens: int
     total_reasoning_tokens: int
     total_tool_calls: int
+    total_cost_usd: float
     context_size: int
     turn_count: int
 
@@ -49,6 +50,7 @@ class SessionDetail:
     total_output_tokens: int
     total_reasoning_tokens: int
     total_tool_calls: int
+    total_cost_usd: float
     context_size: int
     metadata: dict[str, Any]
     turns: list[dict[str, Any]]
@@ -77,6 +79,7 @@ class CostSummary:
     total_output_tokens: int
     total_reasoning_tokens: int
     total_tool_calls: int
+    total_cost_usd: float
 
 
 # ── Storage protocol ────────────────────────────────────────────────

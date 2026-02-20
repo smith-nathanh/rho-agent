@@ -54,6 +54,7 @@ class TelemetryContext:
     total_output_tokens: int = 0
     total_reasoning_tokens: int = 0
     total_tool_calls: int = 0
+    total_cost_usd: float = 0.0
     context_size: int = 0  # Current conversation context size (last API call's input tokens)
 
     # Current turn tracking
@@ -120,12 +121,17 @@ class TelemetryContext:
         self.current_turn_id = None
 
     def record_tokens(
-        self, input_tokens: int, output_tokens: int, reasoning_tokens: int = 0
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        reasoning_tokens: int = 0,
+        cost_usd: float = 0.0,
     ) -> None:
-        """Record token usage."""
+        """Record token usage and cost."""
         self.total_input_tokens += input_tokens
         self.total_output_tokens += output_tokens
         self.total_reasoning_tokens += reasoning_tokens
+        self.total_cost_usd += cost_usd
 
     def record_tool_call(self) -> None:
         """Record a tool call."""
@@ -154,6 +160,7 @@ class TelemetryContext:
             "total_output_tokens": self.total_output_tokens,
             "total_reasoning_tokens": self.total_reasoning_tokens,
             "total_tool_calls": self.total_tool_calls,
+            "total_cost_usd": self.total_cost_usd,
             "context_size": self.context_size,
             "metadata": self.metadata,
         }
@@ -171,6 +178,7 @@ class TurnContext:
     input_tokens: int = 0
     output_tokens: int = 0
     reasoning_tokens: int = 0
+    cost_usd: float = 0.0
     tool_calls: int = 0
     user_input: str = ""
     context_size: int = 0  # Context size at end of turn
@@ -190,6 +198,7 @@ class TurnContext:
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "reasoning_tokens": self.reasoning_tokens,
+            "cost_usd": self.cost_usd,
             "tool_calls": self.tool_calls,
             "context_size": self.context_size,
         }
