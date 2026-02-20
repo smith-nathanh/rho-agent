@@ -79,6 +79,7 @@ class TokenStatus:
         self.context_size = 0
         self.total_input_tokens = input_tokens
         self.total_output_tokens = output_tokens
+        self.total_cached_tokens = 0
 
     def update(self, usage: dict[str, int] | None) -> None:
         """Update counters from a turn usage dict."""
@@ -87,13 +88,23 @@ class TokenStatus:
         self.context_size = usage.get("context_size", self.context_size)
         self.total_input_tokens = usage.get("total_input_tokens", self.total_input_tokens)
         self.total_output_tokens = usage.get("total_output_tokens", self.total_output_tokens)
+        self.total_cached_tokens = usage.get("total_cached_tokens", self.total_cached_tokens)
+
+    @property
+    def cache_hit_rate(self) -> float:
+        """Fraction of input tokens served from prompt cache."""
+        if self.total_input_tokens == 0:
+            return 0.0
+        return self.total_cached_tokens / self.total_input_tokens
 
     def render(self) -> str:
         """Render token metrics as a compact status-bar string."""
+        cache_pct = f" cache:{self.cache_hit_rate:.0%}" if self.total_cached_tokens else ""
         return (
-            f"context:{self.context_size} "
-            f"in:{self.total_input_tokens} "
-            f"out:{self.total_output_tokens}"
+            f"context:{self.context_size}"
+            f"{cache_pct}, "
+            f"session: {self.total_input_tokens} in | "
+            f"{self.total_output_tokens} out"
         )
 
 
@@ -102,6 +113,7 @@ def _sync_token_status_from_session(token_status: TokenStatus, session: Any) -> 
     token_status.context_size = session.last_input_tokens
     token_status.total_input_tokens = session.total_input_tokens
     token_status.total_output_tokens = session.total_output_tokens
+    token_status.total_cached_tokens = session.total_cached_tokens
 
 
 def _format_token_count(tokens: int) -> str:

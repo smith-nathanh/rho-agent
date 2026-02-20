@@ -94,6 +94,13 @@ class Session:
         if input_tokens > 0:
             self.last_input_tokens = input_tokens
 
+    @property
+    def cache_hit_rate(self) -> float:
+        """Fraction of input tokens served from prompt cache (0.0–1.0)."""
+        if self.total_input_tokens == 0:
+            return 0.0
+        return self.total_cached_tokens / self.total_input_tokens
+
     def get_messages(self) -> list[dict[str, Any]]:
         """Get history in API format."""
         return self.history.copy()

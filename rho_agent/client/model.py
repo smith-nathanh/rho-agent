@@ -145,11 +145,16 @@ class ModelClient:
                     if not chunk.choices:
                         # Usage info comes in final chunk with no choices
                         if chunk.usage:
+                            cached = 0
+                            details = getattr(chunk.usage, "prompt_tokens_details", None)
+                            if details:
+                                cached = getattr(details, "cached_tokens", 0) or 0
                             yield StreamEvent(
                                 type="done",
                                 usage={
                                     "input_tokens": chunk.usage.prompt_tokens,
                                     "output_tokens": chunk.usage.completion_tokens,
+                                    "cached_tokens": cached,
                                 },
                             )
                         continue
@@ -260,9 +265,15 @@ class ModelClient:
                     )
 
             # Emit done with usage
+            cached = 0
+            if response.usage:
+                details = getattr(response.usage, "prompt_tokens_details", None)
+                if details:
+                    cached = getattr(details, "cached_tokens", 0) or 0
             usage = {
                 "input_tokens": response.usage.prompt_tokens if response.usage else 0,
                 "output_tokens": response.usage.completion_tokens if response.usage else 0,
+                "cached_tokens": cached,
             }
             yield StreamEvent(type="done", usage=usage)
 
@@ -294,16 +305,62 @@ class ModelClient:
 
             response = await self._client.chat.completions.create(**kwargs)
             content = response.choices[0].message.content or ""
+            cached = 0
+            if response.usage:
+                details = getattr(response.usage, "prompt_tokens_details", None)
+                if details:
+                    cached = getattr(details, "cached_tokens", 0) or 0
             usage = {
                 "input_tokens": response.usage.prompt_tokens if response.usage else 0,
                 "output_tokens": response.usage.completion_tokens if response.usage else 0,
+                "cached_tokens": cached,
                 "cost_usd": 0.0,
             }
             return content, usage
         except APIStatusError as e:
             return (
                 f"API error {e.status_code} (after retries): {e.message}",
-                {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0},
+                {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0},
             )
         except Exception as e:
-            return f"Error: {e}", {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+            return f"Error: {e}", {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0}
+
+    async def complete_prompt(self, prompt: Prompt) -> tuple[str, dict[str, Any]]:
+        """Non-streaming completion from a Prompt, preserving system/tools prefix.
+
+        Like complete() but accepts a Prompt so the system prompt and tool
+        definitions are included in the request — enabling prompt-cache reuse
+        when the prefix matches a previous streaming call.
+        """
+        messages = self._build_messages(prompt)
+        try:
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "messages": messages,
+                "stream": False,
+            }
+            if self._reasoning_effort:
+                kwargs["reasoning_effort"] = self._reasoning_effort
+            elif self._temperature is not None:
+                kwargs["temperature"] = self._temperature
+            if prompt.tools:
+                kwargs["tools"] = prompt.tools
+            if self._service_tier:
+                kwargs["service_tier"] = self._service_tier
+
+            response = await self._client.chat.completions.create(**kwargs)
+            content = response.choices[0].message.content or ""
+            usage = {
+                "input_tokens": response.usage.prompt_tokens if response.usage else 0,
+                "output_tokens": response.usage.completion_tokens if response.usage else 0,
+                "cached_tokens": 0,
+                "cost_usd": 0.0,
+            }
+            return content, usage
+        except APIStatusError as e:
+            return (
+                f"API error {e.status_code} (after retries): {e.message}",
+                {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0},
+            )
+        except Exception as e:
+            return f"Error: {e}", {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0}

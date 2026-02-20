@@ -63,8 +63,16 @@ class ToolRegistry:
         return self._handlers.get(name)
 
     def get_specs(self) -> list[dict[str, Any]]:
-        """Get all tool specs for the LLM."""
-        return [handler.to_spec() for handler in self._handlers.values() if handler.is_enabled]
+        """Get all tool specs for the LLM.
+
+        Tools are returned in sorted name order for prompt-cache stability —
+        any change in ordering invalidates the cached prefix.
+        """
+        return [
+            self._handlers[name].to_spec()
+            for name in sorted(self._handlers)
+            if self._handlers[name].is_enabled
+        ]
 
     def requires_approval(self, tool_name: str) -> bool:
         """Check if a tool requires user approval before execution."""

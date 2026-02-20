@@ -14,7 +14,10 @@ from ..tools.registry import ToolRegistry
 from .session import Session, ToolResult
 from .truncate import truncate_output
 
-# Auto-compaction triggers at this fraction of the model's context window
+# Auto-compaction triggers at this fraction of the model's context window.
+# The remaining 30 % acts as a compaction buffer: the cache-safe fork resends the
+# full conversation as input (a cache hit), but needs headroom for the summary
+# output tokens (~10-20k) and one more user turn before compaction fires.
 AUTO_COMPACT_THRESHOLD = 0.7
 
 # Continuation nudge settings (eval mode only)
@@ -179,6 +182,10 @@ class Agent:
     ) -> CompactResult:
         """Compact the conversation history into a summary.
 
+        Uses cache-safe forking: the compaction call reuses the same system
+        prompt, tool definitions, and conversation history as the parent so
+        the provider's prompt cache is hit on the shared prefix.
+
         Args:
             custom_instructions: Optional guidance for what to prioritize in summary.
             trigger: "manual" (user-initiated) or "auto" (context limit reached).
@@ -188,24 +195,32 @@ class Agent:
         """
         tokens_before = self._session.estimate_tokens()
 
-        # Build the summarization prompt
-        system = COMPACTION_SYSTEM_PROMPT
+        # Build compaction instruction to append after the existing conversation
+        compaction_msg = COMPACTION_SYSTEM_PROMPT
         if custom_instructions:
-            system += f"\n\nUser guidance: {custom_instructions}"
+            compaction_msg += f"\n\nUser guidance: {custom_instructions}"
 
-        # Build conversation content for summarization
-        conversation_text = self._format_history_for_summary()
-
-        messages = [
-            {"role": "system", "content": system},
-            {
-                "role": "user",
-                "content": f"Here is the conversation to summarize:\n\n{conversation_text}",
-            },
+        # Cache-safe fork: same system prompt + tools + full history, with the
+        # compaction instruction appended as a final user message.  The entire
+        # prefix up to this point should be a prompt-cache hit.
+        history_messages = [
+            Message(
+                role=m["role"],
+                content=m.get("content"),
+                tool_calls=m.get("tool_calls"),
+                tool_call_id=m.get("tool_call_id"),
+            )
+            for m in self._session.get_messages()
         ]
+        history_messages.append(Message(role="user", content=compaction_msg))
 
-        # Get the summary from the model
-        summary, usage = await self._client.complete(messages)
+        prompt = Prompt(
+            system=self._session.system_prompt,
+            messages=history_messages,
+            tools=self._registry.get_specs(),
+        )
+
+        summary, usage = await self._client.complete_prompt(prompt)
         self._session.update_token_usage(
             usage.get("input_tokens", 0),
             usage.get("output_tokens", 0),
@@ -232,31 +247,6 @@ class Agent:
             tokens_after=tokens_after,
             trigger=trigger,
         )
-
-    def _format_history_for_summary(self) -> str:
-        """Format conversation history as text for summarization."""
-        parts = []
-        for msg in self._session.get_messages():
-            role = msg.get("role", "unknown")
-            content = msg.get("content")
-
-            if role == "user":
-                parts.append(f"User: {content}")
-            elif role == "assistant":
-                if content:
-                    parts.append(f"Assistant: {content}")
-                if msg.get("tool_calls"):
-                    for tc in msg["tool_calls"]:
-                        func = tc.get("function", {})
-                        parts.append(f"Assistant called tool: {func.get('name', 'unknown')}")
-            elif role == "tool":
-                # Summarize tool results briefly
-                result = content or ""
-                if len(result) > 500:
-                    result = result[:500] + "..."
-                parts.append(f"Tool result: {result}")
-
-        return "\n\n".join(parts)
 
     def should_auto_compact(self) -> bool:
         """Check if auto-compaction should be triggered."""
