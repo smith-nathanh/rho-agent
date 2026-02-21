@@ -1,16 +1,16 @@
 # Examples
 
-Runnable examples demonstrating the three main patterns for using the `rho_agent.runtime` API programmatically.
+Runnable examples demonstrating the main patterns for using the `rho_agent` API programmatically.
 
 ## Basic Single-Agent
 
-[`basic_agent.py`](basic_agent.py) — The simplest starting point. Creates a runtime, sends a prompt, and collects the result.
+[`basic_agent.py`](basic_agent.py) — The simplest starting point. Creates an agent, starts a session, sends a prompt, and collects the result.
 
 ```bash
 uv run python examples/basic_agent.py ~/some/project "Summarize the error handling"
 ```
 
-Key API: `create_runtime()` → `run_prompt()` → read `result.text`
+Key API: `Agent(AgentConfig(...))` → `Session(agent)` → `session.run(prompt)` → read `result.text`
 
 ## Parallel Multi-Agent Dispatch
 
@@ -20,7 +20,7 @@ Key API: `create_runtime()` → `run_prompt()` → read `result.text`
 uv run python examples/log_debugger/run.py --demo --output report.json
 ```
 
-Key API: `create_runtime()` per agent → `dispatch_prompt()` → `handle.wait()` to collect results concurrently
+Key API: `Agent`/`Session` per agent → `asyncio.gather()` to collect results concurrently
 
 ## Streaming with Callbacks
 
@@ -31,4 +31,4 @@ python examples/sql_explorer/seed_database.py   # one-time setup
 uv run streamlit run examples/sql_explorer/app.py
 ```
 
-Key API: `run_prompt(runtime, prompt, on_event=callback)` for real-time event handling
+Key API: `session.run(prompt, on_event=callback)` for real-time event handling

@@ -9,8 +9,10 @@ import os
 from time import monotonic
 from typing import Any
 
+from ...core.agent import Agent
 from ...core.config import AgentConfig
 from ...core.events import ApprovalCallback
+from ...core.session import Session
 from ...core.state import State
 from ..base import ToolHandler, ToolInvocation, ToolOutput
 
@@ -78,10 +80,6 @@ class DelegateHandler(ToolHandler):
 
         if not instruction:
             return ToolOutput(content="Delegate requires a non-empty instruction.", success=False)
-
-        # Lazy import to avoid circular imports
-        from ...core.agent import Agent
-        from ...core.session import Session
 
         # Build child state, optionally with parent history
         child_state = State()

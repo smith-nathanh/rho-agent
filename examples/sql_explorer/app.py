@@ -35,12 +35,7 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 import pandas as pd
 import streamlit as st
 
-from rho_agent.runtime import (
-    RuntimeOptions,
-    create_runtime,
-    run_prompt,
-)
-from rho_agent.runtime.types import LocalRuntime
+from rho_agent import Agent, AgentConfig, Session
 
 # Config
 DB_PATH = Path(__file__).parent / "sample_data.db"
@@ -66,8 +61,8 @@ def init_session_state() -> None:
         st.session_state.query_history = []
     if "pending_prompt" not in st.session_state:
         st.session_state.pending_prompt = None
-    if "runtime" not in st.session_state:
-        st.session_state.runtime = None
+    if "agent_session" not in st.session_state:
+        st.session_state.agent_session = None
 
 
 def ensure_demo_db_config() -> None:
@@ -81,19 +76,19 @@ def ensure_demo_db_config() -> None:
     os.environ["RHO_AGENT_DB_CONFIG"] = str(DB_CONFIG_PATH)
 
 
-def get_runtime() -> LocalRuntime:
-    """Get or create the session runtime."""
-    runtime = st.session_state.runtime
-    if runtime is None:
-        runtime = create_runtime(
-            SYSTEM_PROMPT,
-            options=RuntimeOptions(
-                profile="readonly",
-                working_dir=str(Path(__file__).parent),
-            ),
+def get_session() -> Session:
+    """Get or create the agent session."""
+    session = st.session_state.agent_session
+    if session is None:
+        config = AgentConfig(
+            system_prompt=SYSTEM_PROMPT,
+            profile="readonly",
+            working_dir=str(Path(__file__).parent),
         )
-        st.session_state.runtime = runtime
-    return runtime
+        agent = Agent(config)
+        session = Session(agent)
+        st.session_state.agent_session = session
+    return session
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -182,8 +177,7 @@ def render_chat_tab() -> None:
 
                 async def stream_events():
                     nonlocal response_text, tool_calls, current_tool_placeholder
-                    runtime = get_runtime()
-                    await runtime.start()
+                    session = get_session()
 
                     async def on_event(event):
                         nonlocal response_text, tool_calls, current_tool_placeholder
@@ -216,7 +210,7 @@ def render_chat_tab() -> None:
                                 current_tool_placeholder.markdown(f"`{sig}`")
                                 current_tool_placeholder = None
 
-                    await run_prompt(runtime, pending_prompt, on_event=on_event)
+                    await session.run(pending_prompt, on_event=on_event)
 
                     if response_text:
                         text_placeholder.markdown(response_text)
@@ -399,10 +393,7 @@ def main() -> None:
         """)
 
         if st.button("Clear Conversation"):
-            runtime = st.session_state.get("runtime")
-            if runtime is not None:
-                asyncio.run(runtime.close("completed"))
-                st.session_state.runtime = None
+            st.session_state.agent_session = None
             st.session_state.messages = []
             st.rerun()
 

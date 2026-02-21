@@ -31,12 +31,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from rho_agent.runtime import (
-    AgentHandle,
-    RuntimeOptions,
-    create_runtime,
-    dispatch_prompt,
-)
+from rho_agent import Agent, AgentConfig, Session
 
 
 @dataclass
@@ -288,75 +283,73 @@ async def run_dispatcher(args: argparse.Namespace) -> int:
 
     print(f"Dispatching {len(incidents)} debug agents in parallel...\n")
 
-    # Create one runtime per incident, each with its own working_dir
-    handles: list[tuple[Incident, AgentHandle]] = []
+    # Create one agent+session per incident, each with its own working_dir
+    sessions: list[tuple[Incident, Session]] = []
 
     for incident in incidents:
         system_prompt = load_system_prompt(incident)
-        options = RuntimeOptions(
+        config = AgentConfig(
+            system_prompt=system_prompt,
             model=args.model,
             profile="readonly",
             working_dir=incident.working_dir,
             auto_approve=True,
-            enable_delegate=False,
-            team_id="demo",
-            project_id="log-debugger",
-            telemetry_metadata={
-                "source": "examples_log_debugger",
-                "service": incident.service_name,
-            },
         )
-        runtime = create_runtime(system_prompt, options=options)
-        await runtime.start()
-
-        user_prompt = build_user_prompt(incident)
-        handle = dispatch_prompt(runtime, user_prompt)
-        handles.append((incident, handle))
+        agent = Agent(config)
+        session = Session(agent)
+        sessions.append((incident, session))
         print(f"  [{incident.service_name}] dispatched → {incident.working_dir}/{incident.log_file}")
 
     print()
 
-    # Wait for all agents to complete and collect results
+    # Run all agents concurrently
+    async def run_one(incident: Incident, session: Session) -> tuple[Incident, object | None, Exception | None]:
+        user_prompt = build_user_prompt(incident)
+        try:
+            result = await session.run(user_prompt)
+            return incident, result, None
+        except Exception as exc:
+            return incident, None, exc
+
+    tasks = [run_one(inc, sess) for inc, sess in sessions]
+    outcomes = await asyncio.gather(*tasks)
+
+    # Collect results
     reports: list[dict] = []
     errors: list[dict] = []
 
-    for incident, handle in handles:
-        try:
-            result = await handle.wait()
-            status = handle.status
-
-            if status == "completed" and result.text.strip():
-                try:
-                    report = extract_json(result.text)
-                    reports.append(report)
-                    root_cause = report.get("root_cause", "unknown")
-                    category = report.get("category", "unknown")
-                    severity = report.get("severity", "unknown")
-                    print(f"  [{incident.service_name}] done — {severity} {category}: {root_cause}")
-                except ValueError:
-                    errors.append({
-                        "service": incident.service_name,
-                        "error": "Agent did not return valid JSON",
-                        "raw_output": result.text[:500],
-                    })
-                    print(f"  [{incident.service_name}] done — could not parse JSON from output")
-            else:
-                errors.append({
-                    "service": incident.service_name,
-                    "error": f"Agent finished with status: {status}",
-                    "raw_output": result.text[:500] if result.text else "",
-                })
-                print(f"  [{incident.service_name}] finished with status: {status}")
-        except Exception as exc:
+    for incident, result, exc in outcomes:
+        if exc is not None:
             errors.append({
                 "service": incident.service_name,
                 "error": str(exc),
             })
             print(f"  [{incident.service_name}] failed: {exc}")
+            continue
 
-    # Close all runtimes
-    for _, handle in handles:
-        await handle.runtime.close(handle.status)
+        if result and result.status == "completed" and result.text.strip():
+            try:
+                report = extract_json(result.text)
+                reports.append(report)
+                root_cause = report.get("root_cause", "unknown")
+                category = report.get("category", "unknown")
+                severity = report.get("severity", "unknown")
+                print(f"  [{incident.service_name}] done — {severity} {category}: {root_cause}")
+            except ValueError:
+                errors.append({
+                    "service": incident.service_name,
+                    "error": "Agent did not return valid JSON",
+                    "raw_output": result.text[:500],
+                })
+                print(f"  [{incident.service_name}] done — could not parse JSON from output")
+        else:
+            status = result.status if result else "unknown"
+            errors.append({
+                "service": incident.service_name,
+                "error": f"Agent finished with status: {status}",
+                "raw_output": result.text[:500] if result and result.text else "",
+            })
+            print(f"  [{incident.service_name}] finished with status: {status}")
 
     # Build consolidated report
     consolidated = {

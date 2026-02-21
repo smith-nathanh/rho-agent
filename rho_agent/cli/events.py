@@ -8,10 +8,8 @@ from rich.markdown import Markdown
 from rich.markup import escape
 from rich.panel import Panel
 
-from ..capabilities import CapabilityProfile
 from ..core.events import AgentEvent
 from .theme import THEME
-from .errors import InvalidProfileError
 from .formatting import (
     TokenStatus,
     _format_tool_preview,
@@ -209,10 +207,6 @@ def handle_command(
         # Handled in run_interactive (needs registry/profile context)
         return "write"
 
-    if cmd.startswith("/mode"):
-        # Handled in run_interactive (needs runtime/profile context)
-        return "mode"
-
     if cmd.startswith("/resume"):
         # Handled in run_interactive (needs conversation store/session context)
         return "resume"
@@ -230,7 +224,6 @@ def handle_command(
                 "[bold]Commands:[/bold]",
                 line("/approve", "Enable auto-approve for all tool calls"),
                 line("/compact [guidance]", "Compact conversation history"),
-                line("/mode [name|path|status]", "Switch or show active capability mode"),
                 line("/write [on|off|status]", "Toggle create-only write tool (readonly mode)"),
                 line("/resume [latest|id]", "Resume a saved conversation"),
                 line("/help", "Show this help"),
@@ -262,17 +255,3 @@ def handle_command(
         return None
 
     return None
-
-
-def switch_runtime_profile(
-    profile_name_or_path: str,
-    *,
-    working_dir: str,
-) -> CapabilityProfile:
-    """Load a capability profile (used for mode switching in interactive sessions)."""
-    from ..capabilities.factory import load_profile
-
-    try:
-        return load_profile(profile_name_or_path)
-    except (ValueError, FileNotFoundError) as e:
-        raise InvalidProfileError(str(e)) from e

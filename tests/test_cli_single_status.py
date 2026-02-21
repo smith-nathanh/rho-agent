@@ -1,68 +1,53 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from pathlib import Path
-from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from rho_agent.cli import run_single, run_single_with_output
-from rho_agent.core.events import AgentEvent
+from rho_agent.core.events import AgentEvent, RunResult
 
 
-class ErrorAgent:
-    async def run_turn(self, user_input: str) -> AsyncIterator[AgentEvent]:
-        del user_input
-        yield AgentEvent(type="error", content="boom")
+def _make_error_session():
+    """Create a mock Session whose run() emits an error event."""
+    mock_session = AsyncMock()
+    mock_session.cancel = MagicMock()
 
-    def request_cancel(self) -> None:
-        return None
+    async def fake_run(prompt, *, on_event=None):
+        if on_event:
+            event = AgentEvent(type="error", content="boom")
+            result = on_event(event)
+            if result is not None:
+                await result
+        return RunResult(text="", events=[], status="error", usage={})
+
+    mock_session.run = fake_run
+    return mock_session
 
 
 @pytest.mark.asyncio
-async def test_run_single_sets_error_status_on_error_event(monkeypatch: pytest.MonkeyPatch) -> None:
-    statuses: list[str] = []
-
-    async def fake_start() -> None:
-        return None
-
-    async def fake_close(status: str = "completed") -> None:
-        statuses.append(status)
-
+async def test_run_single_handles_error_event(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("rho_agent.cli.single.handle_event", lambda event, **kwargs: None)
     monkeypatch.setattr("rho_agent.cli.single.platform.system", lambda: "Windows")
 
-    runtime = SimpleNamespace(
-        agent=ErrorAgent(), observability=None, start=fake_start, close=fake_close
-    )
-    await run_single(runtime, "prompt")
-
-    assert statuses == ["error"]
+    session = _make_error_session()
+    # Should not raise
+    await run_single(session, "prompt")
 
 
 @pytest.mark.asyncio
-async def test_run_single_with_output_returns_false_and_sets_error_status(
+async def test_run_single_with_output_returns_false_on_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    statuses: list[str] = []
-
-    async def fake_start() -> None:
-        return None
-
-    async def fake_close(status: str = "completed") -> None:
-        statuses.append(status)
-
     monkeypatch.setattr("rho_agent.cli.single.handle_event", lambda event, **kwargs: None)
     monkeypatch.setattr("rho_agent.cli.single.platform.system", lambda: "Windows")
 
-    runtime = SimpleNamespace(
-        agent=ErrorAgent(), observability=None, start=fake_start, close=fake_close
-    )
+    session = _make_error_session()
     output_path = tmp_path / "response.txt"
 
-    result = await run_single_with_output(runtime, "prompt", str(output_path))
+    result = await run_single_with_output(session, "prompt", str(output_path))
 
     assert result is False
-    assert statuses == ["error"]
     assert not output_path.exists()

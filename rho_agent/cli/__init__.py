@@ -15,7 +15,6 @@ from .events import (
     ApprovalHandler,
     handle_command,
     handle_event,
-    switch_runtime_profile,
 )
 from .formatting import TokenStatus
 from .interactive import run_interactive
@@ -43,7 +42,7 @@ def cli() -> None:
         _conduct_registered = True
 
     args = sys.argv[1:]
-    subcommands = {"main", "dashboard", "monitor", "ps", "kill", "conduct"}
+    subcommands = {"main", "dashboard", "monitor", "ps", "cancel", "conduct"}
 
     if not args or args[0] not in subcommands:
         args = ["main", *args]
@@ -67,7 +66,6 @@ __all__ = [
     "run_interactive",
     "run_single",
     "run_single_with_output",
-    "switch_runtime_profile",
 ]
 
 

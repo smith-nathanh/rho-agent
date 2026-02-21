@@ -5,8 +5,8 @@ Dispatches read-only debug agents in parallel across multiple working directorie
 ## How it works
 
 1. You define a list of **incidents** — each is a `(working_dir, log_file, service_name)` tuple
-2. The orchestrator creates one `readonly` runtime per incident, pointed at that directory
-3. All agents are dispatched concurrently via `dispatch_prompt()`
+2. The orchestrator creates one `readonly` `Agent`/`Session` per incident, pointed at that directory
+3. All agents run concurrently via `asyncio.gather()`
 4. Each agent reads its log file, diagnoses the root cause, and returns structured JSON
 5. Results are merged into a single report with per-incident diagnoses and a summary
 

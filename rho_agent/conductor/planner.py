@@ -7,8 +7,8 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from ..runtime import create_runtime, run_prompt, session_usage
-from ..runtime.types import SessionUsage
+from ..core.agent import Agent
+from ..core.session import Session
 from .models import ConductorConfig, Task, TaskDAG, VerificationConfig
 from .prompts import PLANNER_SYSTEM_PROMPT, PLANNER_USER_TEMPLATE
 
@@ -116,15 +116,9 @@ async def run_planner(
 
     Returns (TaskDAG, usage_dict).
     """
-    options = config.runtime_options(
-        profile="readonly",
-        metadata={"source": "conductor_planner"},
-    )
-    runtime = create_runtime(
-        PLANNER_SYSTEM_PROMPT,
-        options=options,
-        cancel_check=cancel_check,
-    )
+    agent = Agent(config.agent_config(system_prompt=PLANNER_SYSTEM_PROMPT, profile="readonly"))
+    session = Session(agent)
+    session.cancel_check = cancel_check
 
     project_tree = await _get_project_tree(config.working_dir)
     user_prompt = PLANNER_USER_TEMPLATE.format(
@@ -132,14 +126,13 @@ async def run_planner(
         project_tree=project_tree,
     )
 
-    async with runtime:
-        result = await run_prompt(runtime, user_prompt)
-        raw = _extract_json(result.text)
-        dag = _build_dag(raw, config)
+    result = await session.run(user_prompt)
+    raw = _extract_json(result.text)
+    dag = _build_dag(raw, config)
 
-    usage = session_usage(runtime.session)
+    usage = session.state.usage
     return dag, {
-        "input_tokens": usage.input_tokens,
-        "output_tokens": usage.output_tokens,
-        "cost_usd": usage.cost_usd,
+        "input_tokens": usage["input_tokens"],
+        "output_tokens": usage["output_tokens"],
+        "cost_usd": usage["cost_usd"],
     }
