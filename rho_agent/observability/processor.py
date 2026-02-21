@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator
 
-from ..core.agent import AgentEvent
+from ..core.events import AgentEvent
 from .config import ObservabilityConfig
 from .context import TelemetryContext, TurnContext, ToolExecutionContext
 from .exporters.base import Exporter

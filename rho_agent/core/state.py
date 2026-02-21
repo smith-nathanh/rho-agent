@@ -24,10 +24,21 @@ class StateObserver(Protocol):
 
 @dataclass
 class State:
-    """Pure data object — the accumulating record of everything that happened.
+    """Pure conversation trajectory — the RL "trajectory" in Agent/State/Session.
 
-    Holds messages (OpenAI format), cumulative usage, and status.
-    Writes trace.jsonl incrementally when a trace_path is set.
+    The single source of truth for a conversation: messages (OpenAI chat format),
+    cumulative token usage/cost, and run status. State is the trace — there is no
+    separate observability data store.
+
+    Key properties:
+    - **Serializable**: ``to_jsonl()`` / ``from_jsonl()`` for persistence and replay.
+    - **Incremental writes**: When ``trace_path`` is set, every event is appended to
+      ``trace.jsonl`` immediately (crash-safe, no explicit save step).
+    - **Observable**: Attach ``StateObserver`` instances for live export to external
+      systems (Postgres, OTel). Observers are fire-and-forget side channels.
+    - **Inspectable without a Session**: Load a trace file and analyze offline.
+
+    State does NOT hold the system prompt or tools — those belong to Agent.
     """
 
     messages: list[dict[str, Any]] = field(default_factory=list)

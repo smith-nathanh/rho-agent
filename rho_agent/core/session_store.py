@@ -38,15 +38,22 @@ class SessionInfo:
 
 
 class SessionStore:
-    """Directory manager for sessions.
+    """Directory manager for session persistence, discovery, and resume.
 
-    Each session is a directory containing:
-    - config.yaml: the AgentConfig
-    - trace.jsonl: append-only event log (State writes this)
-    - meta.json: pid, model, status, started_at (programmatic sessions)
+    Manages a base directory where each session gets its own subdirectory.
+    Does NOT own session data — State writes ``trace.jsonl`` incrementally,
+    SessionStore just manages the directory layout and provides create/resume/list.
 
-    CLI sessions under ~/.config/rho-agent/sessions/ are lightweight —
-    just config.yaml + trace.jsonl.
+    Directory layout per session::
+
+        <base_dir>/<session_id>/
+            config.yaml     # AgentConfig (for resume)
+            trace.jsonl     # append-only event log (State writes this)
+            meta.json       # pid, model, status (programmatic sessions only)
+            cancel          # sentinel file (touch to request cancellation)
+
+    CLI sessions (under ``~/.config/rho-agent/sessions/``) are lightweight —
+    just ``config.yaml`` + ``trace.jsonl``, no ``meta.json`` or control plane files.
     """
 
     def __init__(self, base_dir: str | Path) -> None:
@@ -100,9 +107,7 @@ class SessionStore:
                 json.dumps(meta, indent=2), encoding="utf-8"
             )
 
-        session = Session(agent, session_id=sid, state=state)
-        session._session_dir = session_dir
-        return session
+        return Session(agent, session_id=sid, state=state, session_dir=session_dir)
 
     def resume(
         self,
@@ -138,9 +143,7 @@ class SessionStore:
         state.trace_path = trace_path
 
         agent = Agent(agent_config)
-        session = Session(agent, session_id=session_id, state=state)
-        session._session_dir = session_dir
-        return session
+        return Session(agent, session_id=session_id, state=state, session_dir=session_dir)
 
     def list(self, limit: int = 20) -> list[SessionInfo]:
         """List sessions, newest first."""

@@ -12,10 +12,29 @@ import yaml
 
 @dataclass
 class AgentConfig:
-    """Full agent definition: identity (system prompt, variables) and infrastructure.
+    """Portable agent configuration — what an agent is and how it runs.
+
+    Captures identity (system prompt + template variables) and infrastructure
+    (model, profile, backend, API settings). Designed to live as a YAML file
+    in version control so teams can share and version agent definitions.
 
     Unknown YAML fields are preserved in ``extras`` so teams can stash custom
-    metadata (notes, owner, version) in their config files.
+    metadata (notes, owner, version) in their config files without breaking
+    deserialization.
+
+    Usage::
+
+        # From YAML file
+        config = AgentConfig.from_file("configs/investigator.yaml")
+
+        # Inline
+        config = AgentConfig(
+            system_prompt="You are a helpful assistant.",
+            profile="developer",
+        )
+
+        # Then create an Agent from it
+        agent = Agent(config)
     """
 
     system_prompt: str = ""

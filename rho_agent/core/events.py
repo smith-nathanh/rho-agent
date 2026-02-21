@@ -54,20 +54,23 @@ EventHandler = Callable[["AgentEvent"], None | Awaitable[None]]
 
 @dataclass
 class AgentEvent:
-    """Event emitted during execution.
+    """Event emitted during a Session.run() execution.
+
+    Events stream to the ``on_event`` callback as the agent works, enabling
+    live UIs (streaming text, tool progress, usage tracking). The ``type``
+    field determines which other fields are populated.
 
     Event types:
-    - "text": Streaming text content from the model
-    - "tool_start": Tool invocation started
-    - "tool_end": Tool invocation completed
-    - "api_call_complete": Single API call finished (per-call metrics)
-    - "turn_complete": Full turn finished (cumulative metrics)
-    - "error": An error occurred
-    - "tool_blocked": Tool call was blocked by user
-    - "interruption": Run paused waiting for out-of-band tool approval
-    - "compact_start": Context compaction starting
-    - "compact_end": Context compaction finished
-    - "cancelled": Turn was cancelled
+    - ``text``: Streaming text chunk from the model (``content`` set).
+    - ``tool_start``: Tool invocation started (``tool_name``, ``tool_call_id``, ``tool_args``).
+    - ``tool_end``: Tool completed (``tool_name``, ``tool_result``, ``tool_metadata``).
+    - ``tool_blocked``: Tool call rejected by user approval (``tool_name``, ``tool_args``).
+    - ``api_call_complete``: Single LLM API call finished (``usage`` with per-call metrics).
+    - ``turn_complete``: Full agentic turn finished (``usage`` with cumulative session metrics).
+    - ``compact_start``/``compact_end``: Context window compaction lifecycle.
+    - ``error``: An error occurred (``content`` has the message).
+    - ``cancelled``: Run was cancelled cooperatively.
+    - ``interruption``: Run paused for out-of-band tool approval.
     """
 
     type: str
@@ -92,7 +95,12 @@ class CompactResult:
 
 @dataclass
 class RunResult:
-    """Returned by session.run()."""
+    """Result of a single ``session.run()`` call.
+
+    Contains the final concatenated text response, all events from the run,
+    the terminal status, and token usage/cost for this run only (not cumulative
+    session totals — those live on ``session.state.usage``).
+    """
 
     text: str
     events: list[AgentEvent]

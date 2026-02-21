@@ -9,10 +9,8 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-import yaml
 from rich.markup import escape
 
-from ..runtime import ObservabilityInitializationError
 from ..signals import SignalManager
 from .theme import THEME
 from .state import MARKDOWN_THEME, console, settings
@@ -27,41 +25,6 @@ def _is_interactive_terminal() -> bool:
     """Return True when running in an interactive TTY."""
     return console.is_terminal and sys.stdin.isatty() and sys.stdout.isatty()
 
-
-def _format_observability_init_error(exc: ObservabilityInitializationError) -> str:
-    cause = exc.__cause__
-    if isinstance(cause, FileNotFoundError):
-        return (
-            f"Observability initialization failed: {cause}. "
-            "Fix --observability-config to point to an existing YAML file and retry."
-        )
-
-    if isinstance(cause, yaml.YAMLError):
-        config_location = exc.config_path or "the observability config file"
-        return (
-            f"Observability initialization failed: invalid YAML in {config_location}: "
-            f"{cause}. Fix the YAML syntax and retry."
-        )
-
-    if isinstance(cause, ValueError) and "tenant" in str(cause).lower():
-        return (
-            "Observability initialization failed: missing tenant information. "
-            "Set both --team-id and --project-id, or define "
-            "observability.tenant.team_id and observability.tenant.project_id in "
-            "the observability config."
-        )
-
-    guidance = []
-    if exc.config_path:
-        guidance.append("verify --observability-config points to a valid YAML file")
-    if exc.team_id and not exc.project_id:
-        guidance.append("provide --project-id")
-    if exc.project_id and not exc.team_id:
-        guidance.append("provide --team-id")
-    if not guidance:
-        guidance.append("set both --team-id and --project-id when observability is enabled")
-
-    return f"Observability initialization failed: {cause or exc}. To fix: {'; '.join(guidance)}."
 
 
 def _get_version() -> str:
@@ -107,13 +70,6 @@ class TokenStatus:
             f"{self.total_output_tokens} out"
         )
 
-
-def _sync_token_status_from_session(token_status: TokenStatus, session: Any) -> None:
-    """Sync UI token status from current session counters (old API)."""
-    token_status.context_size = session.last_input_tokens
-    token_status.total_input_tokens = session.total_input_tokens
-    token_status.total_output_tokens = session.total_output_tokens
-    token_status.total_cached_tokens = session.total_cached_tokens
 
 
 def _sync_token_status_from_state(token_status: TokenStatus, state: Any) -> None:

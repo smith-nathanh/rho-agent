@@ -14,7 +14,8 @@ from dotenv import load_dotenv
 from rho_agent.capabilities import CapabilityProfile
 from rho_agent.capabilities.factory import ToolFactory
 from rho_agent.client.litellm_client import LiteLLMClient
-from rho_agent.core.agent import Agent, AgentEvent
+from rho_agent.core.agent import Agent
+from rho_agent.core.events import AgentEvent
 from rho_agent.core.session import Session
 from rho_agent.eval.harbor.trajectory import TrajectoryBuilder
 from rho_agent.observability import (

@@ -29,7 +29,6 @@ from .errors import (
 )
 from .events import ApprovalHandler
 from .formatting import (
-    _format_observability_init_error,
     _is_interactive_terminal,
     _markup,
 )

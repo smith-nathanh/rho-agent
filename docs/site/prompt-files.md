@@ -77,7 +77,7 @@ rho-agent main --system-prompt task.md --vars-file vars.yaml
 
 From the runtime API:
 
-Variables are resolved at prompt load time before being passed to `create_runtime()`.
+Variables are resolved at prompt load time when constructing an `AgentConfig`.
 
 ## Prompt precedence
 

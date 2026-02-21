@@ -10,29 +10,24 @@ from ..client.model import ModelClient
 from ..tools.registry import ToolRegistry
 from .config import AgentConfig
 
-# Re-export shared types for backwards compatibility
-from .events import (  # noqa: F401
-    AUTO_COMPACT_THRESHOLD,
-    COMPACTION_SYSTEM_PROMPT,
-    COMPLETION_SIGNALS,
-    MAX_NUDGES,
-    NUDGE_MESSAGE,
-    SUMMARY_PREFIX,
-    AgentEvent,
-    ApprovalCallback,
-    ApprovalInterrupt,
-    CompactCallback,
-    CompactResult,
-    EventHandler,
-    RunResult,
-)
-
 
 class Agent:
-    """Stateless agent definition — config + tool registry.
+    """Stateless agent definition — the RL "policy" in the Agent/State/Session decomposition.
 
-    Create one agent, run many conversations via Session.
-    Modify registry before creating a Session; it's frozen after that.
+    Holds the resolved config (identity + infrastructure) and a tool registry
+    (available actions). An Agent is reusable across multiple Sessions — create
+    one Agent, run many conversations.
+
+    The registry can be modified (clear, register custom tools) *before* creating
+    a Session. Once a Session starts, the registry should be treated as frozen
+    because changing tools invalidates the LLM prompt cache.
+
+    Usage::
+
+        agent = Agent(AgentConfig(profile="developer"))
+        agent.registry.clear()
+        agent.registry.register(MyCustomHandler())
+        session = Session(agent)  # registry frozen from here
     """
 
     def __init__(self, config: AgentConfig | None = None) -> None:

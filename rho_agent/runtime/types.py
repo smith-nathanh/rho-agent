@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
-from ..core.agent import Agent, AgentEvent
+from ..core.agent import Agent
+from ..core.events import AgentEvent
 from ..core.session import Session
 from ..observability.processor import ObservabilityProcessor
 from ..tools.registry import ToolRegistry

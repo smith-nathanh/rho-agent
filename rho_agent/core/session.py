@@ -38,9 +38,21 @@ from .truncate import truncate_output
 
 
 class Session:
-    """Execution context — coordinates Agent + State through the LLM -> tools -> LLM loop.
+    """Execution context — the RL "environment" in Agent/State/Session.
 
-    One session = one conversation. Creating a Session freezes the agent's registry.
+    Coordinates Agent (policy) + State (trajectory) through the agentic loop:
+    LLM call -> tool dispatch -> LLM call -> ... until the model stops calling tools.
+
+    One Session = one conversation thread. Each ``run()`` call appends to State,
+    so the agent retains full context across runs. Supports:
+    - **Multi-run conversations**: call ``run()`` multiple times for follow-ups.
+    - **Streaming**: pass ``on_event`` to receive AgentEvents as they happen.
+    - **Cancellation**: ``cancel()`` sets a cooperative flag (also writes a sentinel
+      file when the session has a directory, for cross-process cancellation).
+    - **Auto-compaction**: when context approaches the window limit, automatically
+      summarizes history to stay within bounds.
+    - **Async context manager**: ``async with Session(agent) as s:`` for backends
+      that need cleanup (e.g. Daytona sandbox teardown).
     """
 
     def __init__(
@@ -49,6 +61,7 @@ class Session:
         *,
         session_id: str | None = None,
         state: State | None = None,
+        session_dir: Path | None = None,
     ) -> None:
         from .agent import Agent as AgentClass
 
@@ -57,7 +70,7 @@ class Session:
         self._state = state or State()
         self._client = agent.create_client()
         self._cancelled = False
-        self._session_dir: Path | None = None
+        self._session_dir = session_dir
 
         # Execution-time settings (set by callers before run())
         self.approval_callback: ApprovalCallback | None = None

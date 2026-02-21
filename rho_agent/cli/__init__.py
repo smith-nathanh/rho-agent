@@ -27,7 +27,6 @@ from . import admin as _admin  # noqa: F401
 from . import monitor as _monitor  # noqa: F401
 from . import main_cmd as _main_cmd  # noqa: F401
 
-# Re-export main for backwards compatibility
 from .main_cmd import main
 
 
