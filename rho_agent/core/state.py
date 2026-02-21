@@ -24,7 +24,7 @@ class StateObserver(Protocol):
 
 @dataclass
 class State:
-    """Pure conversation trajectory — the RL "trajectory" in Agent/State/Session.
+    """Pure conversation trajectory in the Agent/State/Session decomposition.
 
     The single source of truth for a conversation: messages (OpenAI chat format),
     cumulative token usage/cost, and run status. State is the trace — there is no

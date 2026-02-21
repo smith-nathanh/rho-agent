@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING, Any
 from ..core.agent import Agent
 from ..core.events import AgentEvent
 from ..core.session import Session
-from ..observability.processor import ObservabilityProcessor
 from ..tools.registry import ToolRegistry
 from .options import RuntimeOptions
 
 if TYPE_CHECKING:
-    from .protocol import Runtime
+    from typing import TypeAlias
+    Runtime: TypeAlias = Any  # protocol was removed in the API redesign
 
 ApprovalCallback = Callable[[str, dict[str, Any]], Awaitable[bool]]
 EventHandler = Callable[[AgentEvent], None | Awaitable[None]]
@@ -29,8 +29,6 @@ def restore_runtime_state(runtime: Runtime, state: RunState) -> None:
     """
     runtime.session_id = state.session_id
     runtime.options.session_id = state.session_id
-    if runtime.observability:
-        runtime.observability.context.session_id = state.session_id
     runtime.session.system_prompt = state.system_prompt
     runtime.session.history = deepcopy(state.history)
     runtime.session.total_input_tokens = state.total_input_tokens
@@ -166,7 +164,6 @@ class LocalRuntime:
     options: RuntimeOptions
     approval_callback: ApprovalCallback | None = None
     cancel_check: Callable[[], bool] | None = None
-    observability: ObservabilityProcessor | None = None
     close_status: str = "completed"
 
     async def __aenter__(self) -> LocalRuntime:
@@ -183,14 +180,12 @@ class LocalRuntime:
         await self.close(status)
 
     async def start(self) -> None:
-        """Start runtime-level telemetry session if configured."""
-        if self.observability:
-            await self.observability.start_session()
+        """Start runtime (no-op for local backend)."""
+        pass
 
     async def close(self, status: str = "completed") -> None:
-        """Close runtime-level telemetry session if configured."""
-        if self.observability:
-            await self.observability.end_session(status)
+        """Close runtime (no-op for local backend)."""
+        pass
 
     def restore_state(self, state: RunState) -> None:
         """Mutate runtime in-place from a serialized run snapshot."""

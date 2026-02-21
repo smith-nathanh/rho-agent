@@ -69,19 +69,16 @@ class SessionStore:
         agent: Agent,
         *,
         session_id: str | None = None,
-        write_meta: bool = False,
     ) -> Session:
-        """Create a new session with a directory, writing config.yaml.
+        """Create a new session with a directory, writing config.yaml and meta.json.
 
         Args:
             agent: The agent to create a session for.
             session_id: Optional custom session ID.
-            write_meta: If True, write meta.json (for programmatic/monitored sessions).
 
         Returns:
             A Session with trace_path set for incremental writing.
         """
-        import os
         import uuid
 
         sid = session_id or str(uuid.uuid4())[:8]
@@ -95,19 +92,27 @@ class SessionStore:
         trace_path = session_dir / "trace.jsonl"
         state = State(trace_path=trace_path)
 
-        # Write meta.json for programmatic sessions
-        if write_meta:
-            meta = {
-                "pid": os.getpid(),
-                "model": agent.config.model,
-                "status": "running",
-                "started_at": datetime.now(timezone.utc).isoformat(),
-            }
-            (session_dir / "meta.json").write_text(
-                json.dumps(meta, indent=2), encoding="utf-8"
-            )
+        # Always write meta.json
+        meta = {
+            "model": agent.config.model,
+            "status": "running",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
+        (session_dir / "meta.json").write_text(
+            json.dumps(meta, indent=2), encoding="utf-8"
+        )
 
         return Session(agent, session_id=sid, state=state, session_dir=session_dir)
+
+    def update_status(self, session_id: str, status: str) -> None:
+        """Update the status field in a session's meta.json."""
+        session_dir = self._base_dir / session_id
+        meta_path = session_dir / "meta.json"
+        if not meta_path.exists():
+            return
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["status"] = status
+        meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
     def resume(
         self,

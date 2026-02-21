@@ -10,7 +10,6 @@ from typing import Any
 
 from ..core.agent import Agent
 from ..core.session import Session
-from ..observability.processor import ObservabilityProcessor
 from ..tools.registry import ToolRegistry
 from .options import RuntimeOptions
 from .types import (
@@ -39,7 +38,7 @@ class DaytonaRuntime:
     options: RuntimeOptions
     approval_callback: ApprovalCallback | None = None
     cancel_check: Callable[[], bool] | None = None
-    observability: ObservabilityProcessor | None = None
+    observability: Any = None
     close_status: str = "completed"
 
     # Daytona-specific — set during construction, not by callers.

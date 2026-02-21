@@ -12,7 +12,7 @@ from .config import AgentConfig
 
 
 class Agent:
-    """Stateless agent definition — the RL "policy" in the Agent/State/Session decomposition.
+    """Stateless agent definition in the Agent/State/Session decomposition.
 
     Holds the resolved config (identity + infrastructure) and a tool registry
     (available actions). An Agent is reusable across multiple Sessions — create

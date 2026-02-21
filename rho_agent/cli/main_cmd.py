@@ -5,8 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import platform
-import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -19,7 +18,6 @@ load_dotenv()
 from ..capabilities import CapabilityProfile, ShellMode
 from ..capabilities.factory import load_profile
 from ..core import Agent, AgentConfig, Session, SessionStore
-from ..signals import AgentInfo, SignalManager
 from .theme import THEME
 from .errors import (
     InvalidModeError,
@@ -142,27 +140,6 @@ def main(
             help="Override shell mode: 'restricted' or 'unrestricted'",
         ),
     ] = None,
-    team_id: Annotated[
-        str | None,
-        typer.Option(
-            "--team-id",
-            help="Team ID for observability (enables telemetry)",
-        ),
-    ] = os.getenv("RHO_AGENT_TEAM_ID"),
-    project_id: Annotated[
-        str | None,
-        typer.Option(
-            "--project-id",
-            help="Project ID for observability (enables telemetry)",
-        ),
-    ] = os.getenv("RHO_AGENT_PROJECT_ID"),
-    observability_config: Annotated[
-        str | None,
-        typer.Option(
-            "--observability-config",
-            help="Path to observability config file",
-        ),
-    ] = os.getenv("RHO_AGENT_OBSERVABILITY_CONFIG"),
 ) -> None:
     """rho-agent: An agent harness and CLI with readonly and developer modes."""
     from ..prompts import load_prompt, parse_vars, prepare_prompt
@@ -221,10 +198,6 @@ def main(
         str(Path(working_dir).expanduser().resolve()) if working_dir else os.getcwd()
     )
 
-    # Generate session ID and set up signal manager for ps/kill support
-    session_id = str(uuid.uuid4())
-    signal_manager = SignalManager()
-
     # Build AgentConfig from flags or --config file
     if resumed_session:
         agent = resumed_session.agent
@@ -255,7 +228,7 @@ def main(
 
         capability_profile = load_profile(agent_config.profile)
         mode_name = capability_profile.name
-        session = session_store.create_session(agent, session_id=session_id[:8])
+        session = session_store.create_session(agent)
     else:
         # Build config from individual CLI flags
         effective_profile = profile or "readonly"
@@ -376,7 +349,7 @@ def main(
             )
             agent._registry = registry
 
-        session = session_store.create_session(agent, session_id=session_id[:8])
+        session = session_store.create_session(agent)
 
     # Register delegate handler if profile supports it
     if capability_profile.name not in ("birdbench",):
@@ -403,54 +376,34 @@ def main(
     # Set up approval handler
     approval_handler = ApprovalHandler(auto_approve=auto_approve)
     session.approval_callback = approval_handler.check_approval
-    session.cancel_check = lambda: signal_manager.is_cancelled(session_id)
 
-    # Register this agent session for ps/kill support
-    agent_info = AgentInfo(
-        session_id=session_id,
-        pid=os.getpid(),
-        model=agent.config.model,
-        instruction_preview=(run_prompt_text or "interactive session")[:100],
-        started_at=datetime.now(timezone.utc).isoformat(),
-    )
-    signal_manager.register(agent_info)
-
-    try:
-        if run_prompt_text:
-            console.print(_markup(f"Mode: {mode_name}", THEME.accent))
-            if output:
-                asyncio.run(
-                    run_single_with_output(
-                        session,
-                        run_prompt_text,
-                        output,
-                        signal_manager=signal_manager,
-                        session_id=session_id,
-                    )
-                )
-            else:
-                asyncio.run(
-                    run_single(
-                        session,
-                        run_prompt_text,
-                        signal_manager=signal_manager,
-                        session_id=session_id,
-                    )
-                )
-        else:
+    if run_prompt_text:
+        console.print(_markup(f"Mode: {mode_name}", THEME.accent))
+        if output:
             asyncio.run(
-                run_interactive(
+                run_single_with_output(
                     session,
-                    approval_handler,
-                    mode_name,
-                    resolved_working_dir,
-                    session_store,
-                    signal_manager=signal_manager,
-                    session_id=session_id,
+                    run_prompt_text,
+                    output,
                 )
             )
-    finally:
-        signal_manager.deregister(session_id)
+        else:
+            asyncio.run(
+                run_single(
+                    session,
+                    run_prompt_text,
+                )
+            )
+    else:
+        asyncio.run(
+            run_interactive(
+                session,
+                approval_handler,
+                mode_name,
+                resolved_working_dir,
+                session_store,
+            )
+        )
 
 
 def _register_delegate(agent: Agent, session: Session) -> None:

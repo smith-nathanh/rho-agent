@@ -5,6 +5,8 @@ One session = one conversation thread. Creating a session is synchronous.
 
 from __future__ import annotations
 
+import asyncio
+import fcntl
 import json
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -38,9 +40,8 @@ from .truncate import truncate_output
 
 
 class Session:
-    """Execution context — the RL "environment" in Agent/State/Session.
+    """Execution context coordinating Agent + State through the agentic loop.
 
-    Coordinates Agent (policy) + State (trajectory) through the agentic loop:
     LLM call -> tool dispatch -> LLM call -> ... until the model stops calling tools.
 
     One Session = one conversation thread. Each ``run()`` call appends to State,
@@ -62,13 +63,14 @@ class Session:
         session_id: str | None = None,
         state: State | None = None,
         session_dir: Path | None = None,
+        client: Any | None = None,
     ) -> None:
         from .agent import Agent as AgentClass
 
         self._agent = agent
         self._id = session_id or str(uuid.uuid4())
         self._state = state or State()
-        self._client = agent.create_client()
+        self._client = client or agent.create_client()
         self._cancelled = False
         self._session_dir = session_dir
 
@@ -113,13 +115,71 @@ class Session:
             cancel_sentinel.touch()
 
     def _is_cancelled(self) -> bool:
-        """Check if cancellation has been requested."""
+        """Check if cancellation has been requested (including sentinel file)."""
         if self._cancelled:
+            return True
+        # Check sentinel file in session directory
+        if self._session_dir is not None and (self._session_dir / "cancel").exists():
+            self._cancelled = True
             return True
         if self.cancel_check is not None and self.cancel_check():
             self._cancelled = True
             return True
         return False
+
+    async def _check_pause(self) -> None:
+        """Sleep-poll while the pause sentinel exists. Returns when unpaused or cancelled."""
+        if self._session_dir is None:
+            return
+        pause_path = self._session_dir / "pause"
+        if not pause_path.exists():
+            return
+        while pause_path.exists():
+            if self._is_cancelled():
+                return
+            await asyncio.sleep(0.5)
+
+    def _consume_directives(self) -> list[str]:
+        """Read and truncate directives.jsonl with fcntl locking. Returns list of directive strings."""
+        if self._session_dir is None:
+            return []
+        path = self._session_dir / "directives.jsonl"
+        if not path.exists():
+            return []
+        directives: list[str] = []
+        try:
+            with open(path, "r+", encoding="utf-8") as f:
+                fcntl.flock(f, fcntl.LOCK_EX)
+                try:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                obj = json.loads(line)
+                                directives.append(obj.get("text", line))
+                            except json.JSONDecodeError:
+                                directives.append(line)
+                    f.seek(0)
+                    f.truncate()
+                finally:
+                    fcntl.flock(f, fcntl.LOCK_UN)
+        except FileNotFoundError:
+            pass
+        return directives
+
+    def _update_meta_status(self, status: str) -> None:
+        """Write final status to meta.json if session directory exists."""
+        if self._session_dir is None:
+            return
+        meta_path = self._session_dir / "meta.json"
+        if not meta_path.exists():
+            return
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta["status"] = status
+            meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        except Exception:
+            pass  # best-effort
 
     # --- Async context manager (for Daytona cleanup) ---
 
@@ -189,6 +249,7 @@ class Session:
         finally:
             self._state.status = status
             self._state._emit({"event": "run_end", "status": status})
+            self._update_meta_status(status)
 
         return RunResult(
             text="".join(collected_text),
@@ -217,6 +278,13 @@ class Session:
         turn = 0
         while max_turns is None or turn < max_turns:
             turn += 1
+
+            # Check pause sentinel
+            await self._check_pause()
+
+            # Consume directives between turns
+            for directive in self._consume_directives():
+                self._state.add_user_message(directive)
 
             # Check cancellation
             if self._is_cancelled():

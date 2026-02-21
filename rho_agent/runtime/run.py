@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-from .protocol import Runtime
-from .store import RunStore
+from typing import TYPE_CHECKING, Any
+
 from .types import EventHandler, RunResult, RunState, ToolApprovalItem
+
+if TYPE_CHECKING:
+    from .store import RunStore
+
+# Legacy type alias — Runtime protocol was removed in the API redesign.
+Runtime = Any
 
 
 async def run_prompt(

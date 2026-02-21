@@ -12,21 +12,11 @@ from typing import Any
 from dotenv import load_dotenv
 
 from rho_agent.capabilities import CapabilityProfile
-from rho_agent.capabilities.factory import ToolFactory
 from rho_agent.client.litellm_client import LiteLLMClient
-from rho_agent.core.agent import Agent
+from rho_agent.core import Agent, AgentConfig, Session
 from rho_agent.core.events import AgentEvent
-from rho_agent.core.session import Session
 from rho_agent.eval.harbor.trajectory import TrajectoryBuilder
-from rho_agent.observability import (
-    ObservabilityConfig,
-    CaptureConfig,
-    TenantConfig,
-    create_processor,
-)
 from rho_agent.prompts import load_prompt, prepare_prompt
-from rho_agent.runtime.options import RuntimeOptions
-from rho_agent.runtime.registry_extensions import register_runtime_tools
 
 # Load .env file - try multiple locations
 # 1. Current directory
@@ -78,15 +68,10 @@ def format_event_trace(events: list[AgentEvent]) -> str:
     return "\n\n".join(lines)
 
 
-async def auto_approve(tool_name: str, tool_args: dict[str, Any]) -> bool:
-    """Auto-approve all tool calls in eval mode."""
-    return True
-
-
 async def run_reviewer_phase(
     instruction: str,
     event_trace: list[AgentEvent],
-    agent: Agent,
+    session: Session,
     client: LiteLLMClient,
     max_iterations: int,
 ) -> None:
@@ -95,7 +80,7 @@ async def run_reviewer_phase(
     Args:
         instruction: Original task instruction.
         event_trace: Full event trace from the actor phase.
-        agent: The actor agent (used for revision turns).
+        session: The actor session (used for revision turns).
         client: Model client for reviewer calls.
         max_iterations: Maximum review-revise iterations (0 = review only).
     """
@@ -116,10 +101,6 @@ async def run_reviewer_phase(
                 "agent_trace": formatted_trace,
             },
         )
-
-        # Create reviewer session (text-only, no tools)
-        reviewer_session = Session(system_prompt=_REVIEWER_SYSTEM)
-        reviewer_session.add_user_message(review_content)
 
         # Get review using raw completion (no tools)
         messages = [
@@ -156,12 +137,15 @@ async def run_reviewer_phase(
 
         # Run actor revision turn and collect events for next review
         revision_events: list[AgentEvent] = []
-        async for event in agent.run_turn(revision_prompt):
+
+        async def collect_revision(event: AgentEvent) -> None:
             revision_events.append(event)
             if event.type == "text" and event.content:
                 print(event.content, end="", flush=True)
             elif event.type == "tool_start":
                 print(f"\n{format_tool_call(event.tool_name, event.tool_args)}", file=sys.stderr)
+
+        await session.run(revision_prompt, on_event=collect_revision)
 
         # Use new trace for next review iteration
         event_trace = revision_events
@@ -187,32 +171,6 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
             "working_dir": working_dir,
         },
     )
-    session = Session(system_prompt=system_prompt)
-
-    # Use eval profile - unrestricted, no approval required
-    profile = CapabilityProfile.eval(working_dir=working_dir)
-    profile.bash_only = bash_only
-    factory = ToolFactory(profile)
-    registry = factory.create_registry(working_dir=working_dir)
-    register_runtime_tools(
-        registry,
-        runtime_session=session,
-        # Harbor runner uses LiteLLMClient directly; keep delegate disabled here
-        # until child delegation is implemented for this execution path.
-        runtime_options=RuntimeOptions(
-            working_dir=working_dir,
-            profile=profile,
-            auto_approve=True,
-            enable_delegate=False,
-        ),
-        approval_callback=auto_approve,
-        cancel_check=None,
-        parent_agent_cancel_check=None,
-    )
-
-    # Log available tools for debugging
-    tool_names = [h.name for h in registry._handlers.values()]
-    print(f"[rho-agent] Tools: {tool_names}", file=sys.stderr)
 
     # Create client from environment
     # LiteLLM uses model names like "openai/gpt-5-mini" or "anthropic/claude-3-5-sonnet"
@@ -249,34 +207,31 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     else:
         context_window = 128_000  # conservative default
 
-    # Create agent with auto-approval (container is sandbox)
-    agent = Agent(
-        session=session,
-        registry=registry,
-        client=client,
-        approval_callback=auto_approve,
-        auto_compact=True,
-        context_window=context_window,
-        enable_nudge=False,  # CONFIRM_DONE gate handles completion verification
-    )
+    # Build agent with eval profile
+    agent = Agent(AgentConfig(
+        system_prompt=system_prompt,
+        model=model,
+        profile="eval",
+        working_dir=working_dir,
+        auto_approve=True,
+    ))
 
-    # Set up observability to capture full tool traces to SQLite
-    # Use /logs/agent/ which is mounted from host - survives process kill
-    telemetry_db = os.environ.get("RHO_AGENT_TELEMETRY_DB", "/logs/agent/telemetry.db")
-    obs_config = ObservabilityConfig(
-        enabled=True,
-        tenant=TenantConfig(team_id="eval", project_id="harbor"),
-        capture=CaptureConfig(tool_arguments=True, tool_results=True),
-    )
-    obs_config.backend.sqlite.path = telemetry_db
-    processor = create_processor(config=obs_config, model=model, profile="eval")
+    # Replace registry with eval-appropriate tools
+    profile = CapabilityProfile.eval(working_dir=working_dir)
+    profile.bash_only = bash_only
+    from rho_agent.capabilities.factory import ToolFactory
+    factory = ToolFactory(profile)
+    agent._registry = factory.create_registry(working_dir=working_dir)
 
-    # run_turn handles the full tool loop internally:
-    # model → tool → model → tool → ... → text-only response → done.
-    # The model stops calling tools when it's finished, then the
-    # runner exits and Harbor runs verification.
-    if processor:
-        await processor.start_session()
+    # Log available tools for debugging
+    tool_names = [h.name for h in agent.registry._handlers.values()]
+    print(f"[rho-agent] Tools: {tool_names}", file=sys.stderr)
+
+    # Create session with LiteLLM client (multi-provider support in containers)
+    session = Session(agent, client=client)
+    session.auto_compact = True
+    session.context_window = context_window
+    session.enable_nudge = False  # CONFIRM_DONE gate handles completion verification
 
     # Create trajectory builder for ATIF output
     trajectory_builder = TrajectoryBuilder(model=model)
@@ -287,20 +242,32 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
 
         async def run_turn(prompt_text: str) -> str:
             # Check cost ceiling before calling agent - end gracefully to allow grading
-            if cost_ceiling_usd > 0 and session.total_cost_usd >= cost_ceiling_usd:
+            if cost_ceiling_usd > 0 and session.state.usage["cost_usd"] >= cost_ceiling_usd:
                 print(
-                    f"\n[Cost ceiling reached: ${session.total_cost_usd:.2f} >= ${cost_ceiling_usd:.2f}]",
+                    f"\n[Cost ceiling reached: ${session.state.usage['cost_usd']:.2f} >= ${cost_ceiling_usd:.2f}]",
                     file=sys.stderr,
                 )
                 return ""
 
-            events = agent.run_turn(prompt_text)
-            if processor:
-                events = processor.wrap_turn(events, prompt_text)
-
             text_content = ""
             turn_events: list[AgentEvent] = []
-            async for event in events:
+
+            def _write_tokens() -> None:
+                """Write tokens/cost incrementally to mounted path (survives process kill)."""
+                Path("/logs/agent/tokens.json").write_text(
+                    json.dumps(
+                        {
+                            "input": session.state.usage["input_tokens"],
+                            "output": session.state.usage["output_tokens"],
+                            "cached": session.state.usage["cached_tokens"],
+                            "reasoning": session.state.usage["reasoning_tokens"],
+                            "cost_usd": session.state.usage["cost_usd"],
+                        }
+                    )
+                )
+
+            async def on_event(event: AgentEvent) -> None:
+                nonlocal text_content
                 event_trace.append(event)
                 turn_events.append(event)
                 if event.type == "text" and event.content:
@@ -318,19 +285,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                             else event.tool_result
                         )
                         print(f"[Result: {result_preview}]", file=sys.stderr)
-                    # Write tokens incrementally after each tool (survives timeout)
-                    Path("/logs/agent/tokens.json").write_text(
-                        json.dumps(
-                            {
-                                "input": session.total_input_tokens,
-                                "output": session.total_output_tokens,
-                                "cached": session.total_cached_tokens,
-                                "reasoning": session.total_reasoning_tokens,
-                                "cost_usd": session.total_cost_usd,
-                                "context_size": session.last_input_tokens,
-                            }
-                        )
-                    )
+                    _write_tokens()
                 elif event.type == "api_call_complete":
                     if os.environ.get("RHO_AGENT_DEBUG"):
                         usage = event.usage or {}
@@ -358,19 +313,9 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                             f"cost=${cost:.4f}]",
                             file=sys.stderr,
                         )
-                    # Write tokens/cost incrementally to mounted path (survives process kill)
-                    Path("/logs/agent/tokens.json").write_text(
-                        json.dumps(
-                            {
-                                "input": session.total_input_tokens,
-                                "output": session.total_output_tokens,
-                                "cached": session.total_cached_tokens,
-                                "reasoning": session.total_reasoning_tokens,
-                                "cost_usd": session.total_cost_usd,
-                                "context_size": session.last_input_tokens,
-                            }
-                        )
-                    )
+                    _write_tokens()
+
+            await session.run(prompt_text, on_event=on_event)
 
             # Build trajectory from this turn's events
             trajectory_builder.build_from_events(turn_events, user_input=prompt_text)
@@ -408,20 +353,11 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
             await run_reviewer_phase(
                 instruction=instruction,
                 event_trace=event_trace,
-                agent=agent,
+                session=session,
                 client=client,
                 max_iterations=max_iterations,
             )
     finally:
-        if processor:
-            # Sync session tokens to processor context before ending.
-            # The session tracks tokens incrementally from each API response,
-            # but the processor only updates on turn_complete events which
-            # may not fire if the agent times out.
-            processor.context.total_input_tokens = session.total_input_tokens
-            processor.context.total_output_tokens = session.total_output_tokens
-            await processor.end_session()
-
         # Save ATIF trajectory for Harbor analysis
         trajectory_builder.save("/logs/agent/trajectory.json")
 

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from rho_agent.cli import run_single, run_single_with_output
-from rho_agent.core.agent import AgentEvent
+from rho_agent.core.events import AgentEvent
 
 
 class ErrorAgent:

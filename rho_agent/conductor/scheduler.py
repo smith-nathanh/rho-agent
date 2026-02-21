@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
 
-from ..signals import AgentInfo, SignalManager
 from .checks import run_checks
 from .git_ops import (
     create_branch,
@@ -35,11 +32,11 @@ from .worker import run_worker, run_worker_retry
 console = Console()
 
 
-async def _wait_while_paused(sm: SignalManager, session_id: str) -> bool:
-    """Block while paused; return False if cancelled."""
+async def _wait_while_paused(session_dir: Path) -> bool:
+    """Block while pause sentinel exists; return False if cancel sentinel appears."""
     announced = False
-    while sm.is_paused(session_id):
-        if sm.is_cancelled(session_id):
+    while (session_dir / "pause").exists():
+        if (session_dir / "cancel").exists():
             return False
         if not announced:
             console.print("[yellow]Conductor paused; waiting for resume...[/yellow]")
@@ -98,8 +95,10 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
         Path(config.state_path).expanduser().resolve() if config.state_path else None
     )
     sp = requested_state_path if requested_state_path else state_path_for_run(run_id)
-    sm = SignalManager()
-    session_id = f"conductor-{run_id}"
+
+    # Create a session directory for sentinel-based control
+    session_dir = sp.parent / f"conductor-{run_id}"
+    session_dir.mkdir(parents=True, exist_ok=True)
 
     # Load or create state
     if config.resume:
@@ -115,24 +114,14 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
             raise FileNotFoundError(f"State file not found: {sp}")
         state = load_state(sp)
         run_id = state.run_id
-        session_id = f"conductor-{run_id}"
+        session_dir = sp.parent / f"conductor-{run_id}"
+        session_dir.mkdir(parents=True, exist_ok=True)
         console.print(f"[green]Resumed conductor run {run_id}[/green]")
     else:
         state = ConductorState(run_id=run_id, config=config)
 
-    # Register with signal manager
-    sm.register(
-        AgentInfo(
-            session_id=session_id,
-            pid=os.getpid(),
-            model=config.model,
-            instruction_preview="conductor",
-            started_at=datetime.now(timezone.utc).isoformat(),
-        )
-    )
-
     def _cancel_check() -> bool:
-        return sm.is_cancelled(session_id)
+        return (session_dir / "cancel").exists()
 
     try:
         # Load PRD text (needed for both planning and worker context)
@@ -170,12 +159,12 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
         # Sequential task loop
         while True:
             # Check signals
-            if sm.is_cancelled(session_id):
+            if (session_dir / "cancel").exists():
                 console.print("[red]Conductor cancelled.[/red]")
                 state.status = "cancelled"
                 break
 
-            if not await _wait_while_paused(sm, session_id):
+            if not await _wait_while_paused(session_dir):
                 state.status = "cancelled"
                 break
 
@@ -218,7 +207,7 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
             handoff_doc = task.handoff_doc
             worker_completed = False
             for session_num in range(1, config.max_worker_sessions + 1):
-                if sm.is_cancelled(session_id):
+                if (session_dir / "cancel").exists():
                     break
 
                 console.print(
@@ -252,7 +241,7 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
                     # error or unexpected
                     break
 
-            if sm.is_cancelled(session_id):
+            if (session_dir / "cancel").exists():
                 save_state(sp, state)
                 continue
 
@@ -399,7 +388,6 @@ async def run_conductor(config: ConductorConfig) -> ConductorState:
         raise
     finally:
         save_state(sp, state)
-        sm.deregister(session_id)
 
     _print_summary(state)
     console.print(f"[dim]State saved to: {sp}[/dim]")

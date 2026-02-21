@@ -10,13 +10,11 @@ from time import monotonic
 
 from ..core.events import AgentEvent
 from ..core.session import Session
-from ..signals import SignalManager
 from .theme import THEME
 from .events import handle_event
 from .formatting import (
     _is_interactive_terminal,
     _markup,
-    _wait_while_paused,
 )
 from .state import RENDER_MARKDOWN, console
 
@@ -24,8 +22,6 @@ from .state import RENDER_MARKDOWN, console
 async def run_single(
     session: Session,
     prompt: str,
-    signal_manager: SignalManager | None = None,
-    session_id: str | None = None,
 ) -> None:
     """Run a single prompt and exit."""
     loop = asyncio.get_event_loop()
@@ -40,19 +36,6 @@ async def run_single(
 
     session_status = "completed"
     try:
-        if signal_manager and session_id:
-            if not await _wait_while_paused(signal_manager, session_id):
-                console.print(_markup("Killed by rho-agent kill", THEME.warning))
-                return
-            directives = signal_manager.consume_directives(session_id)
-            if directives:
-                console.print(
-                    _markup(
-                        "Ignoring queued directives in single-prompt mode.",
-                        THEME.muted,
-                    )
-                )
-
         status_ctx = None
         start = monotonic()
         if interactive_tty:
@@ -84,11 +67,8 @@ async def run_single(
                 )
                 return
             if event.type == "cancelled":
-                if signal_manager and session_id and signal_manager.is_cancelled(session_id):
-                    session_status = "cancelled"
-                    console.print(_markup("Killed by rho-agent kill", THEME.warning))
-                else:
-                    console.print(_markup("Cancelled", THEME.muted))
+                session_status = "cancelled"
+                console.print(_markup("Cancelled", THEME.muted))
                 return
             handle_event(
                 event,
@@ -112,8 +92,6 @@ async def run_single_with_output(
     session: Session,
     prompt: str,
     output_path: str,
-    signal_manager: SignalManager | None = None,
-    session_id: str | None = None,
 ) -> bool:
     """Run a single prompt and write final response to file.
 
@@ -147,19 +125,6 @@ async def run_single_with_output(
     pending_text_chunks: list[str] = []
 
     try:
-        if signal_manager and session_id:
-            if not await _wait_while_paused(signal_manager, session_id):
-                console.print(_markup("Killed by rho-agent kill", THEME.warning))
-                return False
-            directives = signal_manager.consume_directives(session_id)
-            if directives:
-                console.print(
-                    _markup(
-                        "Ignoring queued directives in single-prompt mode.",
-                        THEME.muted,
-                    )
-                )
-
         status_ctx = None
         start = monotonic()
         if interactive_tty:
@@ -190,10 +155,7 @@ async def run_single_with_output(
                 )
                 return
             if event.type == "cancelled":
-                if signal_manager and session_id and signal_manager.is_cancelled(session_id):
-                    console.print(_markup("Killed by rho-agent kill", THEME.warning))
-                else:
-                    console.print(_markup("Cancelled", THEME.muted))
+                console.print(_markup("Cancelled", THEME.muted))
                 cancelled = True
                 return
             handle_event(

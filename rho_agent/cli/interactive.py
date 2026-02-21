@@ -17,7 +17,6 @@ from prompt_toolkit.key_binding import KeyBindings
 from ..core.events import AgentEvent
 from ..core.session import Session
 from ..core.session_store import SessionStore
-from ..signals import SignalManager
 from .theme import THEME
 from .completion import create_completer
 from .errors import InvalidProfileError
@@ -28,7 +27,6 @@ from .formatting import (
     _is_interactive_terminal,
     _markup,
     _sync_token_status_from_state,
-    _wait_while_paused,
 )
 from .state import CONFIG_DIR, HISTORY_FILE, RENDER_MARKDOWN, console
 
@@ -43,16 +41,12 @@ class InteractiveSession:
         mode_name: str,
         working_dir: str,
         session_store: SessionStore,
-        signal_manager: SignalManager | None = None,
-        session_id: str | None = None,
     ) -> None:
         self.session = session
         self.approval_handler = approval_handler
         self.mode_name = mode_name
         self.working_dir = working_dir
         self.session_store = session_store
-        self.signal_manager = signal_manager
-        self.session_id = session_id
         self.session_status = "completed"
         self.token_status = TokenStatus(
             input_tokens=session.state.usage.get("input_tokens", 0),
@@ -101,30 +95,6 @@ class InteractiveSession:
 
         try:
             while True:
-                if self.signal_manager and self.session_id:
-                    if not await _wait_while_paused(self.signal_manager, self.session_id):
-                        self.session_status = "cancelled"
-                        console.print(_markup("Killed by rho-agent kill", THEME.warning))
-                        break
-
-                    directives = self.signal_manager.consume_directives(self.session_id)
-                    for directive in directives:
-                        console.print(_markup(f"Directive received: {directive}", THEME.secondary))
-                        await self._execute_turn(directive)
-                        if self.session_status == "cancelled":
-                            break
-                    if self.session_status == "cancelled":
-                        break
-
-                    if self.signal_manager.has_export_request(self.session_id):
-                        from .context_export import write_context_file
-
-                        write_context_file(
-                            self.signal_manager.context_path(self.session_id),
-                            self.session.state.get_messages(),
-                        )
-                        self.signal_manager.clear_export_request(self.session_id)
-
                 try:
                     console.print()
                     user_input = await prompt_session.prompt_async(
@@ -216,13 +186,13 @@ class InteractiveSession:
                         status_ctx = None
                 if event.type == "cancelled":
                     _sync_token_status_from_state(self.token_status, self.session.state)
+                    # Check if cancelled via sentinel (external cancel)
                     if (
-                        self.signal_manager
-                        and self.session_id
-                        and self.signal_manager.is_cancelled(self.session_id)
+                        self.session._session_dir is not None
+                        and (self.session._session_dir / "cancel").exists()
                     ):
                         self.session_status = "cancelled"
-                        console.print(_markup("Killed by rho-agent kill", THEME.warning))
+                        console.print(_markup("Cancelled by external signal", THEME.warning))
                     else:
                         console.print(_markup("Turn cancelled", THEME.muted))
                     return
@@ -240,8 +210,6 @@ class InteractiveSession:
 
             if status_ctx:
                 status_ctx.__exit__(None, None, None)
-            if self.signal_manager and self.session_id and response_chunks:
-                self.signal_manager.record_response(self.session_id, "".join(response_chunks))
         finally:
             if platform.system() != "Windows":
                 loop.remove_signal_handler(signal.SIGINT)
@@ -431,8 +399,6 @@ async def run_interactive(
     mode_name: str,
     working_dir: str,
     session_store: SessionStore,
-    signal_manager: SignalManager | None = None,
-    session_id: str | None = None,
 ) -> None:
     """Run an interactive REPL session."""
     interactive = InteractiveSession(
@@ -441,7 +407,5 @@ async def run_interactive(
         mode_name=mode_name,
         working_dir=working_dir,
         session_store=session_store,
-        signal_manager=signal_manager,
-        session_id=session_id,
     )
     await interactive.run()

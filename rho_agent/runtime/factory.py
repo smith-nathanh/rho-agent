@@ -4,33 +4,14 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from typing import Any
 
 from ..client.model import ModelClient
 from ..core.agent import Agent
 from ..core.session import Session
-from ..observability.config import ObservabilityConfig
-from ..observability.processor import ObservabilityProcessor
 from .builder import build_runtime_registry
 from .options import RuntimeOptions
-from .protocol import Runtime
 from .types import ApprovalCallback, LocalRuntime
-
-
-class ObservabilityInitializationError(RuntimeError):
-    """Raised when observability cannot be initialized."""
-
-    def __init__(
-        self,
-        details: str,
-        *,
-        config_path: str | None,
-        team_id: str | None,
-        project_id: str | None,
-    ) -> None:
-        super().__init__(details)
-        self.config_path = config_path
-        self.team_id = team_id
-        self.project_id = project_id
 
 
 async def _auto_approve(_: str, __: dict[str, object]) -> bool:
@@ -41,37 +22,6 @@ async def _reject_all(_: str, __: dict[str, object]) -> bool:
     return False
 
 
-def _build_observability(
-    options: RuntimeOptions,
-    model: str,
-    profile_name: str,
-    session_id: str,
-) -> ObservabilityProcessor | None:
-    """Create an observability processor from runtime options, or None if disabled."""
-    try:
-        config = ObservabilityConfig.load(
-            config_path=options.observability_config,
-            team_id=options.team_id,
-            project_id=options.project_id,
-        )
-        if not config.enabled or not config.tenant:
-            return None
-
-        from ..observability.context import TelemetryContext
-
-        context = TelemetryContext.from_config(config, model=model, profile=profile_name)
-        context.session_id = session_id
-        context.metadata.update(options.telemetry_metadata)
-        return ObservabilityProcessor(config, context)
-    except Exception as exc:
-        raise ObservabilityInitializationError(
-            str(exc),
-            config_path=options.observability_config,
-            team_id=options.team_id,
-            project_id=options.project_id,
-        ) from exc
-
-
 def create_runtime(
     system_prompt: str,
     *,
@@ -79,7 +29,7 @@ def create_runtime(
     session: Session | None = None,
     approval_callback: ApprovalCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
-) -> Runtime:
+) -> Any:
     """Create a configured runtime.
 
     Returns a :class:`LocalRuntime` for local profiles, or a
@@ -134,12 +84,6 @@ def create_runtime(
         cancel_check=cancel_check,
     )
     agent_ref = agent
-    observability = _build_observability(
-        options=options,
-        model=options.model,
-        profile_name=profile_name,
-        session_id=session_id,
-    )
 
     if profile_name == "daytona":
         from .daytona import DaytonaRuntime
@@ -160,7 +104,7 @@ def create_runtime(
             options=options,
             approval_callback=resolved_approval_callback,
             cancel_check=cancel_check,
-            observability=observability,
+
             _manager=manager,
         )
 
@@ -174,5 +118,4 @@ def create_runtime(
         options=options,
         approval_callback=resolved_approval_callback,
         cancel_check=cancel_check,
-        observability=observability,
     )

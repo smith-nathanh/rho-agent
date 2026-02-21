@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib.metadata
 import json
 import sys
@@ -11,7 +10,6 @@ from typing import Any
 
 from rich.markup import escape
 
-from ..signals import SignalManager
 from .theme import THEME
 from .state import MARKDOWN_THEME, console, settings
 
@@ -98,23 +96,6 @@ def _format_elapsed(started_at: datetime, ended_at: datetime | None = None) -> s
     if secs < 3600:
         return f"{secs // 60}m{secs % 60}s"
     return f"{secs // 3600}h{(secs % 3600) // 60}m"
-
-
-async def _wait_while_paused(signal_manager: SignalManager, session_id: str) -> bool:
-    """Block at a turn boundary while paused; return False if externally cancelled."""
-    announced = False
-    while signal_manager.is_paused(session_id):
-        if signal_manager.is_cancelled(session_id):
-            return False
-        if not announced:
-            console.print(
-                _markup("Paused by rho-agent monitor; waiting for resume...", THEME.warning)
-            )
-            announced = True
-        await asyncio.sleep(0.5)
-    if announced:
-        console.print(_markup("Resumed by rho-agent monitor", THEME.success))
-    return True
 
 
 def _format_tool_signature(tool_name: str | None, tool_args: dict[str, Any] | None) -> str:
