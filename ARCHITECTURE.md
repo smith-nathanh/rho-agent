@@ -2,30 +2,38 @@
 
 ## Overview
 
-`rho-agent` is a Python-based research agent with **configurable capability profiles**. The core agent harness orchestrates a conversation loop between an LLM and a set of tools, with streaming responses and approval workflows.
+`rho-agent` is a Python-based research agent with **configurable permission profiles**. The architecture separates agent definition (stateless) from execution (stateful), with all conversation data managed through session directories.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                              CLI (cli/)                              │
 │  - Entry point, REPL, argument parsing, approval prompts            │
+│  - --config flag loads AgentConfig from YAML                        │
 └───────────────────────────────┬─────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         Agent (core/agent.py)                       │
-│  - Orchestrates conversation loop                                   │
-│  - Streams AgentEvents to caller                                    │
-│  - Handles tool execution and auto-compaction                       │
+│                     Agent (core/agent.py)                            │
+│  - Stateless definition: config + tools + model client              │
+│  - Reusable across multiple sessions                                │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Session (core/session.py)                         │
+│  - Execution context: runs prompts, drives the agent loop           │
+│  - Owns State, handles cancellation via sentinel files              │
+│  - Events passed to on_event callback                               │
 └─────────┬─────────────────────┬─────────────────────┬───────────────┘
           │                     │                     │
           ▼                     ▼                     ▼
 ┌─────────────────┐  ┌──────────────────┐  ┌──────────────────────────┐
-│     Session     │  │   ModelClient    │  │     ToolRegistry         │
-│ (core/session)  │  │ (client/model)   │  │   (tools/registry)       │
+│      State      │  │   ModelClient    │  │     ToolRegistry         │
+│  (core/state)   │  │ (client/model)   │  │   (tools/registry)       │
 │                 │  │                  │  │                          │
-│ - History       │  │ - OpenAI API     │  │ - Stores handlers        │
+│ - Messages      │  │ - OpenAI API     │  │ - Stores handlers        │
 │ - Token counts  │  │ - Streaming      │  │ - Dispatches invocations │
-│ - Compaction    │  │ - StreamEvents   │  │ - Type coercion          │
+│ - trace.jsonl   │  │ - StreamEvents   │  │ - Type coercion          │
 └─────────────────┘  └──────────────────┘  └───────────┬──────────────┘
                                                        │
                                                        ▼
@@ -41,7 +49,7 @@
 
 ---
 
-## Capability Profiles (`capabilities/__init__.py`)
+## Permission Profiles (`permissions/__init__.py`)
 
 Profiles control what the agent can do. Three built-in profiles plus YAML custom profiles:
 
@@ -51,7 +59,7 @@ Profiles control what the agent can do. Three built-in profiles plus YAML custom
 | `developer` | UNRESTRICTED | FULL | READONLY | GRANULAR | Local development with file editing |
 | `eval` | UNRESTRICTED | FULL | MUTATIONS | NONE | Sandboxed benchmark execution |
 
-### Capability Modes
+### Permission Modes
 
 **ShellMode:**
 - `RESTRICTED`: Only allowlisted commands (grep, cat, find, etc.), dangerous patterns blocked
@@ -72,12 +80,12 @@ Profiles control what the agent can do. Three built-in profiles plus YAML custom
 - `GRANULAR`: Per-tool configuration via `approval_required_tools`
 - `NONE`: No approval (for sandboxed environments)
 
-### Tool Factory (`capabilities/factory.py`)
+### Tool Factory (`permissions/factory.py`)
 
-Creates a `ToolRegistry` from a `CapabilityProfile`:
+Creates a `ToolRegistry` from a `PermissionProfile`:
 
 ```python
-profile = CapabilityProfile.developer()
+profile = PermissionProfile.developer()
 factory = ToolFactory(profile)
 registry = factory.create_registry(working_dir="/path/to/project")
 ```
@@ -90,34 +98,46 @@ The factory:
 
 ---
 
-## Agent Loop (`core/agent.py`)
+## Agent Loop (`core/session.py`)
 
-The `Agent` class orchestrates the conversation:
+The agent loop is driven by `Session.run()`. The `Agent` holds stateless configuration (config, model client, tool registry), while `Session` manages the execution context and conversation state.
 
 ```python
-agent = Agent(
-    session=session,
-    registry=registry,
-    client=client,
-    approval_callback=approval_handler.check_approval,
+config = AgentConfig(
+    system_prompt="You are a research assistant.",
+    profile="developer",
+    working_dir="/tmp/work",
 )
+agent = Agent(config)
+session = Session(agent)
 
-async for event in agent.run_turn(user_input):
-    handle_event(event)
+result = await session.run(prompt="Analyze recent failures.")
+# result is a RunResult with text, status, usage
+```
+
+Events are passed to an `on_event` callback (not yielded):
+
+```python
+def handle_event(event: AgentEvent) -> None:
+    if event.type == "text":
+        print(event.content, end="")
+
+session = Session(agent, on_event=handle_event)
+result = await session.run(prompt="Analyze recent failures.")
 ```
 
 ### Execution Flow
 
 ```
-User Input
+session.run(prompt=...)
     │
     ▼
 Auto-compact check (80% of 100k tokens?)
     │ yes
-    ├──────► compact() → yield compact_start/compact_end
+    ├──────► compact() → on_event(compact_start/compact_end)
     │
     ▼
-Session.add_user_message()
+State.add_user_message()
     │
     ▼
 ┌─────────────────────────────────────────┐
@@ -133,55 +153,61 @@ Session.add_user_message()
 │    text event   tool_call event         │
 │         │         │                     │
 │         ▼         ▼                     │
-│  yield AgentEvent  Check approval       │
-│  (type="text")     │                    │
-│                    ├─ rejected ──► yield tool_blocked, break
-│                    │                    │
-│                    ▼                    │
-│              ToolRegistry.dispatch()    │
-│                    │                    │
-│                    ▼                    │
-│              yield tool_end             │
-│                    │                    │
-│                    ▼                    │
-│         Add results to Session          │
-│                    │                    │
+│  on_event         Check approval        │
+│  (type="text")    │                     │
+│                   ├─ rejected ──► on_event(tool_blocked), break
+│                   │                     │
+│                   ▼                     │
+│             ToolRegistry.dispatch()     │
+│                   │                     │
+│                   ▼                     │
+│             on_event(tool_end)          │
+│                   │                     │
+│                   ▼                     │
+│         Add results to State            │
+│                   │                     │
 │         Loop if tools were called ──────┤
 │                                         │
 └─────────────────────────────────────────┘
     │
     ▼
-yield turn_complete (no more tool calls)
+on_event(run_end) → return RunResult
 ```
 
 ### AgentEvent Types
 
-Events yielded by `agent.run_turn()`:
+Events passed to the `on_event` callback:
 
 | Type | Fields | Description |
 |------|--------|-------------|
-| `text` | `content` | Streamed text from model |
+| `run_start` | `content` | Run beginning |
+| `run_end` | `content`, `usage` | Run finished, includes token counts |
+| `message` | `content` | Streamed text from model |
+| `llm_start` | `content` | Model call beginning |
+| `llm_end` | `content`, `usage` | Model call finished |
+| `api_call_complete` | `content`, `usage` | API round-trip complete |
 | `tool_start` | `tool_name`, `tool_args` | Tool invocation beginning |
 | `tool_end` | `tool_name`, `tool_result`, `tool_metadata` | Tool completed |
 | `tool_blocked` | `tool_name`, `tool_args` | User rejected tool |
-| `compact_start` | `content` ("auto" or "manual") | Compaction beginning |
-| `compact_end` | `content` (token summary) | Compaction finished |
-| `turn_complete` | `usage` | Turn finished, includes token counts |
-| `cancelled` | `content` | Turn was cancelled |
+| `compact` | `content` (token summary) | Compaction performed |
+| `usage` | `usage` | Token usage update |
+| `interruption` | `content` | Turn was interrupted |
 | `error` | `content` | Error occurred |
 
 ### Cancellation
 
-The agent supports mid-turn cancellation:
+The session supports mid-execution cancellation:
 
 ```python
-agent.request_cancel()  # Called from signal handler
+session.cancel()  # Called from signal handler or another task
 ```
 
-Cancellation is checked:
+Cancellation works through a sentinel file written to the session directory. It is checked:
 - Before each model call
 - During streaming
 - Before each tool execution
+
+For external cancellation (e.g., from `rho-agent monitor`), writing a `cancel` sentinel file to the session directory triggers the same behavior.
 
 ---
 
@@ -261,15 +287,17 @@ The registry handles:
 
 ---
 
-## Session Management (`core/session.py`)
+## Session Management
 
-Stores conversation state in OpenAI message format:
+### State (`core/state.py`)
+
+Stores conversation data and writes trace events:
 
 ```python
 @dataclass
-class Session:
+class State:
     system_prompt: str
-    history: list[dict]        # OpenAI message format
+    messages: list[dict]          # OpenAI message format
     total_input_tokens: int
     total_output_tokens: int
 ```
@@ -278,11 +306,42 @@ class Session:
 - `add_user_message()` / `add_assistant_message()`
 - `add_assistant_tool_calls()` / `add_tool_results()`
 - `replace_with_summary()` — For compaction
-- `estimate_tokens()` — Rough count (4 chars ≈ 1 token)
+- `estimate_tokens()` — Rough count (4 chars ~ 1 token)
+- `write_event()` — Appends structured event to `trace.jsonl`
+
+### SessionStore (`core/session_store.py`)
+
+Manages session directories under `~/.config/rho-agent/sessions/`:
+
+```
+~/.config/rho-agent/sessions/
+  abc123/
+    config.yaml       # AgentConfig snapshot
+    trace.jsonl        # Event log (run_start, llm_start, tool_end, ...)
+    meta.json          # Session metadata (status, timestamps, labels)
+    cancel             # Sentinel: triggers cancellation
+    pause              # Sentinel: pauses execution
+    directives.jsonl   # Sentinel: external instructions appended here
+```
+
+**trace.jsonl events:**
+
+| Event | Description |
+|-------|-------------|
+| `run_start` | New run beginning |
+| `run_end` | Run finished with status |
+| `message` | Assistant text output |
+| `llm_start` | Model API call initiated |
+| `llm_end` | Model API call completed |
+| `tool_start` | Tool invocation beginning |
+| `tool_end` | Tool execution completed |
+| `tool_blocked` | Tool rejected by approval |
+| `compact` | Context compaction performed |
+| `usage` | Token usage snapshot |
 
 ### Context Compaction
 
-When context exceeds 80% of limit, the agent auto-compacts:
+When context exceeds 80% of limit, the session auto-compacts:
 
 1. Formats history as text
 2. Asks model to summarize progress and next steps
@@ -290,7 +349,7 @@ When context exceeds 80% of limit, the agent auto-compacts:
 4. Preserves last 2-3 user messages for continuity
 
 ```python
-result = await agent.compact(custom_instructions="Focus on the database schema")
+result = await session.compact(custom_instructions="Focus on the database schema")
 # CompactResult(summary, tokens_before, tokens_after, trigger)
 ```
 
@@ -326,23 +385,77 @@ The client handles:
 
 ---
 
+## Multi-Agent Coordination
+
+### Delegation
+
+Agents can delegate subtasks to child agents. A parent agent spawns a child `Session` with a scoped config, runs a prompt, and incorporates the result:
+
+```python
+child_config = AgentConfig(system_prompt="You are a SQL expert.", profile="readonly")
+child_agent = Agent(child_config)
+child_session = Session(child_agent)
+result = await child_session.run(prompt="Find slow queries in the orders table")
+await child_session.close()
+```
+
+### Monitor
+
+The `rho-agent monitor <dir>` command operates on session directories to observe and control running agents:
+
+| Subcommand | Description |
+|------------|-------------|
+| `ps` | List active sessions in the directory |
+| `watch` | Tail `trace.jsonl` for a session (live event stream) |
+| `cancel` | Write `cancel` sentinel to stop a session |
+| `pause` | Write `pause` sentinel to pause a session |
+| `resume` | Remove `pause` sentinel to resume |
+| `directive` | Append an instruction to `directives.jsonl` |
+
+All coordination happens through the filesystem — no database or network transport required.
+
+---
+
 ## Key Constants
 
 | Constant | Value | Location |
 |----------|-------|----------|
-| Tool output truncation | 20,000 chars (head+tail) | `agent.py:14` |
-| Context limit | 100,000 tokens | `agent.py:17` |
-| Auto-compact threshold | 80% | `agent.py:18` |
-| Bash timeout (restricted) | 120 seconds | `bash.py:14` |
-| Bash timeout (unrestricted) | 300 seconds | `bash.py:15` |
+| Tool output truncation | 20,000 chars (head+tail) | `session.py` |
+| Context limit | 100,000 tokens | `session.py` |
+| Auto-compact threshold | 80% | `session.py` |
+| Bash timeout (restricted) | 120 seconds | `bash.py` |
+| Bash timeout (unrestricted) | 300 seconds | `bash.py` |
+
+---
+
+## Key Directories
+
+| Directory | Contents |
+|-----------|----------|
+| `rho_agent/core/` | `agent.py`, `session.py`, `state.py`, `config.py`, `events.py`, `session_store.py` |
+| `rho_agent/permissions/` | Permission profiles, modes, factory (was `capabilities/`) |
+| `rho_agent/tools/` | `base.py`, `registry.py`, `handlers/` |
+| `rho_agent/client/` | `model.py` (OpenAI-compatible streaming client) |
+| `rho_agent/cli/` | CLI entry point, REPL, monitor subcommands |
+| `rho_agent/eval/` | Benchmark integrations (BIRD-Bench, Harbor/TerminalBench) |
+
+---
+
+## Public Exports
+
+The top-level `rho_agent` package exports:
+
+```python
+from rho_agent import Agent, AgentConfig, AgentEvent, RunResult, Session, SessionStore, State
+```
 
 ---
 
 ## Architecture Principles
 
-1. **Configurable capabilities**: Profiles control what tools are available and how they behave
-2. **Event-driven streaming**: Agent yields events for real-time UI updates
+1. **Configurable permissions**: Profiles control what tools are available and how they behave
+2. **Event-driven streaming**: Session passes events to callbacks for real-time UI updates
 3. **Approval workflow**: Dangerous operations require explicit user approval
 4. **Graceful degradation**: Tool errors return results to agent for self-correction
-5. **Cancellation support**: Mid-turn cancellation at multiple checkpoints
+5. **Cancellation support**: Mid-execution cancellation via sentinel files
 6. **Context management**: Auto-compaction prevents context overflow

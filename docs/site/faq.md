@@ -37,11 +37,11 @@ rho-agent main -r latest
 rho-agent main -r abc123
 ```
 
-Conversations are saved automatically to `~/.config/rho-agent/conversations/`.
+Conversations are saved automatically to `~/.config/rho-agent/sessions/`.
 
 ### Can I use prompt templates with one-shot mode?
 
-Yes. Combine `--prompt` with a positional argument — the positional argument becomes the initial user message, overriding the template's `initial_prompt`:
+Yes. Combine `--prompt` with a positional argument — the positional argument becomes the initial user message:
 
 ```bash
 rho-agent main --prompt task.md "focus specifically on OOM errors"
@@ -99,7 +99,7 @@ rho-agent main --profile daytona
 
 ### When is the sandbox created and destroyed?
 
-The sandbox is lazily provisioned on the first tool call and automatically deleted when the session closes (via `close_runtime()`). If the process crashes, the sandbox may remain — use the Daytona dashboard to clean up orphaned sandboxes.
+The sandbox is lazily provisioned on the first tool call and automatically deleted when the session closes (via `session.close()`). If the process crashes, the sandbox may remain — use the Daytona dashboard to clean up orphaned sandboxes.
 
 ### Can I customize the sandbox image or resources?
 
@@ -110,29 +110,28 @@ Yes. Set `DAYTONA_SANDBOX_IMAGE` for a custom image and `DAYTONA_SANDBOX_CPU`, `
 ### How do I see what agents are running?
 
 ```bash
-rho-agent ps
+rho-agent ps ~/.config/rho-agent/sessions
 ```
 
 Or use the monitor for a richer view:
 
 ```bash
-rho-agent monitor
-# then type: overview
+rho-agent monitor ~/.config/rho-agent/sessions
 ```
 
 ### How do I stop a runaway agent?
 
 ```bash
 # Stop a specific agent by session ID prefix
-rho-agent kill abc1
+rho-agent cancel abc1 --dir ~/.config/rho-agent/sessions
 
 # Stop all running agents
-rho-agent kill --all
+rho-agent cancel --all --dir ~/.config/rho-agent/sessions
 ```
 
 ### Where is telemetry data stored?
 
-By default at `~/.config/rho-agent/telemetry.db` (SQLite). You can change this in `observability.yaml` or use the OTLP backend to export to an external collector.
+Telemetry is stored as trace.jsonl files in session directories at `~/.config/rho-agent/sessions/`.
 
 ## Docs publishing
 

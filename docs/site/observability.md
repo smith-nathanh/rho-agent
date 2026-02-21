@@ -1,310 +1,130 @@
 ---
 title: Observability
-description: Session telemetry, cost tracking, tool metrics, dashboard, and monitor.
+description: Session traces, monitor CLI, and custom observers.
 order: 9
 ---
 
-Observability tracks agent sessions, per-turn token usage, dollar costs, and tool execution metrics. It is optional and enabled when `team_id` and `project_id` are provided (via CLI flags, environment variables, or config file).
+Observability is built into the core. `State` automatically writes `trace.jsonl` to the session directory whenever you use `SessionStore`. There is nothing to enable or configure — tracing is always on.
 
-Unlike hosted observability platforms that require sending your data to a third-party SaaS, rho-agent's telemetry is fully self-contained — your data never leaves your infrastructure. And unlike generic LLM tracing SDKs that bolt on via monkey-patching, rho-agent's observability is integrated directly into the agent loop, capturing cost and usage at the source without runtime hooks or wrapper libraries.
+## trace.jsonl format
 
-rho-agent also goes beyond read-only dashboards. The Postgres backend includes an operational control plane — agent registry, heartbeat liveness, and a signal queue for remote `kill`/`pause`/`resume` — so you can manage running agents, not just watch them.
+Every significant event during a session is appended as a JSON line to `trace.jsonl`. Each line has a `type` field and a `timestamp`.
 
-Two storage backends are available:
+### Event types
 
-- **SQLite** (default) — zero-config, single-file, works out of the box
-- **PostgreSQL** (opt-in) — concurrent multi-user writes, cross-node agent registry, and real-time event streaming via LISTEN/NOTIFY
+| Type | Description |
+|---|---|
+| `run_start` | A new `session.run()` call begins |
+| `run_end` | A `session.run()` call completes (includes status) |
+| `message` | A message added to conversation (role: user, assistant, tool, system) |
+| `llm_start` | LLM API call initiated |
+| `llm_end` | LLM API call completed (includes usage) |
+| `tool_start` | Tool execution begins (includes tool name and args) |
+| `tool_end` | Tool execution completes (includes result) |
+| `tool_blocked` | Tool call denied by permissions or approval |
+| `compact` | Context compaction occurred (includes tokens before/after) |
+| `usage` | Cumulative usage snapshot |
 
-## Enabling observability
+### Sample trace
 
-### Via CLI flags
+```jsonl
+{"type": "run_start", "run_id": 1, "prompt": "List all tables.", "timestamp": "2026-02-21T10:00:00Z"}
+{"type": "message", "role": "user", "content": "List all tables.", "timestamp": "2026-02-21T10:00:00Z"}
+{"type": "llm_start", "model": "gpt-5-mini", "message_count": 2, "timestamp": "2026-02-21T10:00:00Z"}
+{"type": "llm_end", "usage": {"input_tokens": 150, "output_tokens": 45}, "timestamp": "2026-02-21T10:00:01Z"}
+{"type": "tool_start", "tool_name": "bash", "tool_call_id": "call_abc", "args": {"command": "psql -c '\\dt'"}, "timestamp": "2026-02-21T10:00:01Z"}
+{"type": "tool_end", "tool_name": "bash", "tool_call_id": "call_abc", "duration_ms": 320, "timestamp": "2026-02-21T10:00:01Z"}
+{"type": "llm_start", "model": "gpt-5-mini", "message_count": 4, "timestamp": "2026-02-21T10:00:02Z"}
+{"type": "llm_end", "usage": {"input_tokens": 280, "output_tokens": 90}, "timestamp": "2026-02-21T10:00:03Z"}
+{"type": "message", "role": "assistant", "content": "The database has 12 tables...", "timestamp": "2026-02-21T10:00:03Z"}
+{"type": "run_end", "run_id": 1, "status": "completed", "usage": {"input_tokens": 430, "output_tokens": 135}, "timestamp": "2026-02-21T10:00:03Z"}
+```
+
+## Session directory layout
+
+Each session directory at `~/.config/rho-agent/sessions/<session_id>/` contains:
+
+| File | Purpose |
+|---|---|
+| `config.yaml` | AgentConfig snapshot (model, profile, system prompt, etc.) |
+| `trace.jsonl` | Append-only event log — source of truth for the session |
+| `meta.json` | Session metadata (id, status, timestamps, model, profile, first prompt) |
+| `cancel` | Sentinel file — presence signals cancellation request |
+| `pause` | Sentinel file — presence signals pause request |
+| `directives.jsonl` | Operator directives queued for the agent (JSON lines) |
+
+## Monitor CLI
+
+The `rho-agent monitor <dir>` command provides live observation and control of running sessions. It operates on a sessions directory (defaults to `~/.config/rho-agent/sessions/`).
+
+### Subcommands
+
+**`rho-agent monitor <dir> ps`** — List running sessions. Shows session ID, status, model, profile, and start time.
+
+**`rho-agent monitor <dir> watch`** — Tail `trace.jsonl` for a session in real time. Streams events as they are appended.
+
+**`rho-agent monitor <dir> cancel <prefix>`** — Cancel a running session by writing a `cancel` sentinel file. The `<prefix>` argument matches session IDs by prefix for convenience.
+
+**`rho-agent monitor <dir> pause <prefix>`** — Pause a running session by writing a `pause` sentinel file. The agent will pause before the next tool execution.
+
+**`rho-agent monitor <dir> resume <prefix>`** — Resume a paused session by removing the `pause` sentinel file.
+
+**`rho-agent monitor <dir> directive <prefix> <message>`** — Append a directive to `directives.jsonl` for a running session. The agent picks up directives between turns.
+
+## Offline inspection
+
+`trace.jsonl` files are plain JSON lines and can be inspected with standard tools.
+
+### Using jq
 
 ```bash
-rho-agent --team-id acme --project-id incident-response
+# Count tool calls in a session
+jq -s '[.[] | select(.type == "tool_start")] | length' trace.jsonl
+
+# Show all LLM usage events
+jq 'select(.type == "llm_end") | .usage' trace.jsonl
+
+# List distinct tool names used
+jq -r 'select(.type == "tool_start") | .tool_name' trace.jsonl | sort -u
+
+# Get total input tokens across all LLM calls
+jq -s '[.[] | select(.type == "llm_end") | .usage.input_tokens] | add' trace.jsonl
 ```
 
-### Via environment variables
+### Using State.from_jsonl
 
-```bash
-export RHO_AGENT_TEAM_ID=acme
-export RHO_AGENT_PROJECT_ID=incident-response
-```
-
-### Via configuration file
-
-Create `~/.config/rho-agent/observability.yaml` (or point to a custom path with `--observability-config`):
-
-```yaml
-observability:
-  enabled: true
-  tenant:
-    team_id: acme
-    project_id: incident-response
-  backend:
-    type: sqlite
-    sqlite:
-      path: ~/.config/rho-agent/telemetry.db
-  capture:
-    traces: true
-    metrics: true
-    tool_arguments: true
-    tool_results: false
-```
-
-### Via runtime API
+Replay a trace file to restore full conversation state in Python:
 
 ```python
-RuntimeOptions(
-    team_id="acme",
-    project_id="incident-response",
-    telemetry_metadata={"job_id": "job-123", "environment": "staging"},
-)
+from rho_agent import State
+
+state = State.from_jsonl("~/.config/rho-agent/sessions/abc123/trace.jsonl")
+print(f"Messages: {len(state.messages)}")
+print(f"Usage: {state.usage}")
+print(f"Status: {state.status}")
+print(f"Runs completed: {state.run_count}")
 ```
 
-## Backends
+## Observers
 
-### SQLite (default)
-
-No additional dependencies. Data is stored at `~/.config/rho-agent/telemetry.db` by default.
-
-### PostgreSQL
-
-Install the extra:
-
-```bash
-uv sync --extra obs-postgres    # or: pip install 'rho-agent[obs-postgres]'
-```
-
-Then configure via environment variable:
-
-```bash
-export RHO_AGENT_OBSERVABILITY_DSN="postgresql://rho:secret@db-host:5432/rho_observability"
-```
-
-Or via config file:
-
-```yaml
-observability:
-  backend:
-    type: postgres
-    postgres:
-      dsn: "postgresql://rho:secret@db-host:5432/rho_observability"
-      max_connections: 10
-```
-
-Tables are created automatically on first connect. The schema includes LISTEN/NOTIFY triggers for real-time event streaming and GIN indexes on JSONB columns for label queries.
-
-The Postgres backend also provides:
-
-- **Agent registry** — running agents register in a shared `agent_registry` table, enabling `rho-agent ps` and `rho-agent kill` across nodes
-- **Heartbeat** — agents send a heartbeat every 15 seconds; agents missing 3 heartbeats (45s) are considered stale
-- **Signal queue** — `kill`, `pause`, `resume`, and `directive` commands are delivered via a `signal_queue` table instead of filesystem signals
-
-## Labels
-
-Labels tag sessions with arbitrary metadata (cluster name, team, environment, job ID, etc.) without schema changes. Labels are stored in the session's `metadata` JSON column.
-
-### Via environment variable
-
-```bash
-export RHO_AGENT_LABELS="cluster=hpc-west,team=ml-infra"
-```
-
-### Via config file
-
-```yaml
-observability:
-  labels:
-    cluster: hpc-west
-    team: ml-infra
-```
-
-YAML labels take precedence over environment variable labels when both are set.
-
-Labels are queryable via `json_extract(metadata, '$.labels.cluster')` (SQLite) or `metadata->'labels'->>'cluster'` (Postgres).
-
-## What's tracked
-
-### Sessions
-
-Each agent run is a session. Tracked fields include:
-
-- Session ID, team ID, project ID
-- Model name and capability profile
-- Start and end timestamps
-- Final status (`completed`, `error`, `cancelled`)
-- Total input, output, and reasoning tokens
-- Total cost in USD (when using the LiteLLM client)
-- Turn count and total tool calls
-- Custom metadata from `telemetry_metadata` and labels
-
-### Turns
-
-Each user-agent exchange within a session is a turn:
-
-- Turn index (0-based)
-- User input text
-- Start and end timestamps
-- Input, output, and reasoning token counts
-- Cost in USD for the turn
-- Number of tool calls in the turn
-
-### Tool executions
-
-Each tool call within a turn:
-
-- Tool name
-- Start and end timestamps, duration
-- Success or failure
-- Arguments (when `capture.tool_arguments` is enabled)
-- Result (when `capture.tool_results` is enabled — disabled by default as results can be large)
-
-### Cost tracking
-
-When using the LiteLLM client, dollar costs are computed per API call using LiteLLM's built-in pricing database and persisted at both the turn and session level. This gives you accurate spend attribution across teams, projects, and individual agent runs — without maintaining your own pricing tables.
-
-Cost flows through the pipeline automatically:
-
-1. **LiteLLM client** computes `cost_usd` per API call via `litellm.completion_cost()`
-2. **Agent loop** accumulates cost into session totals alongside token counts
-3. **Observability processor** captures cost from event stream with anti-double-count logic
-4. **Storage** persists `total_cost_usd` on sessions and `cost_usd` on turns
-5. **Dashboard** displays cost in session lists, detail views, and project-level analytics
-
-If the LiteLLM client is not in use (e.g., direct Anthropic client), cost fields default to zero and everything else works normally — no errors, no missing data.
-
-## Configuration reference
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `enabled` | bool | `true` | Enable or disable observability |
-| `tenant.team_id` | string | — | Team identifier (required) |
-| `tenant.project_id` | string | — | Project identifier (required) |
-| `backend.type` | string | `sqlite` | `sqlite`, `postgres`, or `otlp` |
-| `backend.sqlite.path` | string | `~/.config/rho-agent/telemetry.db` | SQLite database path |
-| `backend.postgres.dsn` | string | — | PostgreSQL connection string |
-| `backend.postgres.min_connections` | int | `2` | Minimum pool size |
-| `backend.postgres.max_connections` | int | `10` | Maximum pool size |
-| `backend.otlp.endpoint` | string | `http://localhost:4317` | OTLP gRPC endpoint |
-| `backend.otlp.insecure` | bool | `false` | Skip TLS verification |
-| `backend.otlp.headers` | dict | `{}` | Custom headers for OTLP export |
-| `labels` | dict | `{}` | Key-value labels stored in session metadata |
-| `capture.traces` | bool | `true` | Capture trace data |
-| `capture.metrics` | bool | `true` | Capture metric data |
-| `capture.tool_arguments` | bool | `true` | Record tool call arguments |
-| `capture.tool_results` | bool | `false` | Record tool call results |
-
-## Configuration examples
-
-**Single user (default, unchanged):**
-
-```yaml
-observability:
-  backend:
-    type: sqlite
-```
-
-**Multi-user shared SQLite (HPC, POSIX shared filesystem):**
-
-```yaml
-observability:
-  backend:
-    type: sqlite
-    sqlite:
-      path: /shared/rho-agent/telemetry.db
-  labels:
-    cluster: hpc-west
-```
-
-**Postgres cluster mode:**
-
-```yaml
-observability:
-  backend:
-    type: postgres
-    postgres:
-      dsn: "postgresql://rho:secret@service-node:5432/rho_observability"
-      max_connections: 10
-  labels:
-    cluster: hpc-west
-    team: ml-infra
-```
-
-**Environment-only config:**
-
-```bash
-export RHO_AGENT_OBSERVABILITY_DSN=postgresql://rho:secret@service-node:5432/rho_observability
-export RHO_AGENT_LABELS=cluster=hpc-west,team=ml-infra
-export RHO_AGENT_TEAM_ID=acme
-export RHO_AGENT_PROJECT_ID=ops
-```
-
-## Dashboard
-
-The Streamlit dashboard provides a visual interface for browsing telemetry data.
-
-```bash
-rho-agent dashboard
-rho-agent dashboard --port 9090 --db /path/to/telemetry.db
-```
-
-Features:
-
-- Session history table with status, model, cost, and profile filters
-- Session detail view with turn-by-turn breakdown, cost per turn, and tool execution timeline
-- Usage and cost analytics by team, project, and time period
-- Tool execution statistics: call frequency, success rate, and average duration
-
-## Monitor
-
-The monitor is an interactive command center that combines telemetry browsing with live agent management.
-
-```bash
-rho-agent monitor
-rho-agent monitor --db /path/to/telemetry.db --limit 50
-```
-
-From the monitor you can:
-
-- Browse sessions and view detailed turn-by-turn breakdowns
-- List, pause, resume, and cancel running agents
-- Inject directives into running interactive agents
-- Connect multiple running agents for cross-context collaboration
-- View an overview combining running agents with active telemetry sessions
-
-See [CLI Reference](cli-reference/) for the full list of monitor commands.
-
-## Storage API
-
-Both backends satisfy the `TelemetryStore` protocol. You can use the factory to get the right one based on config, or construct directly:
+The `StateObserver` protocol lets you attach custom side channels to receive events in real time. Any object with an `on_event(event: dict)` method satisfies the protocol.
 
 ```python
-from rho_agent.observability.storage.sqlite import TelemetryStorage
+from rho_agent import Agent, AgentConfig, Session
 
-storage = TelemetryStorage("~/.config/rho-agent/telemetry.db", read_only=True)
+class MetricsCollector:
+    def on_event(self, event: dict) -> None:
+        if event["type"] == "llm_end":
+            usage = event.get("usage", {})
+            print(f"LLM call: {usage.get('input_tokens', 0)} in, {usage.get('output_tokens', 0)} out")
+        elif event["type"] == "tool_end":
+            print(f"Tool {event['tool_name']} completed in {event.get('duration_ms', 0)}ms")
+
+agent = Agent(AgentConfig(profile="developer"))
+session = Session(agent)
+session.state.add_observer(MetricsCollector())
+
+result = await session.run(prompt="Analyze the codebase.")
 ```
 
-```python
-from rho_agent.observability.storage.postgres import PostgresTelemetryStore
-
-storage = PostgresTelemetryStore("postgresql://rho:secret@localhost:5432/rho_observability")
-```
-
-Or use the factory:
-
-```python
-from rho_agent.observability.config import ObservabilityConfig
-from rho_agent.observability.storage.factory import create_storage
-
-config = ObservabilityConfig.load()
-storage = create_storage(config)
-```
-
-All backends provide the same query interface:
-
-```python
-sessions = storage.list_sessions(team_id="acme", limit=20)
-detail = storage.get_session_detail(session_id)
-cost = storage.get_cost_summary(team_id="acme", project_id="logs", days=30)
-tools = storage.get_tool_stats(team_id="acme", project_id="logs", days=30)
-```
+Observers receive every event that is written to `trace.jsonl`, making them suitable for live dashboards, metrics collection, alerting, or custom logging pipelines.

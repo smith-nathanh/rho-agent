@@ -53,14 +53,10 @@ uv run rho-agent --help
 |---|---|---|
 | `OPENAI_BASE_URL` | OpenAI default | API endpoint override (for compatible providers) |
 | `OPENAI_MODEL` | `gpt-5-mini` | Default model |
-| `RHO_AGENT_PROFILE` | `readonly` | Default capability profile |
-| `RHO_AGENT_TEAM_ID` | — | Team ID for observability |
-| `RHO_AGENT_PROJECT_ID` | — | Project ID for observability |
-| `RHO_AGENT_OBSERVABILITY_CONFIG` | — | Path to `observability.yaml` |
-| `RHO_AGENT_OBSERVABILITY_DSN` | — | PostgreSQL DSN for observability backend |
-| `RHO_AGENT_LABELS` | — | Session labels (`key=val,key=val`) |
+| `RHO_AGENT_PROFILE` | `readonly` | Default permission profile |
+| `RHO_AGENT_BACKEND` | `local` | Agent backend — `local` or `daytona` |
+| `RHO_AGENT_SERVICE_TIER` | — | API service tier (e.g. `flex`) |
 | `RHO_AGENT_REASONING_EFFORT` | — | Reasoning effort level (for o1/o3 models) |
-| `RHO_AGENT_SIGNAL_DIR` | `~/.config/rho-agent/signals/` | Signal directory for agent coordination |
 
 ### Database connections
 

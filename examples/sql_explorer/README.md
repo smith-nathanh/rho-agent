@@ -74,8 +74,9 @@ The `seed_database.py` script creates a sample company database with:
 
 The demo uses rho-agent's core components:
 
-- `Agent` - Orchestrates the conversation loop
-- `Session` - Manages conversation history
+- `Agent` - Stateless agent definition (config + tool registry)
+- `Session` - Execution context driving the conversation loop
+- `State` - Conversation history and usage tracking
 - `SqliteHandler` - Provides database access (readonly mode)
 - `ModelClient` - Streams responses from the LLM
 

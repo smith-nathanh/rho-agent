@@ -18,7 +18,6 @@ variables:
     required: true
   job_id:
     default: "unknown"
-initial_prompt: Investigate job {{ job_id }} on {{ cluster }}.
 ---
 
 You are debugging a failed job on {{ cluster }}.
@@ -34,7 +33,6 @@ Start by reading the log file and identifying error patterns.
 |---|---|---|
 | `description` | string | Human-readable description of the prompt's purpose |
 | `variables` | dict | Variable definitions (see below) |
-| `initial_prompt` | string | Optional initial user message sent to the agent automatically |
 
 ## Variable definitions
 
@@ -75,9 +73,9 @@ rho-agent main --system-prompt task.md --var cluster=prod --var log_path=/mnt/lo
 rho-agent main --system-prompt task.md --vars-file vars.yaml
 ```
 
-From the runtime API:
+From the Python API:
 
-Variables are resolved at prompt load time when constructing an `AgentConfig`.
+Variables are resolved at prompt load time when constructing an `AgentConfig` via the `AgentConfig.vars` field.
 
 ## Prompt precedence
 
@@ -93,8 +91,7 @@ The first user message sent to the agent is resolved in this order:
 
 1. `--prompt "..."` — explicit prompt text for one-shot mode
 2. Positional argument: `rho-agent main "focus on OOM errors"`
-3. `initial_prompt` field from frontmatter
-4. Neither — agent starts in interactive mode waiting for input
+3. Neither — agent starts in interactive mode waiting for input
 
 ## Example
 
@@ -108,9 +105,6 @@ variables:
     required: true
   focus_area:
     default: "indexes"
-initial_prompt: >
-  Connect to the {{ database }} database, list all tables,
-  and analyze the {{ focus_area }} for optimization opportunities.
 ---
 
 You are a database performance analyst.

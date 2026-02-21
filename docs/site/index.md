@@ -4,7 +4,7 @@ description: A configurable agent runtime for software development, triage, and 
 order: 1
 ---
 
-rho-agent is a configurable runtime for deploying AI agents across software development, debugging, and operations workflows. It provides a structured agent loop with built-in tool handlers for shell execution, file inspection, database access, and external service integration — all governed by capability profiles that control what each agent can and cannot do.
+rho-agent is a configurable runtime for deploying AI agents across software development, debugging, and operations workflows. It provides a structured agent loop with built-in tool handlers for shell execution, file inspection, database access, and external service integration — all governed by permission profiles that control what each agent can and cannot do.
 
 ## Key capabilities
 
@@ -12,9 +12,9 @@ rho-agent is a configurable runtime for deploying AI agents across software deve
 
 **Native tool handlers** give agents direct access to shells, files, databases (PostgreSQL, MySQL, Oracle, Vertica, SQLite), and Excel files — without relying on external plugins or MCP servers.
 
-**Multi-agent coordination** lets agents delegate focused subtasks to child agents and lets operators connect running agents for cross-context collaboration through the monitor.
+**Session management** lets agents delegate focused subtasks to child agents. The monitor and cancel commands provide operational control over running sessions.
 
-**Built-in observability** tracks sessions, turns, token usage, dollar costs, and tool execution metrics to a local SQLite or shared PostgreSQL backend — fully self-hosted, no data leaves your infrastructure. Includes a Streamlit dashboard, interactive monitor, and an operational control plane for managing running agents.
+**Built-in observability** tracks sessions, turns, token usage, dollar costs, and tool execution metrics to trace.jsonl files in session directories — fully self-hosted, no data leaves your infrastructure. Supports observers for custom side channels. Includes an interactive monitor and operational control plane for managing running agents.
 
 **Prompt templates** with YAML frontmatter and Jinja2 variable substitution make it easy to define repeatable, parameterized agent tasks.
 
@@ -25,10 +25,10 @@ rho-agent is a configurable runtime for deploying AI agents across software deve
 | [Quickstart](quickstart/) | Get running in minutes |
 | [Installation](installation/) | Environment setup, install options, and verification |
 | [CLI Reference](cli-reference/) | Commands, flags, and usage examples |
-| [Runtime API](runtime-api/) | Programmatic Python interface for embedding agents |
+| [API Reference](api-reference/) | Programmatic Python interface for embedding agents |
 | [Prompt Files](prompt-files/) | Template prompts with frontmatter and variables |
 | [Tools](tools/) | Complete tool handler reference |
 | [Profiles](profiles/) | Capability profiles and custom profile YAML |
 | [Observability](observability/) | Telemetry, dashboard, and monitor |
-| [Architecture](architecture/) | System design, agent loop, and signal protocol |
+| [Architecture](architecture/) | System design, session lifecycle, and tool routing |
 | [FAQ](faq/) | Common questions and troubleshooting |

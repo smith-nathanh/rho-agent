@@ -23,16 +23,14 @@ Without a prompt argument, the agent starts in interactive mode. With a prompt, 
 | `--prompt <file.md>` | Load a markdown prompt template with frontmatter |
 | `--var key=value` | Set a template variable (repeatable) |
 | `--vars-file <file.yaml>` | Load template variables from a YAML file |
-| `--system <text>` | Override the system prompt entirely |
+| `--system-prompt / -s <text>` | Override the system prompt entirely |
 | `--model <name>` | Model to use (default: `gpt-5-mini` or `OPENAI_MODEL`) |
 | `--base-url <url>` | API endpoint override |
+| `--config / -c <path>` | Agent config YAML file |
 | `--output <path>` | Write the agent's final response to a file |
 | `--auto-approve / -y` | Skip tool approval prompts |
 | `--resume <id> / -r <id>` | Resume a saved conversation (`-r latest` for most recent) |
 | `--list / -l` | List saved conversations |
-| `--team-id <id>` | Team ID for observability |
-| `--project-id <id>` | Project ID for observability |
-| `--observability-config <path>` | Path to `observability.yaml` |
 | `--reasoning-effort <level>` | Reasoning effort for o1/o3 models |
 
 ### Examples
@@ -58,30 +56,17 @@ rho-agent main "summarize this project" --output summary.md
 
 ## `rho-agent dashboard`
 
-Launch the Streamlit observability dashboard for browsing sessions, token usage, and tool statistics.
-
-```bash
-rho-agent dashboard [OPTIONS]
-```
-
-| Flag | Description |
-|---|---|
-| `--port <port>` | Dashboard port (default: `8501`) |
-| `--db <path>` | Path to telemetry SQLite database |
+Coming soon — deferred to a future release.
 
 ## `rho-agent monitor`
 
-Interactive command center for managing running agents and browsing telemetry.
+Interactive command center for managing running agents.
 
 ```bash
-rho-agent monitor [OPTIONS]
+rho-agent monitor <dir>
 ```
 
-| Flag | Description |
-|---|---|
-| `--db <path>` | Path to telemetry SQLite database |
-| `--limit <n>` | Number of sessions to list (default: `20`) |
-| `--read-write` | Open the database in read-write mode |
+Takes a positional argument pointing to a session directory (e.g. `~/.config/rho-agent/sessions`).
 
 ### Monitor commands
 
@@ -89,41 +74,36 @@ Once inside the monitor, these commands are available:
 
 | Command | Description |
 |---|---|
-| `overview` | Running agents and active sessions |
-| `running` | List running agents |
-| `sessions [active\|completed\|all]` | Browse telemetry sessions |
-| `show <id_or_prefix>` | Session detail with turns and tool calls |
-| `kill <prefix\|all>` | Cancel a running session |
+| `ps` | List sessions in the directory |
+| `watch <prefix>` | Live-follow a session's trace output |
+| `cancel <prefix\|all>` | Cancel a running session |
 | `pause <prefix\|all>` | Pause a running session |
 | `resume <prefix\|all>` | Resume a paused session |
 | `directive <prefix> <text>` | Inject a directive into a running agent |
-| `connect <a> <b> [more...] -- <task>` | Launch a coordinator across multiple agent contexts |
-| `disconnect` | End an active connect session |
 | `help` | Show all monitor commands |
 | `quit` | Exit the monitor |
 
 ## `rho-agent ps`
 
-List running agent sessions.
+List sessions in a directory.
 
 ```bash
-rho-agent ps [OPTIONS]
+rho-agent ps <dir>
 ```
 
-| Flag | Description |
-|---|---|
-| `--cleanup` | Remove stale entries from crashed agents |
+Takes a positional argument pointing to a session directory (e.g. `~/.config/rho-agent/sessions`).
 
-## `rho-agent kill`
+## `rho-agent cancel`
 
 Cancel running agent sessions.
 
 ```bash
-rho-agent kill <prefix> [OPTIONS]
+rho-agent cancel [PREFIX] --dir <dir> [--all]
 ```
 
 | Flag | Description |
 |---|---|
-| `--all` | Kill all running agents |
+| `--dir <dir>` | Session directory (required) |
+| `--all` | Cancel all running agents |
 
 Pass a session ID prefix to cancel a specific agent, or use `--all` to cancel every running session.

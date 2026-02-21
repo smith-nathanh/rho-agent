@@ -4,7 +4,7 @@ description: Complete reference for all tool handlers available to agents.
 order: 7
 ---
 
-Tools follow a handler pattern where each tool defines a `name`, `description`, JSON-schema `parameters`, and a `handle()` implementation. Tool availability is controlled by the active [capability profile](profiles/).
+Tools follow a handler pattern where each tool defines a `name`, `description`, JSON-schema `parameters`, and a `handle()` implementation. Tool availability is controlled by the active [permission profile](profiles/).
 
 ## File inspection tools
 
@@ -188,7 +188,7 @@ Database tools continue to run locally even under the `daytona` profile.
 
 ## Sub-agent tools
 
-rho-agent supports two patterns for spawning child agents. Both create independent runtimes and disable further delegation to prevent unbounded recursion.
+rho-agent supports two patterns for spawning child agents. Both create independent sessions and disable further delegation to prevent unbounded recursion.
 
 ### `delegate` (ad-hoc delegation)
 
@@ -207,13 +207,13 @@ Wrap a pre-configured agent as a named tool with typed parameters. Unlike `deleg
 
 ```python
 from rho_agent.tools.handlers import AgentToolHandler
-from rho_agent.runtime.options import RuntimeOptions
+from rho_agent.core.config import AgentConfig
 
 sql_agent = AgentToolHandler(
     tool_name="generate_sql",
     tool_description="Generate SQL from a natural language question.",
     system_prompt="You are an expert SQL developer. ...",
-    options=RuntimeOptions(model="gpt-5-mini", profile="readonly"),
+    config=AgentConfig(model="gpt-5-mini", profile="readonly"),
     input_schema={
         "type": "object",
         "properties": {
@@ -224,18 +224,18 @@ sql_agent = AgentToolHandler(
     },
 )
 
-# Register on an existing runtime's registry
-runtime.registry.register(sql_agent)
+# Register on an existing agent's registry
+agent.registry.register(sql_agent)
 ```
 
-The parent LLM sees `generate_sql(question, dialect)` as a first-class tool. Each invocation spawns an independent runtime — no conversation history is shared.
+The parent LLM sees `generate_sql(question, dialect)` as a first-class tool. Each invocation spawns an independent session — no conversation history is shared.
 
 | Constructor parameter | Type | Description |
 |---|---|---|
 | `tool_name` | string | Tool name the LLM sees (required) |
 | `tool_description` | string | Description for the LLM (required) |
 | `system_prompt` | string | Child agent's system prompt (required) |
-| `options` | RuntimeOptions | Child's model, profile, etc. |
+| `config` | AgentConfig | Child's model, profile, etc. |
 | `input_schema` | dict | JSON Schema for typed parameters |
 | `input_formatter` | callable | Custom `(args) -> instruction` mapper |
 | `requires_approval` | bool | Whether parent needs approval before calling |

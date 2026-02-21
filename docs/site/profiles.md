@@ -1,10 +1,10 @@
 ---
 title: Profiles
-description: Capability profiles that control shell access, file permissions, database modes, and approval behavior.
+description: Permission profiles that control shell access, file permissions, database modes, and approval behavior.
 order: 8
 ---
 
-Profiles define what an agent can and cannot do. They control shell execution mode, file write permissions, database mutation access, and tool approval requirements. Every agent runs under a profile — the default is `readonly`.
+Permission profiles define what an agent can and cannot do. They control shell execution mode, file write permissions, database mutation access, and tool approval requirements. Every agent runs under a profile — the default is `readonly`.
 
 ## Built-in profiles
 
@@ -114,7 +114,7 @@ shell_working_dir: /app  # Default working directory
 bash_only: false         # Only register bash tool
 ```
 
-### Capability modes
+### Permission modes
 
 **Shell modes**
 
