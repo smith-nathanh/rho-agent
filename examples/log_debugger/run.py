@@ -5,6 +5,9 @@ Each agent runs in read-only mode, analyzes a log file in its assigned
 directory, and reports a structured diagnosis.  Results are collected
 and written to a single consolidated report.
 
+Sessions are stored to disk via SessionStore, so you can monitor running
+agents in another terminal with ``rho-agent monitor <sessions-dir>``.
+
 Usage:
     # With real directories (one --incident per failed service):
     uv run python examples/log_debugger/run.py \
@@ -14,6 +17,9 @@ Usage:
 
     # Demo mode (creates fake log dirs under /tmp and runs against them):
     uv run python examples/log_debugger/run.py --demo --output report.json
+
+    # Monitor agents while they run (in a second terminal):
+    rho-agent monitor /tmp/rho-agent-log-debug-sessions
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from rho_agent import Agent, AgentConfig, Session
+from rho_agent.core.session_store import SessionStore
 
 
 @dataclass
@@ -281,7 +288,12 @@ async def run_dispatcher(args: argparse.Namespace) -> int:
         print("No incidents to investigate. Use --incident or --demo.")
         return 1
 
-    print(f"Dispatching {len(incidents)} debug agents in parallel...\n")
+    # Set up session store so monitor can observe running agents
+    sessions_dir = Path(args.sessions_dir)
+    store = SessionStore(sessions_dir)
+
+    print(f"Dispatching {len(incidents)} debug agents in parallel...")
+    print(f"Monitor with: rho-agent monitor {sessions_dir}\n")
 
     # Create one agent+session per incident, each with its own working_dir
     sessions: list[tuple[Incident, Session]] = []
@@ -296,7 +308,7 @@ async def run_dispatcher(args: argparse.Namespace) -> int:
             auto_approve=True,
         )
         agent = Agent(config)
-        session = Session(agent)
+        session = store.create_session(agent, session_id=incident.service_name)
         sessions.append((incident, session))
         print(f"  [{incident.service_name}] dispatched → {incident.working_dir}/{incident.log_file}")
 
@@ -442,6 +454,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         default="debug_report.json",
         help="Path for the consolidated JSON report (default: debug_report.json)",
+    )
+    parser.add_argument(
+        "--sessions-dir",
+        default="/tmp/rho-agent-log-debug-sessions",
+        help="Directory for session state (monitor with: rho-agent monitor <dir>)",
     )
     parser.add_argument(
         "--model",

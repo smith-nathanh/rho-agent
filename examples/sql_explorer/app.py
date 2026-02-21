@@ -29,8 +29,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load .env from project root
-load_dotenv(Path(__file__).parent.parent / ".env")
+# Load .env from project root (two levels up from examples/sql_explorer/)
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 import pandas as pd
 import streamlit as st

@@ -2,11 +2,28 @@
 
 A Streamlit web app demonstrating rho-agent's database exploration capabilities. Chat with an AI agent to explore a SQLite database, then export queries and results.
 
+## Setup
+
+Requires an OpenAI-compatible API key. Create a `.env` file in the **project root** (not in this directory):
+
+```bash
+OPENAI_API_KEY=sk-...
+
+# Optional: alternative provider
+OPENAI_BASE_URL=https://api.together.xyz/v1
+```
+
+Install the `dashboard` extra for Streamlit:
+
+```bash
+uv sync --group dev --extra dashboard
+```
+
 ## Quick Start
 
 ```bash
 # 1. Seed the sample database (one-time)
-python examples/sql_explorer/seed_database.py
+uv run python examples/sql_explorer/seed_database.py
 
 # 2. Launch the app
 uv run streamlit run examples/sql_explorer/app.py
@@ -52,19 +69,6 @@ The `seed_database.py` script creates a sample company database with:
 | `departments` | Department names and budgets |
 | `projects` | Projects with status, deadlines, assigned departments |
 | `timesheets` | Employee time entries on projects |
-
-## Configuration
-
-Set your OpenAI API key (or compatible endpoint):
-
-```bash
-# .env file in project root
-OPENAI_API_KEY=your-key
-
-# Or for alternative providers
-OPENAI_BASE_URL=http://localhost:8000/v1
-OPENAI_MODEL=gpt-5-mini
-```
 
 ## Architecture
 
