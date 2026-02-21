@@ -109,11 +109,18 @@ class TokenStatus:
 
 
 def _sync_token_status_from_session(token_status: TokenStatus, session: Any) -> None:
-    """Sync UI token status from current session counters."""
+    """Sync UI token status from current session counters (old API)."""
     token_status.context_size = session.last_input_tokens
     token_status.total_input_tokens = session.total_input_tokens
     token_status.total_output_tokens = session.total_output_tokens
     token_status.total_cached_tokens = session.total_cached_tokens
+
+
+def _sync_token_status_from_state(token_status: TokenStatus, state: Any) -> None:
+    """Sync UI token status from State usage dict."""
+    token_status.total_input_tokens = state.usage.get("input_tokens", 0)
+    token_status.total_output_tokens = state.usage.get("output_tokens", 0)
+    token_status.total_cached_tokens = state.usage.get("cached_tokens", 0)
 
 
 def _format_token_count(tokens: int) -> str:

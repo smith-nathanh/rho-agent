@@ -69,10 +69,10 @@ From the CLI:
 
 ```bash
 # Individual variables
-rho-agent main --prompt task.md --var cluster=prod --var log_path=/mnt/logs/123
+rho-agent main --system-prompt task.md --var cluster=prod --var log_path=/mnt/logs/123
 
 # Variables file
-rho-agent main --prompt task.md --vars-file vars.yaml
+rho-agent main --system-prompt task.md --vars-file vars.yaml
 ```
 
 From the runtime API:
@@ -83,18 +83,18 @@ Variables are resolved at prompt load time before being passed to `create_runtim
 
 The system prompt is resolved in this order:
 
-1. `--system "..."` — overrides everything
-2. `--prompt file.md` — loads the markdown body as system prompt
-3. `~/.config/rho-agent/default-system.md` — custom default (if the file exists)
-4. Built-in default system prompt
+1. `--system-prompt file.md` — loads the markdown body as system prompt
+2. `~/.config/rho-agent/default.md` — custom default (if the file exists)
+3. Built-in default system prompt
 
 ## Initial message precedence
 
 The first user message sent to the agent is resolved in this order:
 
-1. Positional argument: `rho-agent main --prompt task.md "focus on OOM errors"`
-2. `initial_prompt` field from frontmatter
-3. Neither — agent starts in interactive mode waiting for input
+1. `--prompt "..."` — explicit prompt text for one-shot mode
+2. Positional argument: `rho-agent main "focus on OOM errors"`
+3. `initial_prompt` field from frontmatter
+4. Neither — agent starts in interactive mode waiting for input
 
 ## Example
 
@@ -122,7 +122,7 @@ explain the issue, its performance impact, and a concrete recommendation.
 ```
 
 ```bash
-rho-agent main --prompt schema-analysis.md \
+rho-agent main --system-prompt schema-analysis.md \
   --var database=analytics \
   --var focus_area="query patterns"
 ```

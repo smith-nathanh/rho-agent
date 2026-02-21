@@ -9,9 +9,7 @@ from rich.markup import escape
 from rich.panel import Panel
 
 from ..capabilities import CapabilityProfile
-from ..core.agent import AgentEvent
-from ..runtime import reconfigure_runtime
-from ..runtime.types import LocalRuntime
+from ..core.events import AgentEvent
 from .theme import THEME
 from .errors import InvalidProfileError
 from .formatting import (
@@ -267,19 +265,14 @@ def handle_command(
 
 
 def switch_runtime_profile(
-    runtime: LocalRuntime,
     profile_name_or_path: str,
     *,
     working_dir: str,
 ) -> CapabilityProfile:
-    """Switch runtime capabilities to a new profile for the active session."""
+    """Load a capability profile (used for mode switching in interactive sessions)."""
+    from ..capabilities.factory import load_profile
+
     try:
-        capability_profile = reconfigure_runtime(
-            runtime,
-            profile=profile_name_or_path,
-            working_dir=working_dir,
-        )
+        return load_profile(profile_name_or_path)
     except (ValueError, FileNotFoundError) as e:
         raise InvalidProfileError(str(e)) from e
-
-    return capability_profile

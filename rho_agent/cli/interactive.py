@@ -13,22 +13,21 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
-from rich.panel import Panel
 
-from ..core.agent import AgentEvent
-from ..core.conversations import ConversationStore
-from ..runtime.types import LocalRuntime
+from ..core.events import AgentEvent
+from ..core.session import Session
+from ..core.session_store import SessionStore
 from ..signals import SignalManager
 from .theme import THEME
 from .completion import create_completer
 from .errors import InvalidProfileError
-from .events import ApprovalHandler, handle_command, handle_event, switch_runtime_profile
+from .events import ApprovalHandler, handle_command, handle_event
 from .formatting import (
     TokenStatus,
     _get_version,
     _is_interactive_terminal,
     _markup,
-    _sync_token_status_from_session,
+    _sync_token_status_from_state,
     _wait_while_paused,
 )
 from .state import CONFIG_DIR, HISTORY_FILE, RENDER_MARKDOWN, console
@@ -39,36 +38,31 @@ class InteractiveSession:
 
     def __init__(
         self,
-        runtime: LocalRuntime,
+        session: Session,
         approval_handler: ApprovalHandler,
         mode_name: str,
         working_dir: str,
-        conversation_store: ConversationStore,
-        session_started: datetime,
-        conversation_id: str | None = None,
+        session_store: SessionStore,
         signal_manager: SignalManager | None = None,
         session_id: str | None = None,
     ) -> None:
-        self.runtime = runtime
+        self.session = session
         self.approval_handler = approval_handler
         self.mode_name = mode_name
         self.working_dir = working_dir
-        self.conversation_store = conversation_store
-        self.session_started = session_started
-        self.conversation_id = conversation_id
+        self.session_store = session_store
         self.signal_manager = signal_manager
         self.session_id = session_id
         self.session_status = "completed"
         self.token_status = TokenStatus(
-            input_tokens=runtime.session.total_input_tokens,
-            output_tokens=runtime.session.total_output_tokens,
+            input_tokens=session.state.usage.get("input_tokens", 0),
+            output_tokens=session.state.usage.get("output_tokens", 0),
         )
         self.interactive_tty = _is_interactive_terminal()
 
     async def run(self) -> None:
         """Run the interactive REPL loop until exit or error."""
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        await self.runtime.start()
 
         key_bindings = KeyBindings()
 
@@ -91,17 +85,14 @@ class InteractiveSession:
         )
 
         # Welcome message
-        obs_status = (
-            _markup("telemetry enabled", THEME.success)
-            if self.runtime.observability
-            else _markup("telemetry off", THEME.muted)
-        )
+        from rich.panel import Panel
+
         version = _get_version()
         console.print(
             Panel(
                 f"[bold]{_markup('ρ rho-agent', THEME.primary)}[/bold] v{version}\n"
                 f"Mode: {_markup(self.mode_name, THEME.accent)}\n"
-                f"Model: {_markup(self.runtime.model, THEME.accent)} {obs_status}\n"
+                f"Model: {_markup(self.session.agent.config.model, THEME.accent)}\n"
                 "Enter to send, Esc+Enter for newline, Ctrl+C to cancel.\n"
                 "Type [bold]/help[/bold] for commands, [bold]exit[/bold] to quit.",
                 border_style=THEME.border,
@@ -113,10 +104,6 @@ class InteractiveSession:
                 if self.signal_manager and self.session_id:
                     if not await _wait_while_paused(self.signal_manager, self.session_id):
                         self.session_status = "cancelled"
-                        if self.runtime.observability:
-                            self.runtime.observability.context.metadata["cancel_source"] = (
-                                "kill_command"
-                            )
                         console.print(_markup("Killed by rho-agent kill", THEME.warning))
                         break
 
@@ -134,7 +121,7 @@ class InteractiveSession:
 
                         write_context_file(
                             self.signal_manager.context_path(self.session_id),
-                            self.runtime.session.get_messages(),
+                            self.session.state.get_messages(),
                         )
                         self.signal_manager.clear_export_request(self.session_id)
 
@@ -157,9 +144,6 @@ class InteractiveSession:
                     if user_input.startswith("/write"):
                         self._handle_file_write_toggle(user_input)
                         continue
-                    if user_input.startswith("/mode"):
-                        self._handle_mode_switch(user_input)
-                        continue
                     if user_input.startswith("/resume"):
                         self._handle_resume(user_input)
                         continue
@@ -170,13 +154,13 @@ class InteractiveSession:
                         if ":" in action:
                             instructions = action.split(":", 1)[1]
                         handle_event(AgentEvent(type="compact_start", content="manual"))
-                        result = await self.runtime.agent.compact(
+                        result = await self.session.compact(
                             custom_instructions=instructions, trigger="manual"
                         )
                         handle_event(
                             AgentEvent(
                                 type="compact_end",
-                                content=f"Compacted: {result.tokens_before} → {result.tokens_after} tokens",
+                                content=f"Compacted: {result.tokens_before} -> {result.tokens_after} tokens",
                             )
                         )
                     continue
@@ -188,19 +172,8 @@ class InteractiveSession:
             self.session_status = "error"
             raise
         finally:
-            await self.runtime.close(self.session_status)
-
-            if self.runtime.session.history:
-                saved_path = self.conversation_store.save(
-                    model=self.runtime.model,
-                    system_prompt=self.runtime.session.system_prompt,
-                    history=self.runtime.session.history,
-                    input_tokens=self.runtime.session.total_input_tokens,
-                    output_tokens=self.runtime.session.total_output_tokens,
-                    started=self.session_started,
-                    conversation_id=self.conversation_id,
-                )
-                console.print(f"\n[dim]Goodbye! Conversation saved to {saved_path}[/dim]")
+            if self.session.state.messages:
+                console.print(f"\n[dim]Goodbye! Session saved: {self.session.id}[/dim]")
             else:
                 console.print(_markup("\nGoodbye!", THEME.muted))
 
@@ -211,16 +184,12 @@ class InteractiveSession:
 
         def on_cancel():
             console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
-            self.runtime.agent.request_cancel()
+            self.session.cancel()
 
         if platform.system() != "Windows":
             loop.add_signal_handler(signal.SIGINT, on_cancel)
 
         try:
-            events = self.runtime.agent.run_turn(user_input)
-            if self.runtime.observability:
-                events = self.runtime.observability.wrap_turn(events, user_input)
-
             status_ctx = None
             start = monotonic()
             if self.interactive_tty:
@@ -233,7 +202,8 @@ class InteractiveSession:
             saw_model_output = False
             pending_text_chunks: list[str] = []
 
-            async for event in events:
+            async def on_event(event: AgentEvent) -> None:
+                nonlocal saw_model_output, status_ctx, pending_text_chunks
                 if status_ctx and not saw_model_output:
                     elapsed = int(monotonic() - start)
                     status_ctx.update(f"⠋ working ({elapsed}s • Ctrl+C: cancel)")
@@ -245,23 +215,19 @@ class InteractiveSession:
                         status_ctx.__exit__(None, None, None)
                         status_ctx = None
                 if event.type == "cancelled":
-                    _sync_token_status_from_session(self.token_status, self.runtime.session)
+                    _sync_token_status_from_state(self.token_status, self.session.state)
                     if (
                         self.signal_manager
                         and self.session_id
                         and self.signal_manager.is_cancelled(self.session_id)
                     ):
                         self.session_status = "cancelled"
-                        if self.runtime.observability:
-                            self.runtime.observability.context.metadata["cancel_source"] = (
-                                "kill_command"
-                            )
                         console.print(_markup("Killed by rho-agent kill", THEME.warning))
                     else:
                         console.print(_markup("Turn cancelled", THEME.muted))
-                    break
+                    return
                 if event.type == "error":
-                    _sync_token_status_from_session(self.token_status, self.runtime.session)
+                    _sync_token_status_from_state(self.token_status, self.session.state)
                 handle_event(
                     event,
                     show_turn_usage=False,
@@ -269,6 +235,9 @@ class InteractiveSession:
                     render_markdown=self.interactive_tty and RENDER_MARKDOWN,
                     pending_text_chunks=pending_text_chunks,
                 )
+
+            result = await self.session.run(user_input, on_event=on_event)
+
             if status_ctx:
                 status_ctx.__exit__(None, None, None)
             if self.signal_manager and self.session_id and response_chunks:
@@ -289,7 +258,7 @@ class InteractiveSession:
             return
 
         parts = cmd.split()
-        has_write = "write" in self.runtime.registry
+        has_write = "write" in self.session.registry
 
         if len(parts) == 1:
             if has_write:
@@ -327,7 +296,7 @@ class InteractiveSession:
                 return
             from ..tools.handlers.write import WriteHandler
 
-            self.runtime.registry.register(WriteHandler(create_only=True, requires_approval=True))
+            self.session.registry.register(WriteHandler(create_only=True, requires_approval=True))
             console.print(
                 _markup(
                     "File write enabled for this session (create-only, approval required).",
@@ -340,7 +309,7 @@ class InteractiveSession:
             if not has_write:
                 console.print(_markup("File write is already OFF.", THEME.muted))
                 return
-            self.runtime.registry.unregister("write")
+            self.session.registry.unregister("write")
             console.print(_markup("File write disabled for this session.", THEME.warning))
             return
 
@@ -352,66 +321,66 @@ class InteractiveSession:
         )
 
     @staticmethod
-    def _resolve_resume_id(raw: str, conversations: list[Any]) -> str | None:
-        """Resolve user input (number, 'latest', id, or prefix) to a conversation ID."""
+    def _resolve_resume_id(raw: str, sessions: list[Any]) -> str | None:
+        """Resolve user input (number, 'latest', id, or prefix) to a session ID."""
         target = raw.strip()
         if not target:
             return None
         if target.isdigit():
             idx = int(target)
-            if 1 <= idx <= len(conversations):
-                return conversations[idx - 1].id
+            if 1 <= idx <= len(sessions):
+                return sessions[idx - 1].id
             return None
         if target.lower() == "latest":
-            return conversations[0].id if conversations else None
-        for conv in conversations:
-            if conv.id == target:
-                return conv.id
-        matches = [conv.id for conv in conversations if conv.id.startswith(target)]
+            return sessions[0].id if sessions else None
+        for s in sessions:
+            if s.id == target:
+                return s.id
+        matches = [s.id for s in sessions if s.id.startswith(target)]
         if len(matches) == 1:
             return matches[0]
         return None
 
     def _handle_resume(self, cmd: str) -> None:
-        """Handle /resume: list or select a saved conversation to restore."""
-        conversations = self.conversation_store.list_conversations(limit=20)
-        if not conversations:
-            console.print(_markup("No saved conversations to resume.", THEME.error))
+        """Handle /resume: list or select a saved session to restore."""
+        sessions = self.session_store.list(limit=20)
+        if not sessions:
+            console.print(_markup("No saved sessions to resume.", THEME.error))
             return
 
         parts = cmd.split(maxsplit=1)
         selected_id: str | None = None
 
         if len(parts) > 1:
-            selected_id = self._resolve_resume_id(parts[1], conversations)
+            selected_id = self._resolve_resume_id(parts[1], sessions)
             if not selected_id:
                 console.print(
                     _markup(
-                        f"Could not resolve conversation '{parts[1]}'. "
+                        f"Could not resolve session '{parts[1]}'. "
                         "Use /resume to list and select.",
                         THEME.warning,
                     )
                 )
                 return
         else:
-            console.print(_markup("Recent conversations:", THEME.secondary))
-            for idx, conv in enumerate(conversations, start=1):
+            console.print(_markup("Recent sessions:", THEME.secondary))
+            for idx, info in enumerate(sessions, start=1):
                 try:
-                    started_dt = datetime.fromisoformat(conv.started)
+                    started_dt = datetime.fromisoformat(info.created_at)
                     time_str = started_dt.strftime("%Y-%m-%d %H:%M")
                 except ValueError:
-                    time_str = conv.id
+                    time_str = info.id
                 console.print(
                     f"{_markup(f'{idx:>2}.', THEME.secondary)} "
-                    f"{_markup(conv.id, THEME.accent)}  {time_str}  "
-                    f"{_markup(conv.model, THEME.muted)}"
+                    f"{_markup(info.id, THEME.accent)}  {time_str}  "
+                    f"{_markup(info.model, THEME.muted)}"
                 )
-                if conv.display_preview:
-                    console.print(_markup(f"  {conv.display_preview}", THEME.muted))
+                if info.display_preview:
+                    console.print(_markup(f"  {info.display_preview}", THEME.muted))
             console.print()
             console.print(
                 _markup(
-                    "Enter number, conversation ID, or prefix (blank to cancel):",
+                    "Enter number, session ID, or prefix (blank to cancel):",
                     THEME.warning,
                 ),
                 end=" ",
@@ -423,105 +392,56 @@ class InteractiveSession:
             if not raw:
                 console.print(_markup("Resume cancelled.", THEME.muted))
                 return
-            selected_id = self._resolve_resume_id(raw, conversations)
+            selected_id = self._resolve_resume_id(raw, sessions)
             if not selected_id:
                 console.print(
                     _markup(
-                        f"Could not resolve conversation '{raw}'.",
+                        f"Could not resolve session '{raw}'.",
                         THEME.error,
                     )
                 )
                 return
 
-        resumed = self.conversation_store.load(selected_id)
-        if not resumed:
-            console.print(_markup(f"Conversation not found: {selected_id}", THEME.error))
+        try:
+            resumed = self.session_store.resume(selected_id)
+        except FileNotFoundError:
+            console.print(_markup(f"Session not found: {selected_id}", THEME.error))
             return
 
-        self.runtime.session.system_prompt = resumed.system_prompt
-        self.runtime.session.history = resumed.history.copy()
-        self.runtime.session.total_input_tokens = resumed.input_tokens
-        self.runtime.session.total_output_tokens = resumed.output_tokens
+        # Replace our session's state with the resumed one
+        self.session._state = resumed.state
+        self.session._client = resumed.agent.create_client()
+        self.token_status.total_input_tokens = resumed.state.usage.get("input_tokens", 0)
+        self.token_status.total_output_tokens = resumed.state.usage.get("output_tokens", 0)
         self.token_status.context_size = 0
-        self.token_status.total_input_tokens = resumed.input_tokens
-        self.token_status.total_output_tokens = resumed.output_tokens
-        self.conversation_id = resumed.id
-        try:
-            self.session_started = datetime.fromisoformat(resumed.started)
-        except ValueError:
-            self.session_started = datetime.now()
 
-        console.print(_markup(f"Resumed conversation: {resumed.id}", THEME.success))
+        console.print(_markup(f"Resumed session: {selected_id}", THEME.success))
         console.print(
             _markup(
-                f"Messages: {len(resumed.history)}  "
-                f"tokens in/out: {resumed.input_tokens}/{resumed.output_tokens}",
-                THEME.muted,
-            )
-        )
-
-    def _handle_mode_switch(self, cmd: str) -> None:
-        """Handle /mode: display or switch the active capability profile."""
-        parts = cmd.split(maxsplit=1)
-        if len(parts) == 1 or parts[1].strip().lower() in ("status", "current"):
-            console.print(_markup(f"Current mode: {self.mode_name}", THEME.accent))
-            console.print(
-                _markup(
-                    "Usage: /mode <readonly|developer|eval|profile-path>",
-                    THEME.muted,
-                )
-            )
-            return
-
-        target = parts[1].strip()
-        try:
-            capability_profile = switch_runtime_profile(
-                self.runtime,
-                target,
-                working_dir=self.working_dir,
-            )
-        except InvalidProfileError as e:
-            console.print(_markup(str(e), THEME.error))
-            return
-
-        self.mode_name = capability_profile.name
-        console.print(_markup(f"Switched mode to {self.mode_name}", THEME.success))
-        console.print(
-            _markup(
-                (
-                    "shell="
-                    f"{capability_profile.shell.value}, "
-                    "file_write="
-                    f"{capability_profile.file_write.value}, "
-                    "database="
-                    f"{capability_profile.database.value}"
-                ),
+                f"Messages: {len(resumed.state.messages)}  "
+                f"tokens in/out: {resumed.state.usage.get('input_tokens', 0)}/{resumed.state.usage.get('output_tokens', 0)}",
                 THEME.muted,
             )
         )
 
 
 async def run_interactive(
-    runtime: LocalRuntime,
+    session: Session,
     approval_handler: ApprovalHandler,
     mode_name: str,
     working_dir: str,
-    conversation_store: ConversationStore,
-    session_started: datetime,
-    conversation_id: str | None = None,
+    session_store: SessionStore,
     signal_manager: SignalManager | None = None,
     session_id: str | None = None,
 ) -> None:
     """Run an interactive REPL session."""
-    session = InteractiveSession(
-        runtime=runtime,
+    interactive = InteractiveSession(
+        session=session,
         approval_handler=approval_handler,
         mode_name=mode_name,
         working_dir=working_dir,
-        conversation_store=conversation_store,
-        session_started=session_started,
-        conversation_id=conversation_id,
+        session_store=session_store,
         signal_manager=signal_manager,
         session_id=session_id,
     )
-    await session.run()
+    await interactive.run()

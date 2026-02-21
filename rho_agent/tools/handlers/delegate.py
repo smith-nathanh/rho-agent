@@ -1,40 +1,38 @@
-"""Delegate work to a single child agent runtime."""
+"""Delegate work to a single child agent."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import replace
 from datetime import datetime, timezone
 import os
 from time import monotonic
 from typing import Any
 
-from ...core.session import Session
-from ...runtime.options import RuntimeOptions
-from ...runtime.types import ApprovalCallback
-from ...signals import AgentInfo, SignalManager
+from ...core.config import AgentConfig
+from ...core.events import ApprovalCallback
+from ...core.state import State
 from ..base import ToolHandler, ToolInvocation, ToolOutput
 
 
 class DelegateHandler(ToolHandler):
-    """Spawn one child runtime to execute a focused instruction."""
+    """Spawn one child agent to execute a focused instruction."""
 
     def __init__(
         self,
         *,
-        parent_session: Session,
-        parent_options: RuntimeOptions,
+        parent_config: AgentConfig,
+        parent_system_prompt: str,
+        parent_state: State,
         parent_approval_callback: ApprovalCallback | None,
         parent_cancel_check: Callable[[], bool] | None,
-        parent_agent_cancel_check: Callable[[], bool] | None,
         requires_approval: bool,
     ) -> None:
-        self._parent_session = parent_session
-        self._parent_options = parent_options
+        self._parent_config = parent_config
+        self._parent_system_prompt = parent_system_prompt
+        self._parent_state = parent_state
         self._parent_approval_callback = parent_approval_callback
         self._parent_cancel_check = parent_cancel_check
-        self._parent_agent_cancel_check = parent_agent_cancel_check
         self._requires_approval = requires_approval
 
     @property
@@ -74,83 +72,54 @@ class DelegateHandler(ToolHandler):
         return self._requires_approval
 
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
-        """Spawn a child runtime and return its final output."""
+        """Spawn a child agent and return its final output."""
         instruction = str(invocation.arguments.get("instruction", "")).strip()
         full_context = bool(invocation.arguments.get("full_context", False))
 
         if not instruction:
             return ToolOutput(content="Delegate requires a non-empty instruction.", success=False)
 
-        child_session = Session(system_prompt=self._parent_session.system_prompt)
+        # Lazy import to avoid circular imports
+        from ...core.agent import Agent
+        from ...core.session import Session
+
+        # Build child state, optionally with parent history
+        child_state = State()
         if full_context:
-            child_session.history = deepcopy(self._parent_session.history)
+            child_state.messages = deepcopy(self._parent_state.messages)
 
-        parent_session_id = self._parent_options.session_id
-        telemetry_metadata = dict(self._parent_options.telemetry_metadata)
-        telemetry_metadata["parent_session_id"] = parent_session_id
-        child_options = replace(
-            self._parent_options,
-            enable_delegate=False,
-            session_id=None,
-            telemetry_metadata=telemetry_metadata,
+        # Build child agent (no delegate to prevent recursion)
+        child_config = AgentConfig(
+            system_prompt=self._parent_system_prompt,
+            model=self._parent_config.model,
+            base_url=self._parent_config.base_url,
+            service_tier=self._parent_config.service_tier,
+            reasoning_effort=self._parent_config.reasoning_effort,
+            profile=self._parent_config.profile,
+            working_dir=self._parent_config.working_dir,
+            auto_approve=self._parent_config.auto_approve,
         )
+        child_agent = Agent(child_config)
+        # Remove delegate tool from child to prevent recursion
+        if "delegate" in child_agent.registry:
+            child_agent.registry.unregister("delegate")
 
-        # Local import to avoid runtime import cycles during bootstrap.
-        from ...runtime.factory import create_runtime
-        from ...runtime.run import run_prompt
-
-        signal_manager = SignalManager()
-        child_session_id_ref: list[str | None] = [None]
-
-        def _child_cancel_check() -> bool:
-            if self._parent_agent_cancel_check is not None and self._parent_agent_cancel_check():
-                return True
-            if self._parent_cancel_check is not None and self._parent_cancel_check():
-                return True
-            session_id = child_session_id_ref[0]
-            if session_id and signal_manager.is_cancelled(session_id):
-                return True
-            return False
-
-        child_cancel_check: Callable[[], bool] | None = _child_cancel_check
-
-        child_runtime = create_runtime(
-            child_session.system_prompt,
-            options=child_options,
-            session=child_session,
-            approval_callback=self._parent_approval_callback,
-            cancel_check=child_cancel_check,
-        )
-        child_session_id = getattr(child_runtime, "session_id", None)
-        child_session_id_ref[0] = child_session_id
-        child_registered = False
-        if isinstance(child_session_id, str) and child_session_id:
-            signal_manager.register(
-                AgentInfo(
-                    session_id=child_session_id,
-                    pid=os.getpid(),
-                    model=child_options.model,
-                    instruction_preview=instruction[:100],
-                    started_at=datetime.now(timezone.utc).isoformat(),
-                )
-            )
-            child_registered = True
+        child_session = Session(child_agent, state=child_state)
+        child_session.approval_callback = self._parent_approval_callback
+        child_session.cancel_check = self._parent_cancel_check
 
         started = monotonic()
         try:
-            if child_registered:
-                # Approval has already happened at this point; child execution starts now.
-                print(f"[delegate] Sub-agent {child_session_id[:8]} started", flush=True)
-            async with child_runtime:
-                result = await run_prompt(child_runtime, instruction)
-                child_runtime.close_status = result.status
+            print(f"[delegate] Sub-agent {child_session.id[:8]} started", flush=True)
+            async with child_session:
+                result = await child_session.run(instruction)
                 return ToolOutput(
                     content=result.text,
                     success=result.status == "completed",
                     metadata={
                         "child_usage": result.usage,
                         "child_status": result.status,
-                        "child_session_id": child_session_id,
+                        "child_session_id": child_session.id,
                         "duration_seconds": round(monotonic() - started, 2),
                     },
                 )
@@ -160,10 +129,7 @@ class DelegateHandler(ToolHandler):
                 success=False,
                 metadata={
                     "child_status": "error",
-                    "child_session_id": child_session_id,
+                    "child_session_id": child_session.id,
                     "duration_seconds": round(monotonic() - started, 2),
                 },
             )
-        finally:
-            if child_registered:
-                signal_manager.deregister(child_session_id)
