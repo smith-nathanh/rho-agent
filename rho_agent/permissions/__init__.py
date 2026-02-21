@@ -1,4 +1,4 @@
-"""Capability system for configurable tool profiles."""
+"""Permission system for configurable tool profiles."""
 
 from __future__ import annotations
 
@@ -81,17 +81,17 @@ DEFAULT_DANGEROUS_PATTERNS = (
 
 
 @dataclass
-class CapabilityProfile:
-    """Configuration profile for rho-agent capabilities.
+class PermissionProfile:
+    """Permission profile controlling what an agent is allowed to do.
 
-    Bundles all capability settings into a single object that can be loaded
-    from YAML or constructed programmatically.
+    Bundles shell, file-write, database, and approval settings into a single
+    object that can be loaded from YAML or constructed programmatically.
     """
 
     name: str
     description: str = ""
 
-    # Capability modes
+    # Permission modes
     shell: ShellMode = ShellMode.RESTRICTED
     file_write: FileWriteMode = FileWriteMode.OFF
     database: DatabaseMode = DatabaseMode.READONLY
@@ -107,7 +107,7 @@ class CapabilityProfile:
     bash_only: bool = False  # If True, only bash tool is registered (no Read, Grep, etc.)
 
     @classmethod
-    def readonly(cls) -> CapabilityProfile:
+    def readonly(cls) -> PermissionProfile:
         """Default read-only profile for research and inspection."""
         return cls(
             name="readonly",
@@ -119,7 +119,7 @@ class CapabilityProfile:
         )
 
     @classmethod
-    def developer(cls) -> CapabilityProfile:
+    def developer(cls) -> PermissionProfile:
         """Developer profile with full file editing and unrestricted shell."""
         return cls(
             name="developer",
@@ -133,7 +133,7 @@ class CapabilityProfile:
         )
 
     @classmethod
-    def eval(cls, working_dir: str = "/app") -> CapabilityProfile:
+    def eval(cls, working_dir: str = "/app") -> PermissionProfile:
         """Evaluation profile for sandboxed containers - no restrictions."""
         return cls(
             name="eval",
@@ -148,21 +148,7 @@ class CapabilityProfile:
         )
 
     @classmethod
-    def daytona(cls, working_dir: str = "/home/daytona") -> CapabilityProfile:
-        """Remote sandbox profile - all tools execute in a Daytona cloud VM."""
-        return cls(
-            name="daytona",
-            description="Remote sandbox - tools execute in Daytona cloud VM",
-            shell=ShellMode.UNRESTRICTED,
-            file_write=FileWriteMode.FULL,
-            database=DatabaseMode.READONLY,
-            approval=ApprovalMode.NONE,
-            shell_timeout=300,
-            shell_working_dir=working_dir,
-        )
-
-    @classmethod
-    def from_yaml(cls, path: str | Path) -> CapabilityProfile:
+    def from_yaml(cls, path: str | Path) -> PermissionProfile:
         """Load a profile from a YAML file."""
         path = Path(path).expanduser().resolve()
 
@@ -175,7 +161,7 @@ class CapabilityProfile:
         return cls.from_dict(data)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> CapabilityProfile:
+    def from_dict(cls, data: dict[str, Any]) -> PermissionProfile:
         """Create a profile from a dictionary (parsed YAML)."""
         # Extract shell settings
         shell_config = data.get("shell", {})

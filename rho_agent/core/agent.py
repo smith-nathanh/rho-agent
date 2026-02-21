@@ -6,6 +6,9 @@ Immutable once a Session starts.
 
 from __future__ import annotations
 
+import os
+from typing import Any
+
 from ..client.model import ModelClient
 from ..tools.registry import ToolRegistry
 from .config import AgentConfig
@@ -32,16 +35,36 @@ class Agent:
 
     def __init__(self, config: AgentConfig | None = None) -> None:
         self._config = config or AgentConfig()
+        self._sandbox_manager: Any | None = None
         self._registry = self._build_registry()
         self._system_prompt: str | None = None  # lazily resolved
 
     def _build_registry(self) -> ToolRegistry:
         """Build tool registry from the config's profile."""
-        from ..capabilities.factory import ToolFactory, load_profile
+        from ..permissions.factory import ToolFactory, load_profile
 
         profile = load_profile(self._config.profile)
+
+        if self._config.backend == "daytona":
+            return self._build_daytona_registry(profile)
+
         factory = ToolFactory(profile)
         return factory.create_registry(working_dir=self._config.working_dir)
+
+    def _build_daytona_registry(self, profile: Any) -> ToolRegistry:
+        """Build registry with Daytona remote handlers for shell/file tools."""
+        from ..tools.handlers.daytona import register_daytona_tools
+        from ..permissions.factory import ToolFactory
+
+        registry = ToolRegistry()
+        working_dir = self._config.working_dir or profile.shell_working_dir or "/home/daytona"
+        self._sandbox_manager = register_daytona_tools(registry, working_dir)
+
+        # Database tools still use the local factory path
+        factory = ToolFactory(profile)
+        factory._register_database_tools(registry, dict(os.environ))
+
+        return registry
 
     @property
     def config(self) -> AgentConfig:

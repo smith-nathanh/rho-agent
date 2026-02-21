@@ -196,7 +196,9 @@ class Session:
 
     async def close(self) -> None:
         """Clean up resources (Daytona sandbox teardown, etc.)."""
-        pass  # local backend needs no cleanup
+        manager = getattr(self._agent, '_sandbox_manager', None)
+        if manager is not None:
+            await manager.close()
 
     # --- Main execution ---
 

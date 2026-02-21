@@ -1,4 +1,4 @@
-"""Tool factory for creating registries from capability profiles."""
+"""Tool factory for creating registries from permission profiles."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 from ..tools.handlers.database_config import DatabaseConfig, load_database_config
 from ..tools.registry import ToolRegistry
 from . import (
-    CapabilityProfile,
+    PermissionProfile,
     DatabaseMode,
     FileWriteMode,
     ShellMode,
@@ -16,17 +16,17 @@ from . import (
 
 
 class ToolFactory:
-    """Factory for creating tool registries from capability profiles.
+    """Factory for creating tool registries from permission profiles.
 
     The factory instantiates and configures tools based on the profile's
-    capability settings, handling mode-specific behavior transparently.
+    permission settings, handling mode-specific behavior transparently.
     """
 
-    def __init__(self, profile: CapabilityProfile):
-        """Initialize the factory with a capability profile.
+    def __init__(self, profile: PermissionProfile):
+        """Initialize the factory with a permission profile.
 
         Args:
-            profile: The capability profile defining tool configuration.
+            profile: The permission profile defining tool configuration.
         """
         self.profile = profile
 
@@ -201,13 +201,13 @@ class ToolFactory:
 
 
 def create_registry_from_profile(
-    profile: CapabilityProfile,
+    profile: PermissionProfile,
     working_dir: str | None = None,
 ) -> ToolRegistry:
     """Convenience function to create a registry from a profile.
 
     Args:
-        profile: The capability profile.
+        profile: The permission profile.
         working_dir: Working directory for shell commands.
 
     Returns:
@@ -217,7 +217,7 @@ def create_registry_from_profile(
     return factory.create_registry(working_dir=working_dir)
 
 
-def load_profile(name_or_path: str) -> CapabilityProfile:
+def load_profile(name_or_path: str) -> PermissionProfile:
     """Load a profile by name or path.
 
     Args:
@@ -225,7 +225,7 @@ def load_profile(name_or_path: str) -> CapabilityProfile:
                      or a path to a YAML profile file.
 
     Returns:
-        The loaded capability profile.
+        The loaded permission profile.
 
     Raises:
         FileNotFoundError: If the profile file doesn't exist.
@@ -233,10 +233,9 @@ def load_profile(name_or_path: str) -> CapabilityProfile:
     """
     # Check for built-in profiles
     builtins = {
-        "readonly": CapabilityProfile.readonly,
-        "developer": CapabilityProfile.developer,
-        "eval": CapabilityProfile.eval,
-        "daytona": CapabilityProfile.daytona,
+        "readonly": PermissionProfile.readonly,
+        "developer": PermissionProfile.developer,
+        "eval": PermissionProfile.eval,
     }
 
     if name_or_path in builtins:
@@ -245,7 +244,7 @@ def load_profile(name_or_path: str) -> CapabilityProfile:
     # Check if it's a file path
     path = Path(name_or_path).expanduser()
     if path.exists():
-        return CapabilityProfile.from_yaml(path)
+        return PermissionProfile.from_yaml(path)
 
     # Check in default profile directories
     profile_dirs = [
@@ -256,9 +255,9 @@ def load_profile(name_or_path: str) -> CapabilityProfile:
     for profile_dir in profile_dirs:
         yaml_path = profile_dir / f"{name_or_path}.yaml"
         if yaml_path.exists():
-            return CapabilityProfile.from_yaml(yaml_path)
+            return PermissionProfile.from_yaml(yaml_path)
 
     raise ValueError(
         f"Unknown profile: {name_or_path}. "
-        f"Use 'readonly', 'developer', 'eval', 'daytona', or provide a path to a YAML file."
+        f"Use 'readonly', 'developer', 'eval', or provide a path to a YAML file."
     )

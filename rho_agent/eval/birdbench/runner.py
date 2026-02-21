@@ -10,9 +10,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from rho_agent.capabilities import (
+from rho_agent.permissions import (
     ApprovalMode,
-    CapabilityProfile,
+    PermissionProfile,
     DatabaseMode,
     FileWriteMode,
     ShellMode,

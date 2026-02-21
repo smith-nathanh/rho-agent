@@ -15,8 +15,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from ..capabilities import CapabilityProfile, ShellMode
-from ..capabilities.factory import load_profile
+from ..permissions import PermissionProfile, ShellMode
+from ..permissions.factory import load_profile
 from ..core import Agent, AgentConfig, Session, SessionStore
 from .theme import THEME
 from .errors import (
@@ -343,7 +343,7 @@ def main(
         # Apply shell_mode override to the profile used by the registry
         if shell_mode:
             # Re-build registry with overridden profile
-            from ..capabilities.factory import ToolFactory
+            from ..permissions.factory import ToolFactory
             registry = ToolFactory(capability_profile).create_registry(
                 working_dir=resolved_working_dir
             )
@@ -408,7 +408,7 @@ def main(
 
 def _register_delegate(agent: Agent, session: Session) -> None:
     """Register the delegate handler if the profile supports it."""
-    from ..capabilities.factory import load_profile
+    from ..permissions.factory import load_profile
     from ..tools.handlers.delegate import DelegateHandler
 
     try:

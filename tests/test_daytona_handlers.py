@@ -402,21 +402,22 @@ class TestDaytonaListHandler:
 
 
 # ---------------------------------------------------------------------------
-# Profile + Factory integration
+# Agent integration
 # ---------------------------------------------------------------------------
 
 
-class TestDaytonaProfile:
-    def test_profile_factory_method(self):
-        from rho_agent.capabilities import CapabilityProfile
+class TestDaytonaBackendRouting:
+    def test_agent_routes_to_daytona_registry(self):
+        """Agent with backend='daytona' should call register_daytona_tools."""
+        from unittest.mock import patch, MagicMock
+        from rho_agent.core.agent import Agent
+        from rho_agent.core.config import AgentConfig
 
-        profile = CapabilityProfile.daytona()
-        assert profile.name == "daytona"
-        assert profile.shell_working_dir == "/home/daytona"
-        assert profile.shell_timeout == 300
-
-    def test_load_profile_by_name(self):
-        from rho_agent.capabilities.factory import load_profile
-
-        profile = load_profile("daytona")
-        assert profile.name == "daytona"
+        mock_manager = MagicMock()
+        with patch(
+            "rho_agent.tools.handlers.daytona.register_daytona_tools",
+            return_value=mock_manager,
+        ) as mock_reg:
+            agent = Agent(AgentConfig(backend="daytona", profile="developer"))
+            mock_reg.assert_called_once()
+            assert agent._sandbox_manager is mock_manager

@@ -11,7 +11,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from rho_agent.capabilities import CapabilityProfile
+from rho_agent.permissions import PermissionProfile
 from rho_agent.client.litellm_client import LiteLLMClient
 from rho_agent.core import Agent, AgentConfig, Session
 from rho_agent.core.events import AgentEvent
@@ -217,9 +217,9 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     ))
 
     # Replace registry with eval-appropriate tools
-    profile = CapabilityProfile.eval(working_dir=working_dir)
+    profile = PermissionProfile.eval(working_dir=working_dir)
     profile.bash_only = bash_only
-    from rho_agent.capabilities.factory import ToolFactory
+    from rho_agent.permissions.factory import ToolFactory
     factory = ToolFactory(profile)
     agent._registry = factory.create_registry(working_dir=working_dir)
 
