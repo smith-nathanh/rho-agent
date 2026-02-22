@@ -47,7 +47,9 @@ async def test_successful_invocation() -> None:
         MockSession.return_value = mock_session
 
         output = await handler.handle(
-            ToolInvocation(call_id="1", tool_name="test_agent", arguments={"instruction": "do work"})
+            ToolInvocation(
+                call_id="1", tool_name="test_agent", arguments={"instruction": "do work"}
+            )
         )
 
     assert output.success is True
@@ -73,7 +75,9 @@ async def test_child_failure_returns_error() -> None:
         MockSession.return_value = mock_session
 
         output = await handler.handle(
-            ToolInvocation(call_id="1", tool_name="test_agent", arguments={"instruction": "do work"})
+            ToolInvocation(
+                call_id="1", tool_name="test_agent", arguments={"instruction": "do work"}
+            )
         )
 
     assert output.success is False
@@ -133,7 +137,9 @@ async def test_custom_input_formatter() -> None:
         MockSession.return_value = mock_session
 
         await handler.handle(
-            ToolInvocation(call_id="1", tool_name="test_agent", arguments={"question": "count users"})
+            ToolInvocation(
+                call_id="1", tool_name="test_agent", arguments={"question": "count users"}
+            )
         )
 
     mock_session.run.assert_called_once_with("SQL for: count users")

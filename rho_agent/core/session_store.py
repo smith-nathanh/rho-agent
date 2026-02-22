@@ -98,9 +98,7 @@ class SessionStore:
             "status": "running",
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
-        (session_dir / "meta.json").write_text(
-            json.dumps(meta, indent=2), encoding="utf-8"
-        )
+        (session_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
         return Session(agent, session_id=sid, state=state, session_dir=session_dir)
 

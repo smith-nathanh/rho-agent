@@ -41,7 +41,9 @@ async def test_delegate_full_context_false_uses_empty_child_history() -> None:
 
     handler = _make_handler(parent_state=parent_state)
 
-    mock_result = RunResult(text="child complete", events=[], status="completed", usage={"input_tokens": 1})
+    mock_result = RunResult(
+        text="child complete", events=[], status="completed", usage={"input_tokens": 1}
+    )
 
     with patch("rho_agent.tools.handlers.delegate.Session") as MockSession:
         mock_session = AsyncMock()

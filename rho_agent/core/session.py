@@ -203,14 +203,14 @@ class Session:
         Raises:
             RuntimeError: If the agent is not using a Daytona backend.
         """
-        manager = getattr(self._agent, '_sandbox_manager', None)
+        manager = getattr(self._agent, "_sandbox_manager", None)
         if manager is None:
             raise RuntimeError("get_sandbox() requires a Daytona backend")
         return await manager.get_sandbox()
 
     async def close(self) -> None:
         """Clean up resources (Daytona sandbox teardown, etc.)."""
-        manager = getattr(self._agent, '_sandbox_manager', None)
+        manager = getattr(self._agent, "_sandbox_manager", None)
         if manager is not None:
             await manager.close()
 
@@ -332,11 +332,13 @@ class Session:
             pending_tool_calls: list[tuple[str, str, dict[str, Any]]] = []
 
             # Stream response
-            self._state._emit({
-                "event": "llm_start",
-                "model": self._agent.config.model,
-                "context_size": self._state.estimate_tokens(self._agent.system_prompt),
-            })
+            self._state._emit(
+                {
+                    "event": "llm_start",
+                    "model": self._agent.config.model,
+                    "context_size": self._state.estimate_tokens(self._agent.system_prompt),
+                }
+            )
 
             async for event in self._client.stream(llm_prompt):
                 if self._is_cancelled():
@@ -356,14 +358,16 @@ class Session:
                             tool_call_id=tc.id,
                             tool_args=tc.arguments,
                         )
-                        tool_calls.append({
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.name,
-                                "arguments": json.dumps(tc.arguments),
-                            },
-                        })
+                        tool_calls.append(
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.name,
+                                    "arguments": json.dumps(tc.arguments),
+                                },
+                            }
+                        )
                         pending_tool_calls.append((tc.id, tc.name, tc.arguments))
 
                 elif event.type == "done":
@@ -378,15 +382,17 @@ class Session:
                         self._last_input_tokens = event.usage.get("input_tokens", 0)
                         self._call_index += 1
 
-                        self._state._emit({
-                            "event": "llm_end",
-                            "model": self._agent.config.model,
-                            "input_tokens": event.usage.get("input_tokens", 0),
-                            "output_tokens": event.usage.get("output_tokens", 0),
-                            "cache_read_tokens": event.usage.get("cached_tokens", 0),
-                            "reasoning_tokens": event.usage.get("reasoning_tokens", 0),
-                            "cost_usd": event.usage.get("cost_usd", 0.0),
-                        })
+                        self._state._emit(
+                            {
+                                "event": "llm_end",
+                                "model": self._agent.config.model,
+                                "input_tokens": event.usage.get("input_tokens", 0),
+                                "output_tokens": event.usage.get("output_tokens", 0),
+                                "cache_read_tokens": event.usage.get("cached_tokens", 0),
+                                "reasoning_tokens": event.usage.get("reasoning_tokens", 0),
+                                "cost_usd": event.usage.get("cost_usd", 0.0),
+                            }
+                        )
 
                         yield AgentEvent(
                             type="api_call_complete",
@@ -463,27 +469,31 @@ class Session:
                         tool_call_id=tool_id,
                         tool_args=tool_args,
                     )
-                    self._state._emit({
-                        "event": "tool_blocked",
-                        "tool_call_id": tool_id,
-                        "tool_name": tool_name,
-                        "tool_args": tool_args,
-                    })
+                    self._state._emit(
+                        {
+                            "event": "tool_blocked",
+                            "tool_call_id": tool_id,
+                            "tool_name": tool_name,
+                            "tool_args": tool_args,
+                        }
+                    )
                     rejected = True
                     # Add dummy results for remaining
-                    for remaining_id, _, _ in pending_tool_calls[i + 1:]:
+                    for remaining_id, _, _ in pending_tool_calls[i + 1 :]:
                         self._state.add_tool_result(
                             remaining_id,
                             "Command skipped - user rejected previous command.",
                         )
                     break
 
-                self._state._emit({
-                    "event": "tool_start",
-                    "tool_call_id": tool_id,
-                    "tool_name": tool_name,
-                    "tool_args": tool_args,
-                })
+                self._state._emit(
+                    {
+                        "event": "tool_start",
+                        "tool_call_id": tool_id,
+                        "tool_name": tool_name,
+                        "tool_args": tool_args,
+                    }
+                )
 
                 invocation = ToolInvocation(
                     call_id=tool_id,
@@ -494,12 +504,14 @@ class Session:
                 truncated_content = truncate_output(output.content)
 
                 self._state.add_tool_result(tool_id, truncated_content)
-                self._state._emit({
-                    "event": "tool_end",
-                    "tool_call_id": tool_id,
-                    "tool_name": tool_name,
-                    "success": output.success,
-                })
+                self._state._emit(
+                    {
+                        "event": "tool_end",
+                        "tool_call_id": tool_id,
+                        "tool_name": tool_name,
+                        "success": output.success,
+                    }
+                )
 
                 yield AgentEvent(
                     type="tool_end",
@@ -528,14 +540,15 @@ class Session:
     def _should_auto_compact(self) -> bool:
         if not self.auto_compact or self.context_window is None:
             return False
-        token_count = (
-            self._last_input_tokens
-            or self._state.estimate_tokens(self._agent.system_prompt)
+        token_count = self._last_input_tokens or self._state.estimate_tokens(
+            self._agent.system_prompt
         )
         threshold = int(self.context_window * AUTO_COMPACT_THRESHOLD)
         return token_count > threshold
 
-    async def _do_compact(self, custom_instructions: str = "", trigger: str = "auto") -> AsyncIterator[AgentEvent]:
+    async def _do_compact(
+        self, custom_instructions: str = "", trigger: str = "auto"
+    ) -> AsyncIterator[AgentEvent]:
         yield AgentEvent(type="compact_start", content=trigger)
         result = await self.compact(custom_instructions=custom_instructions, trigger=trigger)
         yield AgentEvent(
@@ -586,12 +599,14 @@ class Session:
 
         tokens_after = self._state.estimate_tokens(self._agent.system_prompt)
 
-        self._state._emit({
-            "event": "compact",
-            "tokens_before": tokens_before,
-            "tokens_after": tokens_after,
-            "trigger": trigger,
-        })
+        self._state._emit(
+            {
+                "event": "compact",
+                "tokens_before": tokens_before,
+                "tokens_after": tokens_after,
+                "trigger": trigger,
+            }
+        )
 
         return CompactResult(
             summary=summary,

@@ -151,11 +151,7 @@ class State:
 
     def get_user_messages(self) -> list[str]:
         """Extract all user messages from history."""
-        return [
-            m["content"]
-            for m in self.messages
-            if m.get("role") == "user" and m.get("content")
-        ]
+        return [m["content"] for m in self.messages if m.get("role") == "user" and m.get("content")]
 
     def estimate_tokens(self, system_prompt: str = "") -> int:
         """Rough estimate of tokens in history (4 chars ~ 1 token)."""
@@ -179,12 +175,16 @@ class State:
             event = {"event": "message", **msg}
             lines.append(json.dumps(event, default=str))
         # Append usage summary
-        lines.append(json.dumps({
-            "event": "usage",
-            **self.usage,
-            "status": self.status,
-            "run_count": self.run_count,
-        }))
+        lines.append(
+            json.dumps(
+                {
+                    "event": "usage",
+                    **self.usage,
+                    "status": self.status,
+                    "run_count": self.run_count,
+                }
+            )
+        )
         return ("\n".join(lines) + "\n").encode("utf-8")
 
     @classmethod

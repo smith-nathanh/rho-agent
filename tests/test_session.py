@@ -21,6 +21,7 @@ from rho_agent.tools.registry import ToolRegistry
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class _EchoHandler(ToolHandler):
     """Handler that echoes arguments back."""
 
@@ -83,26 +84,32 @@ async def _stream_events(*events: StreamEvent):
 
 def _make_stream(*events: StreamEvent):
     """Return a callable that produces a fresh async generator of events per call."""
+
     def factory(prompt):
         async def gen():
             for e in events:
                 yield e
+
         return gen()
+
     return factory
 
 
 def _make_multi_turn_stream(*turn_events: tuple[StreamEvent, ...]):
     """Return a callable that yields different events per call."""
     calls = iter(turn_events)
+
     def factory(prompt):
         events = next(calls)
         return _stream_events(*events)
+
     return factory
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_text_response_ends_loop():
@@ -129,7 +136,10 @@ async def test_tool_call_then_text_response():
     client = MagicMock()
     client.stream = _make_multi_turn_stream(
         (
-            StreamEvent(type="tool_call", tool_call=ToolCall(id="tc_1", name="echo", arguments={"text": "echoed"})),
+            StreamEvent(
+                type="tool_call",
+                tool_call=ToolCall(id="tc_1", name="echo", arguments={"text": "echoed"}),
+            ),
             StreamEvent(type="done", usage={"input_tokens": 10, "output_tokens": 5}),
         ),
         (
@@ -156,7 +166,10 @@ async def test_max_turns_respected():
 
     client = MagicMock()
     client.stream = _make_stream(
-        StreamEvent(type="tool_call", tool_call=ToolCall(id="tc_x", name="echo", arguments={"text": "again"})),
+        StreamEvent(
+            type="tool_call",
+            tool_call=ToolCall(id="tc_x", name="echo", arguments={"text": "again"}),
+        ),
         StreamEvent(type="done", usage={"input_tokens": 10, "output_tokens": 5}),
     )
 
@@ -202,7 +215,10 @@ async def test_approval_rejection_ends_turn():
 
     client = MagicMock()
     client.stream = _make_stream(
-        StreamEvent(type="tool_call", tool_call=ToolCall(id="tc_1", name="echo", arguments={"text": "blocked"})),
+        StreamEvent(
+            type="tool_call",
+            tool_call=ToolCall(id="tc_1", name="echo", arguments={"text": "blocked"}),
+        ),
         StreamEvent(type="done", usage={"input_tokens": 10, "output_tokens": 5}),
     )
 
@@ -224,7 +240,10 @@ async def test_approval_interrupt_yields_interruption():
 
     client = MagicMock()
     client.stream = _make_stream(
-        StreamEvent(type="tool_call", tool_call=ToolCall(id="tc_1", name="echo", arguments={"text": "interrupt"})),
+        StreamEvent(
+            type="tool_call",
+            tool_call=ToolCall(id="tc_1", name="echo", arguments={"text": "interrupt"}),
+        ),
         StreamEvent(type="done", usage={"input_tokens": 10, "output_tokens": 5}),
     )
 
@@ -286,7 +305,10 @@ async def test_usage_accumulated_across_turns():
     client = MagicMock()
     client.stream = _make_multi_turn_stream(
         (
-            StreamEvent(type="tool_call", tool_call=ToolCall(id="tc_1", name="echo", arguments={"text": "a"})),
+            StreamEvent(
+                type="tool_call",
+                tool_call=ToolCall(id="tc_1", name="echo", arguments={"text": "a"}),
+            ),
             StreamEvent(type="done", usage={"input_tokens": 100, "output_tokens": 50}),
         ),
         (

@@ -139,7 +139,9 @@ def main(
     ] = os.getenv("RHO_AGENT_BACKEND", "local"),
     upload: Annotated[
         list[str] | None,
-        typer.Option("--upload", help="Upload files to sandbox (repeatable, format: ./local:/remote)"),
+        typer.Option(
+            "--upload", help="Upload files to sandbox (repeatable, format: ./local:/remote)"
+        ),
     ] = None,
     shell_mode: Annotated[
         str | None,
@@ -158,7 +160,10 @@ def main(
         for mapping in upload:
             if ":" not in mapping:
                 console.print(
-                    _markup(f"Invalid --upload format (expected ./local:/remote): {mapping}", THEME.error)
+                    _markup(
+                        f"Invalid --upload format (expected ./local:/remote): {mapping}",
+                        THEME.error,
+                    )
                 )
                 raise typer.Exit(1)
             src, dest = mapping.rsplit(":", 1)
@@ -292,7 +297,9 @@ def main(
                 vars_path = Path(vars_file).expanduser().resolve()
                 if not vars_path.exists():
                     console.print(
-                        _markup(str(PromptLoadError(f"Vars file not found: {vars_path}")), THEME.error)
+                        _markup(
+                            str(PromptLoadError(f"Vars file not found: {vars_path}")), THEME.error
+                        )
                     )
                     raise typer.Exit(1)
                 try:
@@ -302,7 +309,9 @@ def main(
                         prompt_vars.update({k: str(v) for k, v in file_vars.items()})
                 except Exception as exc:
                     console.print(
-                        _markup(str(PromptLoadError(f"Failed to load vars file: {exc}")), THEME.error)
+                        _markup(
+                            str(PromptLoadError(f"Failed to load vars file: {exc}")), THEME.error
+                        )
                     )
                     raise typer.Exit(1) from exc
 
@@ -328,9 +337,11 @@ def main(
             except (FileNotFoundError, ValueError) as exc:
                 console.print(
                     _markup(
-                        str(PromptLoadError(
-                            f"Could not load default prompt at {default_prompt_path}: {exc}"
-                        )),
+                        str(
+                            PromptLoadError(
+                                f"Could not load default prompt at {default_prompt_path}: {exc}"
+                            )
+                        ),
                         THEME.error,
                     )
                 )
@@ -367,6 +378,7 @@ def main(
         if shell_mode:
             # Re-build registry with overridden profile
             from ..permissions.factory import ToolFactory
+
             registry = ToolFactory(capability_profile).create_registry(
                 working_dir=resolved_working_dir
             )
@@ -383,9 +395,11 @@ def main(
         raise typer.Exit(1)
 
     # Determine the prompt to run
-    run_prompt_text = prompt if prompt else (prompt_arg if prompt_arg else (
-        initial_prompt if not resumed_session else None
-    ))
+    run_prompt_text = (
+        prompt
+        if prompt
+        else (prompt_arg if prompt_arg else (initial_prompt if not resumed_session else None))
+    )
 
     if not run_prompt_text and not _is_interactive_terminal():
         console.print(
@@ -442,7 +456,7 @@ def _register_delegate(agent: Agent, session: Session) -> None:
     except (ValueError, FileNotFoundError):
         return
 
-    if not hasattr(profile, 'requires_tool_approval'):
+    if not hasattr(profile, "requires_tool_approval"):
         return
 
     agent.registry.register(

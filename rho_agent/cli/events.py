@@ -175,7 +175,9 @@ def handle_event(
             if total_cached and total_in:
                 cache_str = f", cache: {total_cached / total_in:.0%}"
             cost_str = f", cost: ${total_cost:.4f}" if total_cost else ""
-            print(f"[context: {context_size}{cache_str}, session: {total_in} in | {total_out} out{cost_str}]")
+            print(
+                f"[context: {context_size}{cache_str}, session: {total_in} in | {total_out} out{cost_str}]"
+            )
 
     elif event.type == "error":
         console.print(_markup(f"Error: {event.content}", THEME.error))

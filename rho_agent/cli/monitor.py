@@ -85,21 +85,11 @@ class MonitorSession:
     def _print_help(self) -> None:
         console.print(_markup("Commands:", THEME.secondary))
         console.print("[dim]  ps                                      list sessions[/dim]")
-        console.print(
-            "[dim]  watch <prefix>                          tail trace events[/dim]"
-        )
-        console.print(
-            "[dim]  cancel <prefix|all>                    cancel session(s)[/dim]"
-        )
-        console.print(
-            "[dim]  pause <prefix|all>                     pause session(s)[/dim]"
-        )
-        console.print(
-            "[dim]  resume <prefix|all>                    resume session(s)[/dim]"
-        )
-        console.print(
-            "[dim]  directive <prefix> <text>               inject directive[/dim]"
-        )
+        console.print("[dim]  watch <prefix>                          tail trace events[/dim]")
+        console.print("[dim]  cancel <prefix|all>                    cancel session(s)[/dim]")
+        console.print("[dim]  pause <prefix|all>                     pause session(s)[/dim]")
+        console.print("[dim]  resume <prefix|all>                    resume session(s)[/dim]")
+        console.print("[dim]  directive <prefix> <text>               inject directive[/dim]")
         console.print("[dim]  help                                    show this help[/dim]")
         console.print("[dim]  quit                                    exit monitor[/dim]")
 
@@ -169,9 +159,7 @@ class MonitorSession:
             console.print(_markup("No trace.jsonl found", THEME.error))
             return
 
-        console.print(
-            _markup(f"Watching {session_dir.name} (Ctrl+C to stop)", THEME.success)
-        )
+        console.print(_markup(f"Watching {session_dir.name} (Ctrl+C to stop)", THEME.success))
 
         try:
             with open(trace_path, encoding="utf-8") as f:

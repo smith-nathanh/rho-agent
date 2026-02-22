@@ -412,7 +412,7 @@ The `rho-agent monitor <dir>` command operates on session directories to observe
 | `resume` | Remove `pause` sentinel to resume |
 | `directive` | Append an instruction to `directives.jsonl` |
 
-All coordination happens through the filesystem — no database or network transport required.
+Session control happens through the filesystem — no database or network transport required.
 
 ---
 

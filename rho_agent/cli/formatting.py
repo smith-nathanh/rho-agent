@@ -24,7 +24,6 @@ def _is_interactive_terminal() -> bool:
     return console.is_terminal and sys.stdin.isatty() and sys.stdout.isatty()
 
 
-
 def _get_version() -> str:
     """Return the installed package version or 'dev' if not installed."""
     try:
@@ -67,7 +66,6 @@ class TokenStatus:
             f"session: {self.total_input_tokens} in | "
             f"{self.total_output_tokens} out"
         )
-
 
 
 def _sync_token_status_from_state(token_status: TokenStatus, state: Any) -> None:

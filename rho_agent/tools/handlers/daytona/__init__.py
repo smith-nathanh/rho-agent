@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ...registry import ToolRegistry
 
 from .backend import DaytonaBackend
 from .bash import DaytonaBashHandler

@@ -10,6 +10,7 @@ from rho_agent.prompts.renderer import prepare_prompt, render_string
 
 # --- parse_frontmatter ---
 
+
 def test_parse_frontmatter_extracts_yaml_and_body():
     content = "---\ntitle: Test\nauthor: Nobody\n---\nHello, world!"
     fm, body = parse_frontmatter(content)
@@ -33,6 +34,7 @@ def test_parse_frontmatter_unclosed_returns_raw():
 
 
 # --- prepare_prompt ---
+
 
 def test_prepare_prompt_renders_variables():
     prompt = Prompt(
@@ -65,6 +67,7 @@ def test_prepare_prompt_missing_required_raises():
 
 
 # --- render_string ---
+
 
 def test_render_string_undefined_variable_renders_empty():
     """Jinja2 default Undefined is permissive — undefined vars render as empty."""

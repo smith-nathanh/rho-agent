@@ -359,7 +359,9 @@ def main() -> None:
     # Check database exists
     if not DB_PATH.exists():
         st.error(f"Database not found at {DB_PATH}")
-        st.info("Run `python examples/sql_explorer/seed_database.py` to create the sample database.")
+        st.info(
+            "Run `python examples/sql_explorer/seed_database.py` to create the sample database."
+        )
         return
 
     ensure_demo_db_config()

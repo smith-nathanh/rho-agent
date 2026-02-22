@@ -40,7 +40,11 @@ def test_jsonl_round_trip_usage():
 def test_jsonl_round_trip_tool_calls():
     state = _make_state()
     tool_calls = [
-        {"id": "tc_1", "type": "function", "function": {"name": "bash", "arguments": '{"cmd": "ls"}'}}
+        {
+            "id": "tc_1",
+            "type": "function",
+            "function": {"name": "bash", "arguments": '{"cmd": "ls"}'},
+        }
     ]
     state.add_assistant_tool_calls(tool_calls)
     state.add_tool_result("tc_1", "file1.txt\nfile2.txt")

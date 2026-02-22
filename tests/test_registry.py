@@ -12,6 +12,7 @@ from rho_agent.tools.registry import ToolRegistry, _coerce_arguments
 
 # --- Inline stub handler ---
 
+
 class StubHandler(ToolHandler):
     """Minimal handler for testing registry dispatch."""
 
@@ -62,6 +63,7 @@ def _invoke(name: str, **kwargs: Any) -> ToolInvocation:
 
 # --- Dispatch tests ---
 
+
 @pytest.mark.asyncio
 async def test_dispatch_routes_to_correct_handler():
     reg = ToolRegistry()
@@ -103,6 +105,7 @@ async def test_dispatch_handler_exception_wrapped():
 
 # --- Coercion tests ---
 
+
 def test_coerce_string_true_to_bool():
     schema = {"properties": {"flag": {"type": "boolean"}}}
     result = _coerce_arguments({"flag": "true"}, schema)
@@ -124,6 +127,7 @@ def test_coerce_leaves_correct_types_alone():
 
 
 # --- get_specs tests ---
+
 
 def test_get_specs_excludes_disabled():
     reg = ToolRegistry()

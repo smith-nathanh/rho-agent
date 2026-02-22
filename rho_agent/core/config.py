@@ -41,12 +41,12 @@ class AgentConfig:
     vars: dict[str, str] = field(default_factory=dict)
     model: str = field(default_factory=lambda: os.getenv("OPENAI_MODEL", "gpt-5-mini"))
     profile: str = field(default_factory=lambda: os.getenv("RHO_AGENT_PROFILE", "readonly"))
-    backend: str | Any = field(default_factory=lambda: os.getenv("RHO_AGENT_BACKEND", "local"))  # str | DaytonaBackend
+    backend: str | Any = field(
+        default_factory=lambda: os.getenv("RHO_AGENT_BACKEND", "local")
+    )  # str | DaytonaBackend
     working_dir: str | None = None
     base_url: str | None = field(default_factory=lambda: os.getenv("OPENAI_BASE_URL"))
-    service_tier: str | None = field(
-        default_factory=lambda: os.getenv("RHO_AGENT_SERVICE_TIER")
-    )
+    service_tier: str | None = field(default_factory=lambda: os.getenv("RHO_AGENT_SERVICE_TIER"))
     reasoning_effort: str | None = field(
         default_factory=lambda: os.getenv("RHO_AGENT_REASONING_EFFORT")
     )
@@ -55,11 +55,21 @@ class AgentConfig:
     extras: dict[str, Any] = field(default_factory=dict)
 
     # Known field names (for separating known from extras on YAML load)
-    _KNOWN_FIELDS = frozenset({
-        "system_prompt", "vars", "model", "profile", "backend", "working_dir",
-        "base_url", "service_tier", "reasoning_effort", "response_format",
-        "auto_approve",
-    })
+    _KNOWN_FIELDS = frozenset(
+        {
+            "system_prompt",
+            "vars",
+            "model",
+            "profile",
+            "backend",
+            "working_dir",
+            "base_url",
+            "service_tier",
+            "reasoning_effort",
+            "response_format",
+            "auto_approve",
+        }
+    )
 
     @classmethod
     def from_file(cls, path: str | Path) -> AgentConfig:

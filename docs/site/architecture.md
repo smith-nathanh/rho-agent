@@ -100,17 +100,17 @@ The `delegate` tool spawns a child agent to handle a focused subtask. The child:
 - Cannot delegate further (single-level only)
 - Is automatically cancelled when the parent is cancelled
 
-### Session directory protocol
+### Session control protocol
 
-Agents coordinate through sentinel files in the session directory (`~/.config/rho-agent/sessions/<session_id>/`):
+Running agents are controlled through sentinel files in the session directory (`~/.config/rho-agent/sessions/<session_id>/`):
 
 | File | Purpose |
 |---|---|
 | `cancel` | Presence signals cancellation request |
 | `pause` | Presence signals pause request |
-| `directives.jsonl` | Queued directives (JSON lines, append-only) |
+| `directives.jsonl` | Queued operator directives (JSON lines, append-only) |
 
-The monitor CLI reads `trace.jsonl` for live observation and writes sentinel files to control running agents.
+The [Monitor](monitor/) reads `trace.jsonl` for live observation and writes sentinel files to control running agents.
 
 ## Conversation persistence
 

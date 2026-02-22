@@ -230,9 +230,7 @@ class InteractiveSession:
         """Handle /download <remote_path> <local_path>."""
         parts = cmd.split()
         if len(parts) != 3:
-            console.print(
-                _markup("Usage: /download <remote_path> <local_path>", THEME.warning)
-            )
+            console.print(_markup("Usage: /download <remote_path> <local_path>", THEME.warning))
             return
 
         _, remote_path, local_path = parts
@@ -357,8 +355,7 @@ class InteractiveSession:
             if not selected_id:
                 console.print(
                     _markup(
-                        f"Could not resolve session '{parts[1]}'. "
-                        "Use /resume to list and select.",
+                        f"Could not resolve session '{parts[1]}'. Use /resume to list and select.",
                         THEME.warning,
                     )
                 )

@@ -69,14 +69,16 @@ class BirdRunner:
 
             # Build agent with minimal profile
             system_prompt = self._get_system_prompt()
-            agent = Agent(AgentConfig(
-                system_prompt=system_prompt,
-                model=self.config.model,
-                base_url=self.config.base_url,
-                service_tier=self.config.service_tier,
-                profile="readonly",
-                auto_approve=True,
-            ))
+            agent = Agent(
+                AgentConfig(
+                    system_prompt=system_prompt,
+                    model=self.config.model,
+                    base_url=self.config.base_url,
+                    service_tier=self.config.service_tier,
+                    profile="readonly",
+                    auto_approve=True,
+                )
+            )
 
             # Replace registry with BIRD-specific tools only
             agent.registry.clear()

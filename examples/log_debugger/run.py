@@ -282,7 +282,9 @@ async def run_dispatcher(args: argparse.Namespace) -> int:
             if len(parts) != 3:
                 print(f"Error: --incident must be dir:logfile:service — got {spec!r}")
                 return 1
-            incidents.append(Incident(working_dir=parts[0], log_file=parts[1], service_name=parts[2]))
+            incidents.append(
+                Incident(working_dir=parts[0], log_file=parts[1], service_name=parts[2])
+            )
 
     if not incidents:
         print("No incidents to investigate. Use --incident or --demo.")
@@ -310,12 +312,16 @@ async def run_dispatcher(args: argparse.Namespace) -> int:
         agent = Agent(config)
         session = store.create_session(agent, session_id=incident.service_name)
         sessions.append((incident, session))
-        print(f"  [{incident.service_name}] dispatched → {incident.working_dir}/{incident.log_file}")
+        print(
+            f"  [{incident.service_name}] dispatched → {incident.working_dir}/{incident.log_file}"
+        )
 
     print()
 
     # Run all agents concurrently
-    async def run_one(incident: Incident, session: Session) -> tuple[Incident, object | None, Exception | None]:
+    async def run_one(
+        incident: Incident, session: Session
+    ) -> tuple[Incident, object | None, Exception | None]:
         user_prompt = build_user_prompt(incident)
         try:
             result = await session.run(user_prompt)
@@ -332,10 +338,12 @@ async def run_dispatcher(args: argparse.Namespace) -> int:
 
     for incident, result, exc in outcomes:
         if exc is not None:
-            errors.append({
-                "service": incident.service_name,
-                "error": str(exc),
-            })
+            errors.append(
+                {
+                    "service": incident.service_name,
+                    "error": str(exc),
+                }
+            )
             print(f"  [{incident.service_name}] failed: {exc}")
             continue
 
@@ -348,19 +356,23 @@ async def run_dispatcher(args: argparse.Namespace) -> int:
                 severity = report.get("severity", "unknown")
                 print(f"  [{incident.service_name}] done — {severity} {category}: {root_cause}")
             except ValueError:
-                errors.append({
-                    "service": incident.service_name,
-                    "error": "Agent did not return valid JSON",
-                    "raw_output": result.text[:500],
-                })
+                errors.append(
+                    {
+                        "service": incident.service_name,
+                        "error": "Agent did not return valid JSON",
+                        "raw_output": result.text[:500],
+                    }
+                )
                 print(f"  [{incident.service_name}] done — could not parse JSON from output")
         else:
             status = result.status if result else "unknown"
-            errors.append({
-                "service": incident.service_name,
-                "error": f"Agent finished with status: {status}",
-                "raw_output": result.text[:500] if result and result.text else "",
-            })
+            errors.append(
+                {
+                    "service": incident.service_name,
+                    "error": f"Agent finished with status: {status}",
+                    "raw_output": result.text[:500] if result and result.text else "",
+                }
+            )
             print(f"  [{incident.service_name}] finished with status: {status}")
 
     # Build consolidated report
