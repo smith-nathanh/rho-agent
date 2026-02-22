@@ -48,7 +48,7 @@ uv run rho-agent main "list all Python files that import asyncio"
 Prompt files are markdown documents with YAML frontmatter for variables:
 
 ```bash
-uv run rho-agent main --prompt examples/job-failure.md \
+uv run rho-agent main --system-prompt examples/job-failure.md \
   --var cluster=prod \
   --var log_path=/mnt/logs/123
 ```

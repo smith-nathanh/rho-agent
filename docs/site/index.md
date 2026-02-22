@@ -1,10 +1,10 @@
 ---
 title: rho-agent
-description: A configurable agent runtime for software development, triage, and operations.
+description: A configurable AI agent for software development, triage, and operations.
 order: 1
 ---
 
-rho-agent is a configurable runtime for deploying AI agents across software development, debugging, and operations workflows. It provides a structured agent loop with built-in tool handlers for shell execution, file inspection, database access, and external service integration — all governed by permission profiles that control what each agent can and cannot do.
+rho-agent is a configurable AI agent for software development, debugging, and operations workflows. It provides a structured agent loop with built-in tool handlers for shell execution, file inspection, database access, and external service integration — all governed by permission profiles that control what each agent can and cannot do. Every session is traced to disk and can be resumed, inspected, or monitored live.
 
 ## Key capabilities
 
@@ -12,9 +12,11 @@ rho-agent is a configurable runtime for deploying AI agents across software deve
 
 **Native tool handlers** give agents direct access to shells, files, databases (PostgreSQL, MySQL, Oracle, Vertica, SQLite), and Excel files — without relying on external plugins or MCP servers.
 
-**Session management** lets agents delegate focused subtasks to child agents. The monitor and cancel commands provide operational control over running sessions.
+**Delegation** lets agents spawn focused child agents for subtasks.
 
-**Built-in observability** tracks sessions, turns, token usage, dollar costs, and tool execution metrics to trace.jsonl files in session directories — fully self-hosted, no data leaves your infrastructure. Supports observers for custom side channels. Includes an interactive monitor and operational control plane for managing running agents.
+**Observability** — every session writes an append-only `trace.jsonl` with token usage, costs, and tool execution. Sessions can be listed, resumed, and inspected offline. Attach custom observers for live export to external systems.
+
+**Monitor** — watch, pause, steer, and cancel running agents with `rho-agent monitor`.
 
 **Prompt templates** with YAML frontmatter and Jinja2 variable substitution make it easy to define repeatable, parameterized agent tasks.
 

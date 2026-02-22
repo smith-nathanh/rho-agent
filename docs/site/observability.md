@@ -82,9 +82,11 @@ jq -s '[.[] | select(.type == "llm_end") | .usage.input_tokens] | add' trace.jso
 Replay a trace file to restore full conversation state in Python:
 
 ```python
+from pathlib import Path
 from rho_agent import State
 
-state = State.from_jsonl("~/.config/rho-agent/sessions/abc123/trace.jsonl")
+trace = Path("~/.config/rho-agent/sessions/abc123/trace.jsonl").expanduser()
+state = State.from_jsonl(trace.read_bytes())
 print(f"Messages: {len(state.messages)}")
 print(f"Usage: {state.usage}")
 print(f"Status: {state.status}")

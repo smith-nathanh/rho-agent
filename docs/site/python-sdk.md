@@ -109,39 +109,52 @@ session = Session(agent)
 
 ## State
 
-Pure conversation data container. Tracks messages, token usage, status, and provides serialization. State is created internally by Session but can be inspected and observed.
+The conversation trajectory — messages, token usage, cost, and status. State accumulates across multiple `run()` calls and can be inspected after the fact or loaded from a trace file without a live Session.
 
 ```python
 state = session.state
 
-# Messages
-state.messages                        # Full message list
-state.get_messages()                  # Messages for model context
-state.add_user_message(content)
-state.add_assistant_message(content)
-state.add_tool_result(tool_call_id, result)
+# Check cost and token usage after a run
+state.usage["cost_usd"]              # Cumulative cost across all runs
+state.usage["input_tokens"]          # Total input tokens
+state.usage["output_tokens"]         # Total output tokens
 
-# Usage
-state.usage                           # dict with token counts
-state.update_usage(input=100, output=50)
-
-# Status
+# Inspect what happened
 state.status                          # "running", "completed", "error", "cancelled"
-state.run_count                       # Number of runs completed
+state.run_count                       # Number of run() calls completed
+state.messages                        # Full message list (OpenAI chat format)
+state.get_user_messages()             # Extract just the user prompts
+```
 
-# Token estimation
-tokens = state.estimate_tokens()
+### Loading a past session's state
 
-# Context compaction
-state.replace_with_summary(summary, tokens_before, tokens_after)
+Load a trace file to inspect a session offline — no live Session needed:
 
-# Observers
-state.add_observer(my_observer)
-state.remove_observer(my_observer)
+```python
+from pathlib import Path
+from rho_agent import State
 
-# Serialization
-state.to_jsonl(path)                  # Append-only write to trace file
-restored = State.from_jsonl(path)     # Replay trace to restore state
+state = State.from_jsonl(Path("~/.config/rho-agent/sessions/abc123/trace.jsonl").expanduser().read_bytes())
+print(f"Runs: {state.run_count}, Cost: ${state.usage['cost_usd']:.4f}")
+
+# What tools did the agent call?
+for msg in state.messages:
+    for tc in msg.get("tool_calls") or []:
+        print(f"  {tc['function']['name']}")
+```
+
+### Observing events in real time
+
+Attach a `StateObserver` to get notified on every state mutation (message added, tool called, etc.):
+
+```python
+class ToolAuditLog:
+    def on_event(self, event: dict) -> None:
+        if event.get("tool_calls"):
+            for tc in event["tool_calls"]:
+                print(f"[{event['ts']}] {tc['function']['name']}")
+
+session.state.add_observer(ToolAuditLog())
 ```
 
 ## Session

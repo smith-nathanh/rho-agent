@@ -90,31 +90,31 @@ class State:
         """Add a user message."""
         msg = {"role": "user", "content": content}
         self.messages.append(msg)
-        self._emit({"event": "message", **msg})
+        self._emit({"type": "message", **msg})
 
     def add_assistant_message(self, content: str) -> None:
         """Add an assistant text message."""
         msg = {"role": "assistant", "content": content}
         self.messages.append(msg)
-        self._emit({"event": "message", **msg})
+        self._emit({"type": "message", **msg})
 
     def add_assistant_tool_calls(self, tool_calls: list[dict[str, Any]]) -> None:
         """Add assistant message with tool calls."""
         msg: dict[str, Any] = {"role": "assistant", "content": None, "tool_calls": tool_calls}
         self.messages.append(msg)
-        self._emit({"event": "message", **msg})
+        self._emit({"type": "message", **msg})
 
     def add_tool_result(self, tool_call_id: str, content: str) -> None:
         """Add a single tool result message."""
         msg = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
         self.messages.append(msg)
-        self._emit({"event": "message", **msg})
+        self._emit({"type": "message", **msg})
 
     def add_system_message(self, content: str) -> None:
         """Add a system message."""
         msg = {"role": "system", "content": content}
         self.messages.append(msg)
-        self._emit({"event": "message", **msg})
+        self._emit({"type": "message", **msg})
 
     # --- Usage tracking ---
 
@@ -172,13 +172,13 @@ class State:
         """Serialize state to JSONL bytes (message events)."""
         lines = []
         for msg in self.messages:
-            event = {"event": "message", **msg}
+            event = {"type": "message", **msg}
             lines.append(json.dumps(event, default=str))
         # Append usage summary
         lines.append(
             json.dumps(
                 {
-                    "event": "usage",
+                    "type": "usage",
                     **self.usage,
                     "status": self.status,
                     "run_count": self.run_count,
@@ -195,9 +195,9 @@ class State:
             if not line.strip():
                 continue
             event = json.loads(line)
-            event_type = event.get("event")
+            event_type = event.get("type")
             if event_type == "message":
-                msg = {k: v for k, v in event.items() if k != "event" and k != "ts"}
+                msg = {k: v for k, v in event.items() if k != "type" and k != "ts"}
                 state.messages.append(msg)
             elif event_type == "usage":
                 state.usage["input_tokens"] = event.get("input_tokens", 0)

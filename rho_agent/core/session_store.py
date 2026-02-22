@@ -219,10 +219,10 @@ class SessionStore:
                             if not line.strip():
                                 continue
                             event = json.loads(line)
-                            if event.get("event") == "run_start":
+                            if event.get("type") == "run_start":
                                 first_prompt = event.get("prompt", "")
                                 break
-                            if event.get("event") == "message" and event.get("role") == "user":
+                            if event.get("type") == "message" and event.get("role") == "user":
                                 first_prompt = event.get("content", "")
                                 break
                 except Exception:

@@ -197,7 +197,7 @@ class MonitorSession:
         except json.JSONDecodeError:
             return
 
-        ev_type = event.get("event", "")
+        ev_type = event.get("type", "")
 
         if ev_type == "run_start":
             prompt = event.get("prompt", "")

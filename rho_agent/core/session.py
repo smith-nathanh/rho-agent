@@ -235,7 +235,7 @@ class Session:
         """
         self._state.run_count += 1
         self._state.status = "running"
-        self._state._emit({"event": "run_start", "prompt": prompt})
+        self._state._emit({"type": "run_start", "prompt": prompt})
 
         collected_text: list[str] = []
         collected_events: list[AgentEvent] = []
@@ -264,7 +264,7 @@ class Session:
             raise
         finally:
             self._state.status = status
-            self._state._emit({"event": "run_end", "status": status})
+            self._state._emit({"type": "run_end", "status": status})
             self._update_meta_status(status)
 
         return RunResult(
@@ -334,7 +334,7 @@ class Session:
             # Stream response
             self._state._emit(
                 {
-                    "event": "llm_start",
+                    "type": "llm_start",
                     "model": self._agent.config.model,
                     "context_size": self._state.estimate_tokens(self._agent.system_prompt),
                 }
@@ -384,7 +384,7 @@ class Session:
 
                         self._state._emit(
                             {
-                                "event": "llm_end",
+                                "type": "llm_end",
                                 "model": self._agent.config.model,
                                 "input_tokens": event.usage.get("input_tokens", 0),
                                 "output_tokens": event.usage.get("output_tokens", 0),
@@ -471,7 +471,7 @@ class Session:
                     )
                     self._state._emit(
                         {
-                            "event": "tool_blocked",
+                            "type": "tool_blocked",
                             "tool_call_id": tool_id,
                             "tool_name": tool_name,
                             "tool_args": tool_args,
@@ -488,7 +488,7 @@ class Session:
 
                 self._state._emit(
                     {
-                        "event": "tool_start",
+                        "type": "tool_start",
                         "tool_call_id": tool_id,
                         "tool_name": tool_name,
                         "tool_args": tool_args,
@@ -506,7 +506,7 @@ class Session:
                 self._state.add_tool_result(tool_id, truncated_content)
                 self._state._emit(
                     {
-                        "event": "tool_end",
+                        "type": "tool_end",
                         "tool_call_id": tool_id,
                         "tool_name": tool_name,
                         "success": output.success,
@@ -601,7 +601,7 @@ class Session:
 
         self._state._emit(
             {
-                "event": "compact",
+                "type": "compact",
                 "tokens_before": tokens_before,
                 "tokens_after": tokens_after,
                 "trigger": trigger,

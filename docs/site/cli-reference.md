@@ -22,10 +22,10 @@ Without a prompt argument, the agent starts in interactive mode. With a prompt, 
 | `--backend <name>` | Execution backend: `local` (default) or `daytona` |
 | `--upload <local:remote>` | Upload files to sandbox (repeatable, format: `./local:/remote`; Daytona only) |
 | `--working-dir <path>` | Set the agent's working directory |
-| `--prompt <file.md>` | Load a markdown prompt template with frontmatter |
+| `--system-prompt / -s <file.md>` | Markdown system prompt file with YAML frontmatter |
 | `--var key=value` | Set a template variable (repeatable) |
 | `--vars-file <file.yaml>` | Load template variables from a YAML file |
-| `--system-prompt / -s <text>` | Override the system prompt entirely |
+| `--prompt / -p <text>` | Prompt text for one-shot mode |
 | `--model <name>` | Model to use (default: `gpt-5-mini` or `OPENAI_MODEL`) |
 | `--base-url <url>` | API endpoint override |
 | `--config / -c <path>` | Agent config YAML file |
@@ -45,7 +45,7 @@ rho-agent main --profile developer --working-dir ~/proj/myapp
 rho-agent main "find all TODO comments in the codebase"
 
 # Prompt template with variables
-rho-agent main --prompt examples/job-failure.md \
+rho-agent main --system-prompt examples/job-failure.md \
   --var cluster=prod \
   --var log_path=/mnt/logs/123
 
@@ -55,10 +55,6 @@ rho-agent main -r latest
 # Write output to a file
 rho-agent main "summarize this project" --output summary.md
 ```
-
-## `rho-agent dashboard`
-
-Coming soon — deferred to a future release.
 
 ## `rho-agent monitor`
 

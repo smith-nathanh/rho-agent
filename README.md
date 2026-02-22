@@ -1,10 +1,10 @@
 # rho-agent
 
-A configurable agent runtime for software development, research, and operations.
+A configurable AI agent for software development, research, and operations.
 
 <!-- ![demo](assets/demo.gif) -->
 
-rho-agent is a configurable runtime for deploying AI agents across software development, debugging, and operations workflows. It provides a structured agent loop with built-in tool handlers for shell execution, file inspection, database access, and external service integration — all governed by permission profiles that control what each agent can and cannot do.
+rho-agent is a configurable AI agent for software development, debugging, and operations workflows. It provides a structured agent loop with built-in tool handlers for shell execution, file inspection, database access, and external service integration — all governed by permission profiles that control what each agent can and cannot do. Every session is traced to disk and can be resumed, inspected, or monitored live.
 
 ## Quickstart
 
