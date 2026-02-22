@@ -100,7 +100,6 @@ class BirdRunner:
             turn_timeout = 600 if self.config.service_tier == "flex" else 120
 
             session = Session(agent)
-            session.enable_nudge = True
             async with session:
                 for turn in range(self.config.max_turns):
                     turns += 1

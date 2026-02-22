@@ -44,8 +44,10 @@ class Agent:
         from ..permissions.factory import ToolFactory, load_profile
 
         profile = load_profile(self._config.profile)
+        backend = self._config.backend
 
-        if self._config.backend == "daytona":
+        # DaytonaBackend instance or "daytona" string
+        if not isinstance(backend, str) or backend == "daytona":
             return self._build_daytona_registry(profile)
 
         factory = ToolFactory(profile)
@@ -53,12 +55,13 @@ class Agent:
 
     def _build_daytona_registry(self, profile: Any) -> ToolRegistry:
         """Build registry with Daytona remote handlers for shell/file tools."""
-        from ..tools.handlers.daytona import register_daytona_tools
+        from ..tools.handlers.daytona import DaytonaBackend, register_daytona_tools
         from ..permissions.factory import ToolFactory
 
         registry = ToolRegistry()
         working_dir = self._config.working_dir or profile.shell_working_dir or "/home/daytona"
-        self._sandbox_manager = register_daytona_tools(registry, working_dir)
+        backend = self._config.backend if isinstance(self._config.backend, DaytonaBackend) else None
+        self._sandbox_manager = register_daytona_tools(registry, working_dir, backend=backend)
 
         # Database tools still use the local factory path
         factory = ToolFactory(profile)

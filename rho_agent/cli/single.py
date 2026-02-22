@@ -19,9 +19,45 @@ from .formatting import (
 from .state import RENDER_MARKDOWN, console
 
 
+async def upload_to_sandbox(
+    session: Session,
+    mappings: list[tuple[str, str]],
+) -> None:
+    """Upload local files/directories to the Daytona sandbox.
+
+    Each mapping is (local_src, remote_dest). Directories are walked recursively.
+    Uses streaming upload_file() per file to avoid loading everything into memory.
+    """
+    if not mappings:
+        return
+
+    sandbox = await session.get_sandbox()
+
+    for src_str, dest in mappings:
+        src = Path(src_str).expanduser().resolve()
+        if not src.exists():
+            console.print(_markup(f"Upload source not found: {src}", THEME.error))
+            continue
+
+        if src.is_dir():
+            files = [f for f in src.rglob("*") if f.is_file()]
+            console.print(
+                _markup(f"Uploading {src_str} → {dest} ({len(files)} files)", THEME.accent)
+            )
+            for file_path in files:
+                relative = file_path.relative_to(src)
+                remote_path = f"{dest.rstrip('/')}/{relative}"
+                await sandbox.fs.upload_file(str(file_path), remote_path)
+        else:
+            console.print(_markup(f"Uploading {src_str} → {dest}", THEME.accent))
+            await sandbox.fs.upload_file(str(src), dest)
+
+
 async def run_single(
     session: Session,
     prompt: str,
+    *,
+    upload_mappings: list[tuple[str, str]] | None = None,
 ) -> None:
     """Run a single prompt and exit."""
     loop = asyncio.get_event_loop()
@@ -36,6 +72,10 @@ async def run_single(
 
     session_status = "completed"
     try:
+        # Upload files to sandbox before running
+        if upload_mappings:
+            await upload_to_sandbox(session, upload_mappings)
+
         status_ctx = None
         start = monotonic()
         if interactive_tty:
@@ -86,12 +126,15 @@ async def run_single(
     finally:
         if platform.system() != "Windows":
             loop.remove_signal_handler(signal.SIGINT)
+        await session.close()
 
 
 async def run_single_with_output(
     session: Session,
     prompt: str,
     output_path: str,
+    *,
+    upload_mappings: list[tuple[str, str]] | None = None,
 ) -> bool:
     """Run a single prompt and write final response to file.
 
@@ -125,6 +168,10 @@ async def run_single_with_output(
     pending_text_chunks: list[str] = []
 
     try:
+        # Upload files to sandbox before running
+        if upload_mappings:
+            await upload_to_sandbox(session, upload_mappings)
+
         status_ctx = None
         start = monotonic()
         if interactive_tty:
@@ -175,6 +222,7 @@ async def run_single_with_output(
     finally:
         if platform.system() != "Windows":
             loop.remove_signal_handler(signal.SIGINT)
+        await session.close()
 
     if cancelled or had_error:
         return False

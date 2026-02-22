@@ -6,6 +6,7 @@ import asyncio
 import platform
 import signal
 from datetime import datetime
+from pathlib import Path
 from time import monotonic
 from typing import Any
 
@@ -29,6 +30,7 @@ from .formatting import (
     _sync_token_status_from_state,
 )
 from .state import CONFIG_DIR, HISTORY_FILE, RENDER_MARKDOWN, console
+from .single import upload_to_sandbox
 
 
 class InteractiveSession:
@@ -41,12 +43,14 @@ class InteractiveSession:
         mode_name: str,
         working_dir: str,
         session_store: SessionStore,
+        upload_mappings: list[tuple[str, str]] | None = None,
     ) -> None:
         self.session = session
         self.approval_handler = approval_handler
         self.mode_name = mode_name
         self.working_dir = working_dir
         self.session_store = session_store
+        self.upload_mappings = upload_mappings or []
         self.session_status = "completed"
         self.token_status = TokenStatus(
             input_tokens=session.state.usage.get("input_tokens", 0),
@@ -94,6 +98,10 @@ class InteractiveSession:
         )
 
         try:
+            # Upload files to sandbox before starting interactive loop
+            if self.upload_mappings:
+                await upload_to_sandbox(self.session, self.upload_mappings)
+
             while True:
                 try:
                     console.print()
@@ -111,6 +119,9 @@ class InteractiveSession:
                     break
 
                 if user_input.startswith("/"):
+                    if user_input.startswith("/download"):
+                        await self._handle_download(user_input)
+                        continue
                     if user_input.startswith("/write"):
                         self._handle_file_write_toggle(user_input)
                         continue
@@ -142,6 +153,7 @@ class InteractiveSession:
             self.session_status = "error"
             raise
         finally:
+            await self.session.close()
             if self.session.state.messages:
                 console.print(f"\n[dim]Goodbye! Session saved: {self.session.id}[/dim]")
             else:
@@ -213,6 +225,27 @@ class InteractiveSession:
         finally:
             if platform.system() != "Windows":
                 loop.remove_signal_handler(signal.SIGINT)
+
+    async def _handle_download(self, cmd: str) -> None:
+        """Handle /download <remote_path> <local_path>."""
+        parts = cmd.split()
+        if len(parts) != 3:
+            console.print(
+                _markup("Usage: /download <remote_path> <local_path>", THEME.warning)
+            )
+            return
+
+        _, remote_path, local_path = parts
+        try:
+            sandbox = await self.session.get_sandbox()
+            local = Path(local_path).expanduser().resolve()
+            local.parent.mkdir(parents=True, exist_ok=True)
+            await sandbox.fs.download_file(remote_path, str(local))
+            console.print(_markup(f"Downloaded {remote_path} → {local}", THEME.success))
+        except RuntimeError as exc:
+            console.print(_markup(str(exc), THEME.error))
+        except Exception as exc:
+            console.print(_markup(f"Download failed: {exc}", THEME.error))
 
     def _handle_file_write_toggle(self, cmd: str) -> None:
         """Toggle the create-only write tool in readonly mode."""
@@ -399,6 +432,8 @@ async def run_interactive(
     mode_name: str,
     working_dir: str,
     session_store: SessionStore,
+    *,
+    upload_mappings: list[tuple[str, str]] | None = None,
 ) -> None:
     """Run an interactive REPL session."""
     interactive = InteractiveSession(
@@ -407,5 +442,6 @@ async def run_interactive(
         mode_name=mode_name,
         working_dir=working_dir,
         session_store=session_store,
+        upload_mappings=upload_mappings,
     )
     await interactive.run()

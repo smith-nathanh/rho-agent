@@ -231,7 +231,6 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     session = Session(agent, client=client)
     session.auto_compact = True
     session.context_window = context_window
-    session.enable_nudge = False  # CONFIRM_DONE gate handles completion verification
 
     # Create trajectory builder for ATIF output
     trajectory_builder = TrajectoryBuilder(model=model)

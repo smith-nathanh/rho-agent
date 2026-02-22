@@ -24,9 +24,6 @@ from ..tools.registry import ToolRegistry
 from .events import (
     AUTO_COMPACT_THRESHOLD,
     COMPACTION_SYSTEM_PROMPT,
-    COMPLETION_SIGNALS,
-    MAX_NUDGES,
-    NUDGE_MESSAGE,
     SUMMARY_PREFIX,
     AgentEvent,
     ApprovalCallback,
@@ -79,7 +76,6 @@ class Session:
         self.cancel_check: Callable[[], bool] | None = None
         self.auto_compact: bool = True
         self.context_window: int | None = None
-        self.enable_nudge: bool = False
 
         # Mutable copy of registry (frozen from agent, but Session owns its copy)
         self._registry = agent.registry
@@ -87,7 +83,6 @@ class Session:
         # Internal run state
         self._last_input_tokens: int = 0
         self._call_index: int = 0
-        self._nudge_count: int = 0
 
     @property
     def agent(self) -> "Agent":
@@ -194,6 +189,25 @@ class Session:
     ) -> None:
         await self.close()
 
+    async def get_sandbox(self) -> Any:
+        """Return the Daytona sandbox, creating it if needed.
+
+        Use this to upload/download files before or after ``run()``::
+
+            async with Session(agent) as s:
+                sandbox = await s.get_sandbox()
+                await sandbox.fs.upload_file("local/data.csv", "/work/data.csv")
+                await s.run(prompt="Analyze /work/data.csv")
+                await sandbox.fs.download_file("/work/results.json", "results.json")
+
+        Raises:
+            RuntimeError: If the agent is not using a Daytona backend.
+        """
+        manager = getattr(self._agent, '_sandbox_manager', None)
+        if manager is None:
+            raise RuntimeError("get_sandbox() requires a Daytona backend")
+        return await manager.get_sandbox()
+
     async def close(self) -> None:
         """Clean up resources (Daytona sandbox teardown, etc.)."""
         manager = getattr(self._agent, '_sandbox_manager', None)
@@ -265,7 +279,6 @@ class Session:
     ) -> AsyncIterator[AgentEvent]:
         """Internal agentic loop — yields AgentEvent."""
         self._cancelled = False
-        self._nudge_count = 0
         self._call_index = 0
 
         # Auto-compact check before processing
@@ -397,17 +410,8 @@ class Session:
             elif text_content:
                 self._state.add_assistant_message(text_content)
 
-            # No tool calls — check nudge or finish
+            # No tool calls — turn is done
             if not pending_tool_calls:
-                if self.enable_nudge and self._nudge_count < MAX_NUDGES:
-                    text_lower = text_content.lower()
-                    has_completion = any(s in text_lower for s in COMPLETION_SIGNALS)
-                    if not has_completion and len(text_content) < 500:
-                        self._nudge_count += 1
-                        self._state.add_user_message(NUDGE_MESSAGE)
-                        continue
-
-                self._nudge_count = 0
                 yield AgentEvent(
                     type="turn_complete",
                     usage={

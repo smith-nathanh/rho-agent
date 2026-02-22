@@ -40,7 +40,7 @@ class AgentConfig:
     vars: dict[str, str] = field(default_factory=dict)
     model: str = "gpt-5-mini"
     profile: str | PermissionProfile | None = None
-    backend: str = "local"            # "local" or "daytona"
+    backend: str | DaytonaBackend = "local"  # "local", "daytona", or DaytonaBackend
     working_dir: str | None = None
     base_url: str | None = None
     service_tier: str | None = None
@@ -58,7 +58,7 @@ class AgentConfig:
 | `vars` | `dict[str, str]` | `{}` | Variables for prompt template substitution |
 | `model` | `str` | `"gpt-5-mini"` | Model identifier passed to the LLM client |
 | `profile` | `str \| PermissionProfile \| None` | `None` | Permission profile name, object, or path to YAML |
-| `backend` | `str` | `"local"` | Execution backend: `"local"` or `"daytona"` |
+| `backend` | `str \| DaytonaBackend` | `"local"` | Execution backend: `"local"`, `"daytona"`, or a `DaytonaBackend` instance |
 | `working_dir` | `str \| None` | `None` | Working directory for tool execution |
 | `base_url` | `str \| None` | `None` | Custom API base URL |
 | `service_tier` | `str \| None` | `None` | API service tier |
@@ -161,7 +161,6 @@ session.approval_callback = my_callback    # Called when tool needs approval
 session.cancel_check = lambda: False       # Polled to check for cancellation
 session.auto_compact = True                # Auto-compact when context is large
 session.context_window = 128_000           # Context window size for compaction
-session.enable_nudge = True                # Enable nudge messages on empty responses
 ```
 
 ### Methods
@@ -178,6 +177,9 @@ compact_result = await session.compact()
 
 # Access state
 session.state  # State object
+
+# Get the Daytona sandbox (for file upload/download)
+sandbox = await session.get_sandbox()
 ```
 
 ### Async context manager (Daytona backend)
@@ -374,7 +376,9 @@ await session.run(prompt="Continue where we left off.")
 
 ### Daytona backend
 
-Use the async context manager for Daytona sessions to ensure remote cleanup:
+Use the async context manager for Daytona sessions to ensure remote cleanup.
+
+**Env-var auth** — set `DAYTONA_API_KEY` and use the string shorthand:
 
 ```python
 from rho_agent import Agent, AgentConfig, Session
@@ -389,3 +393,76 @@ async with Session(Agent(config)) as session:
     result = await session.run(prompt="Deploy the latest build to staging.")
     print(result.text)
 ```
+
+**Explicit config** — pass a `DaytonaBackend` for full control over auth and sandbox shape:
+
+```python
+from daytona import DaytonaConfig, Resources
+from rho_agent import Agent, AgentConfig, Session
+from rho_agent.tools.handlers.daytona import DaytonaBackend
+
+backend = DaytonaBackend(
+    config=DaytonaConfig(api_key="..."),
+    image="python:3.13",
+    resources=Resources(cpu=2, memory=4, disk=10),
+)
+
+async with Session(Agent(AgentConfig(profile="developer", backend=backend))) as s:
+    result = await s.run(prompt="Set up the project")
+    print(result.text)
+```
+
+**Uploading and downloading files** — use `get_sandbox()` to access the Daytona FS API:
+
+```python
+async with Session(Agent(AgentConfig(profile="developer", backend=backend))) as s:
+    sandbox = await s.get_sandbox()
+
+    # Upload a local repo into the sandbox
+    await sandbox.fs.upload_file("./my-project.tar.gz", "/work/my-project.tar.gz")
+
+    await s.run(prompt="Extract /work/my-project.tar.gz and run the tests")
+
+    # Download results before the sandbox is destroyed
+    await sandbox.fs.download_file("/work/results.json", "./results.json")
+```
+
+### DaytonaBackend
+
+Configuration object for the Daytona sandbox backend.
+
+```python
+@dataclass
+class DaytonaBackend:
+    config: DaytonaConfig | None = None   # SDK auth config (None = env vars)
+    image: str = "ubuntu:latest"          # Container image
+    resources: Resources | None = None    # CPU, memory, disk, GPU
+    auto_stop_interval: int = 0           # Auto-stop after N seconds idle (0 = never)
+```
+
+### CLI flags for Daytona
+
+Use `--backend` and `--upload` to work with Daytona sandboxes from the CLI:
+
+```bash
+# Run with a Daytona sandbox
+rho-agent --backend daytona --profile developer "Analyze the project"
+
+# Upload local files into the sandbox before running
+rho-agent --backend daytona --upload ./my-project:/work/my-project --profile developer
+
+# Multiple uploads
+rho-agent --backend daytona \
+  --upload ./data:/work/data \
+  --upload ./config.yaml:/work/config.yaml \
+  --profile developer
+
+# In interactive mode, download results from the sandbox
+# (use the /download slash command)
+#   /download /work/results.json ./results.json
+```
+
+| Flag | Description |
+|---|---|
+| `--backend <name>` | Execution backend: `local` (default) or `daytona` |
+| `--upload <src>:<dest>` | Upload local file or directory to sandbox (repeatable) |

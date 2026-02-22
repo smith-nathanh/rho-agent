@@ -61,32 +61,76 @@ def _invocation(tool_name: str, **kwargs) -> ToolInvocation:
 
 
 # ---------------------------------------------------------------------------
+# DaytonaBackend
+# ---------------------------------------------------------------------------
+
+
+class TestDaytonaBackend:
+    def test_defaults(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        b = DaytonaBackend()
+        assert b.config is None
+        assert b.image == "ubuntu:latest"
+        assert b.resources is None
+        assert b.auto_stop_interval == 0
+
+    def test_config_serializes_as_daytona_string(self):
+        from rho_agent.core.config import AgentConfig
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        cfg = AgentConfig(backend=DaytonaBackend(image="python:3.13"))
+        d = cfg._to_dict()
+        assert d["backend"] == "daytona"
+
+
+# ---------------------------------------------------------------------------
 # SandboxManager
 # ---------------------------------------------------------------------------
 
 
 class TestSandboxManager:
-    async def test_from_env_defaults(self):
-        mgr = SandboxManager.from_env()
+    def test_defaults(self):
+        mgr = SandboxManager()
         assert mgr._image == "ubuntu:latest"
         assert mgr._working_dir == "/home/daytona"
+        assert mgr._api_config is None
 
-    async def test_from_env_custom_image(self):
-        with patch.dict("os.environ", {"DAYTONA_SANDBOX_IMAGE": "python:3.13"}):
-            mgr = SandboxManager.from_env()
-            assert mgr._image == "python:3.13"
+    def test_from_backend_defaults(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
 
-    async def test_from_env_uses_explicit_env_dict(self):
-        mgr = SandboxManager.from_env(
-            env={
-                "DAYTONA_SANDBOX_IMAGE": "python:3.13",
-                "DAYTONA_SANDBOX_CPU": "2",
-                "DAYTONA_SANDBOX_MEMORY": "4096",
-                "DAYTONA_SANDBOX_DISK": "10240",
-            }
+        backend = DaytonaBackend()
+        mgr = SandboxManager.from_backend(backend)
+        assert mgr._image == "ubuntu:latest"
+        assert mgr._auto_stop_interval == 0
+        assert mgr._api_config is None
+
+    def test_from_backend_with_config(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        fake_config = MagicMock()
+        backend = DaytonaBackend(
+            config=fake_config,
+            image="python:3.13",
+            auto_stop_interval=60,
         )
+        mgr = SandboxManager.from_backend(backend, working_dir="/work")
         assert mgr._image == "python:3.13"
-        assert mgr._resources == {"cpu": 2, "memory": 4096, "disk": 10240}
+        assert mgr._working_dir == "/work"
+        assert mgr._auto_stop_interval == 60
+        assert mgr._api_config is fake_config
+
+    def test_from_backend_extracts_resources(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        resources = MagicMock()
+        resources.cpu = 2
+        resources.memory = 4
+        resources.disk = 10
+        resources.gpu = None
+        backend = DaytonaBackend(resources=resources)
+        mgr = SandboxManager.from_backend(backend)
+        assert mgr._resources == {"cpu": 2, "memory": 4, "disk": 10}
 
     async def test_close_when_no_sandbox(self):
         mgr = SandboxManager()
@@ -407,9 +451,8 @@ class TestDaytonaListHandler:
 
 
 class TestDaytonaBackendRouting:
-    def test_agent_routes_to_daytona_registry(self):
+    def test_agent_routes_string_daytona(self):
         """Agent with backend='daytona' should call register_daytona_tools."""
-        from unittest.mock import patch, MagicMock
         from rho_agent.core.agent import Agent
         from rho_agent.core.config import AgentConfig
 
@@ -420,4 +463,25 @@ class TestDaytonaBackendRouting:
         ) as mock_reg:
             agent = Agent(AgentConfig(backend="daytona", profile="developer"))
             mock_reg.assert_called_once()
+            # String "daytona" passes backend=None
+            _, kwargs = mock_reg.call_args
+            assert kwargs.get("backend") is None
+            assert agent._sandbox_manager is mock_manager
+
+    def test_agent_routes_daytona_backend_object(self):
+        """Agent with DaytonaBackend instance passes it through."""
+        from rho_agent.core.agent import Agent
+        from rho_agent.core.config import AgentConfig
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        backend = DaytonaBackend(image="python:3.13")
+        mock_manager = MagicMock()
+        with patch(
+            "rho_agent.tools.handlers.daytona.register_daytona_tools",
+            return_value=mock_manager,
+        ) as mock_reg:
+            agent = Agent(AgentConfig(backend=backend, profile="developer"))
+            mock_reg.assert_called_once()
+            _, kwargs = mock_reg.call_args
+            assert kwargs["backend"] is backend
             assert agent._sandbox_manager is mock_manager

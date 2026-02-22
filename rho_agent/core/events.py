@@ -9,23 +9,6 @@ from typing import Any
 # Auto-compaction triggers at this fraction of the model's context window.
 AUTO_COMPACT_THRESHOLD = 0.7
 
-# Continuation nudge settings (eval mode only)
-MAX_NUDGES = 3
-NUDGE_MESSAGE = (
-    "Please continue working on the task. If you need a tool that's missing, "
-    "install it. If an approach failed, try a different method."
-)
-COMPLETION_SIGNALS = [
-    "task complete",
-    "successfully completed",
-    "finished",
-    "done",
-    "completed the task",
-    "solution is ready",
-    "have completed",
-    "is complete",
-]
-
 COMPACTION_SYSTEM_PROMPT = """\
 You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
 

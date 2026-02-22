@@ -224,6 +224,7 @@ def handle_command(
                 "[bold]Commands:[/bold]",
                 line("/approve", "Enable auto-approve for all tool calls"),
                 line("/compact [guidance]", "Compact conversation history"),
+                line("/download <remote> <local>", "Download file from sandbox"),
                 line("/write [on|off|status]", "Toggle create-only write tool (readonly mode)"),
                 line("/resume [latest|id]", "Resume a saved conversation"),
                 line("/help", "Show this help"),

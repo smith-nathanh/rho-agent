@@ -133,6 +133,14 @@ def main(
             help="Capability profile: 'readonly' (default), 'developer', 'eval', or path to YAML",
         ),
     ] = os.getenv("RHO_AGENT_PROFILE"),
+    backend: Annotated[
+        str,
+        typer.Option("--backend", help="Execution backend: 'local' or 'daytona'"),
+    ] = os.getenv("RHO_AGENT_BACKEND", "local"),
+    upload: Annotated[
+        list[str] | None,
+        typer.Option("--upload", help="Upload files to sandbox (repeatable, format: ./local:/remote)"),
+    ] = None,
     shell_mode: Annotated[
         str | None,
         typer.Option(
@@ -143,6 +151,18 @@ def main(
 ) -> None:
     """rho-agent: An agent harness and CLI with readonly and developer modes."""
     from ..prompts import load_prompt, parse_vars, prepare_prompt
+
+    # Parse upload mappings (format: ./local:/remote)
+    upload_mappings: list[tuple[str, str]] = []
+    if upload:
+        for mapping in upload:
+            if ":" not in mapping:
+                console.print(
+                    _markup(f"Invalid --upload format (expected ./local:/remote): {mapping}", THEME.error)
+                )
+                raise typer.Exit(1)
+            src, dest = mapping.rsplit(":", 1)
+            upload_mappings.append((src, dest))
 
     # Set preview lines for tool output display
     settings.tool_preview_lines = preview_lines
@@ -212,6 +232,8 @@ def main(
             agent_config.model = model
         if profile:
             agent_config.profile = profile
+        if backend != "local":
+            agent_config.backend = backend
         if base_url:
             agent_config.base_url = base_url
         if reasoning_effort:
@@ -333,6 +355,7 @@ def main(
             system_prompt=system_prompt_text,
             model=model,
             profile=effective_profile,
+            backend=backend,
             base_url=base_url,
             reasoning_effort=reasoning_effort,
             working_dir=resolved_working_dir,
@@ -385,6 +408,7 @@ def main(
                     session,
                     run_prompt_text,
                     output,
+                    upload_mappings=upload_mappings,
                 )
             )
         else:
@@ -392,6 +416,7 @@ def main(
                 run_single(
                     session,
                     run_prompt_text,
+                    upload_mappings=upload_mappings,
                 )
             )
     else:
@@ -402,6 +427,7 @@ def main(
                 mode_name,
                 resolved_working_dir,
                 session_store,
+                upload_mappings=upload_mappings,
             )
         )
 

@@ -41,7 +41,7 @@ class AgentConfig:
     vars: dict[str, str] = field(default_factory=dict)
     model: str = field(default_factory=lambda: os.getenv("OPENAI_MODEL", "gpt-5-mini"))
     profile: str = field(default_factory=lambda: os.getenv("RHO_AGENT_PROFILE", "readonly"))
-    backend: str = field(default_factory=lambda: os.getenv("RHO_AGENT_BACKEND", "local"))
+    backend: str | Any = field(default_factory=lambda: os.getenv("RHO_AGENT_BACKEND", "local"))  # str | DaytonaBackend
     working_dir: str | None = None
     base_url: str | None = field(default_factory=lambda: os.getenv("OPENAI_BASE_URL"))
     service_tier: str | None = field(
@@ -103,7 +103,7 @@ class AgentConfig:
             data["vars"] = dict(self.vars)
         data["model"] = self.model
         data["profile"] = self.profile
-        data["backend"] = self.backend
+        data["backend"] = "daytona" if not isinstance(self.backend, str) else self.backend
         if self.working_dir:
             data["working_dir"] = self.working_dir
         if self.base_url:
