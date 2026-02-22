@@ -60,7 +60,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-See the [API Reference](docs/site/api-reference.md) docs and [`examples/`](examples/) for more patterns including task-based parallelism and cancellation.
+See the [Python SDK](docs/site/python-sdk.md) docs and [`examples/`](examples/) for more patterns including task-based parallelism and cancellation.
 
 ## Permission Profiles
 
@@ -71,7 +71,6 @@ Every agent runs under a profile that controls shell access, file write permissi
 | `readonly` | Restricted (allowlist) | Off | SELECT only | Safe inspection of production systems |
 | `developer` | Unrestricted | Full | SELECT only | Local development with file editing |
 | `eval` | Unrestricted | Full | Full | Sandboxed benchmark execution |
-| `daytona` | Unrestricted (remote) | Full (remote) | SELECT only | Cloud sandbox via Daytona |
 
 ```bash
 rho-agent --profile readonly
@@ -89,7 +88,7 @@ Custom profiles are defined in YAML. See [Profiles](docs/site/profiles.md) for t
 - **Multi-agent coordination** — delegate subtasks to child agents or interact with running agents through the monitor
 - **Observability** — per-session `trace.jsonl` event logs with token usage, tool execution, and timing data; session directories at `~/.config/rho-agent/sessions/`
 - **Session management** — monitor, pause, resume, and cancel running agents from another terminal (`rho-agent monitor <dir>`)
-- **Remote sandboxing** — execute all tools in a Daytona cloud VM with `--profile daytona`
+- **Remote sandboxing** — execute shell and file tools in a Daytona cloud sandbox with `--backend daytona`
 - **Evaluation integrations** — [BIRD-Bench](rho_agent/eval/birdbench/) (text-to-SQL) and [TerminalBench](rho_agent/eval/harbor/) via Harbor
 
 ## Documentation
@@ -99,9 +98,10 @@ Custom profiles are defined in YAML. See [Profiles](docs/site/profiles.md) for t
 | [Quickstart](docs/site/quickstart.md) | Get running in minutes |
 | [Installation](docs/site/installation.md) | Environment setup and install options |
 | [CLI Reference](docs/site/cli-reference.md) | Commands, flags, and usage examples |
-| [API Reference](docs/site/api-reference.md) | Programmatic Python interface for embedding agents |
+| [Python SDK](docs/site/python-sdk.md) | Create and run agents programmatically |
 | [Tools](docs/site/tools.md) | Complete tool handler reference |
 | [Profiles](docs/site/profiles.md) | Permission profiles and custom YAML |
+| [Daytona](docs/site/daytona.md) | Remote sandbox execution via Daytona |
 | [Observability](docs/site/observability.md) | Telemetry, monitor, and session traces |
 | [Architecture](docs/site/architecture.md) | System design, agent loop, and session protocol |
 

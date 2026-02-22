@@ -18,7 +18,9 @@ Without a prompt argument, the agent starts in interactive mode. With a prompt, 
 
 | Flag | Description |
 |---|---|
-| `--profile <name\|path>` | Capability profile: `readonly`, `developer`, `eval`, `daytona`, or path to a YAML file |
+| `--profile <name\|path>` | Permission profile: `readonly`, `developer`, `eval`, or path to a YAML file |
+| `--backend <name>` | Execution backend: `local` (default) or `daytona` |
+| `--upload <local:remote>` | Upload files to sandbox (repeatable, format: `./local:/remote`; Daytona only) |
 | `--working-dir <path>` | Set the agent's working directory |
 | `--prompt <file.md>` | Load a markdown prompt template with frontmatter |
 | `--var key=value` | Set a template variable (repeatable) |

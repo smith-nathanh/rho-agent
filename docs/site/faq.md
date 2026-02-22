@@ -83,27 +83,7 @@ rho-agent main --profile write-restricted-shell.yaml
 
 ## Daytona remote sandbox
 
-### What is the Daytona profile?
-
-The `daytona` profile routes all file and shell tool execution to a remote cloud VM managed by [Daytona](https://daytona.io). The agent process stays on your machine — only tool calls run remotely. This gives you isolated, disposable environments without needing to manage Docker containers yourself.
-
-### How do I set it up?
-
-Install the SDK extra and set your API key:
-
-```bash
-uv pip install 'rho-agent[daytona]'
-export DAYTONA_API_KEY=your-key
-rho-agent main --profile daytona
-```
-
-### When is the sandbox created and destroyed?
-
-The sandbox is lazily provisioned on the first tool call and automatically deleted when the session closes (via `session.close()`). If the process crashes, the sandbox may remain — use the Daytona dashboard to clean up orphaned sandboxes.
-
-### Can I customize the sandbox image or resources?
-
-Yes. Set `DAYTONA_SANDBOX_IMAGE` for a custom image and `DAYTONA_SANDBOX_CPU`, `DAYTONA_SANDBOX_MEMORY`, `DAYTONA_SANDBOX_DISK` for resource limits. See [Installation](installation/) for the full list.
+See the [Daytona](daytona/) guide for setup, usage, sandbox configuration, and file upload/download.
 
 ## Operations
 

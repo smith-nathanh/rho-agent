@@ -2,7 +2,7 @@
 
 ## Overview
 
-`rho-agent` is a Python-based research agent with **configurable permission profiles**. The architecture separates agent definition (stateless) from execution (stateful), with all conversation data managed through session directories.
+`rho-agent` is a configurable agent runtime for software development, debugging, and operations. It provides a structured agent loop with native tool handlers (shell, filesystem, databases) governed by permission profiles that control what each agent can do. The architecture separates agent definition (stateless `Agent`) from execution (stateful `Session`), with all conversation data managed through session directories.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -416,6 +416,50 @@ All coordination happens through the filesystem — no database or network trans
 
 ---
 
+## Remote Execution — Daytona Backend (`tools/handlers/daytona/`)
+
+The `--backend daytona` flag routes shell and file tool execution to a Daytona cloud sandbox. Any permission profile can be combined with any backend.
+
+### Routing
+
+During `Agent._build_registry()`, if `config.backend` is `"daytona"` or a `DaytonaBackend` instance, the agent calls `_build_daytona_registry()` instead of the standard `ToolFactory` path. This registers 7 remote handlers (`DaytonaBashHandler`, `DaytonaReadHandler`, `DaytonaWriteHandler`, `DaytonaEditHandler`, `DaytonaGlobHandler`, `DaytonaGrepHandler`, `DaytonaListHandler`) that share a single `SandboxManager`. Database tools are still registered locally via `ToolFactory._register_database_tools()`.
+
+### SandboxManager (`tools/handlers/daytona/manager.py`)
+
+Manages the lifecycle of a single Daytona sandbox per session:
+
+- **Lazy creation**: The sandbox is provisioned on the first tool call via `get_sandbox()`, not at agent construction. Uses `asyncio.Lock` for thread-safety.
+- **Shared instance**: All 7 handlers hold a reference to the same `SandboxManager` and share one sandbox.
+- **Cleanup**: `close()` deletes the sandbox and closes the SDK client. Called by `Session.close()`. Best-effort — exceptions are swallowed.
+
+### DaytonaBackend (`tools/handlers/daytona/backend.py`)
+
+Configuration dataclass for sandbox shape:
+
+```python
+@dataclass
+class DaytonaBackend:
+    config: DaytonaConfig | None = None  # SDK auth (None = env vars)
+    image: str = "ubuntu:latest"
+    resources: Resources | None = None   # CPU, memory, disk, GPU
+    auto_stop_interval: int = 0
+```
+
+### Handler implementation
+
+Each handler executes via the Daytona SDK's `sandbox.process.exec()` (for shell commands) or `sandbox.fs` (for file upload/download). Tool names and parameter schemas are identical to local handlers — the model sees the same interface.
+
+### CLI
+
+```bash
+rho-agent main --backend daytona --profile developer
+rho-agent main --backend daytona --upload ./data.csv:/home/daytona/data.csv
+```
+
+`--backend` accepts `local` (default) or `daytona`. `--upload` pre-stages files into the sandbox before the agent starts.
+
+---
+
 ## Key Constants
 
 | Constant | Value | Location |
@@ -434,7 +478,7 @@ All coordination happens through the filesystem — no database or network trans
 |-----------|----------|
 | `rho_agent/core/` | `agent.py`, `session.py`, `state.py`, `config.py`, `events.py`, `session_store.py` |
 | `rho_agent/permissions/` | Permission profiles, modes, factory (was `capabilities/`) |
-| `rho_agent/tools/` | `base.py`, `registry.py`, `handlers/` |
+| `rho_agent/tools/` | `base.py`, `registry.py`, `handlers/` (local), `handlers/daytona/` (remote) |
 | `rho_agent/client/` | `model.py` (OpenAI-compatible streaming client) |
 | `rho_agent/cli/` | CLI entry point, REPL, monitor subcommands |
 | `rho_agent/eval/` | Benchmark integrations (BIRD-Bench, Harbor/TerminalBench) |

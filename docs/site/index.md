@@ -8,7 +8,7 @@ rho-agent is a configurable runtime for deploying AI agents across software deve
 
 ## Key capabilities
 
-**Capability profiles** control shell access, file write permissions, and database mutation behavior per agent. A `readonly` agent can safely inspect production systems. A `developer` agent can edit files and run arbitrary commands. An `eval` agent has unrestricted access for sandboxed benchmark execution. A `daytona` agent executes all tools in a remote cloud sandbox.
+**Permission profiles** control shell access, file write permissions, and database mutation behavior per agent. A `readonly` agent can safely inspect production systems. A `developer` agent can edit files and run arbitrary commands. An `eval` agent has unrestricted access for sandboxed benchmark execution. The **Daytona backend** (`--backend daytona`) routes shell and file tool execution to a remote cloud sandbox.
 
 **Native tool handlers** give agents direct access to shells, files, databases (PostgreSQL, MySQL, Oracle, Vertica, SQLite), and Excel files — without relying on external plugins or MCP servers.
 
@@ -25,7 +25,7 @@ rho-agent is a configurable runtime for deploying AI agents across software deve
 | [Quickstart](quickstart/) | Get running in minutes |
 | [Installation](installation/) | Environment setup, install options, and verification |
 | [CLI Reference](cli-reference/) | Commands, flags, and usage examples |
-| [API Reference](api-reference/) | Programmatic Python interface for embedding agents |
+| [Python SDK](python-sdk/) | Create and run agents programmatically |
 | [Prompt Files](prompt-files/) | Template prompts with frontmatter and variables |
 | [Tools](tools/) | Complete tool handler reference |
 | [Profiles](profiles/) | Capability profiles and custom profile YAML |

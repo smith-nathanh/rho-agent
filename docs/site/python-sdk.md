@@ -1,6 +1,6 @@
 ---
-title: API Reference
-description: Programmatic interface for embedding agents in services, workers, and batch systems.
+title: Python SDK
+description: Create and run agents programmatically.
 order: 5
 ---
 
@@ -178,25 +178,22 @@ compact_result = await session.compact()
 # Access state
 session.state  # State object
 
-# Get the Daytona sandbox (for file upload/download)
+# Get the Daytona sandbox (see Daytona guide for details)
 sandbox = await session.get_sandbox()
 ```
 
 ### Async context manager (Daytona backend)
 
-When using the Daytona backend, use Session as an async context manager to ensure proper cleanup of remote resources:
+When using the Daytona backend, use `Session` as an async context manager to ensure the sandbox is cleaned up:
 
 ```python
-config = AgentConfig(backend="daytona", profile="developer")
-agent = Agent(config)
-
-async with Session(agent) as session:
+async with Session(Agent(AgentConfig(backend="daytona", profile="developer"))) as session:
     result = await session.run(prompt="Check the deployment status.")
     print(result.text)
-# session.close() called automatically
+# sandbox deleted automatically
 ```
 
-For the local backend, `close()` is a no-op and the context manager is optional.
+For the local backend, `close()` is a no-op and the context manager is optional. See the [Daytona](daytona/) guide for more.
 
 ## SessionStore
 
@@ -376,93 +373,4 @@ await session.run(prompt="Continue where we left off.")
 
 ### Daytona backend
 
-Use the async context manager for Daytona sessions to ensure remote cleanup.
-
-**Env-var auth** — set `DAYTONA_API_KEY` and use the string shorthand:
-
-```python
-from rho_agent import Agent, AgentConfig, Session
-
-config = AgentConfig(
-    system_prompt="You are a deployment assistant.",
-    backend="daytona",
-    profile="developer",
-)
-
-async with Session(Agent(config)) as session:
-    result = await session.run(prompt="Deploy the latest build to staging.")
-    print(result.text)
-```
-
-**Explicit config** — pass a `DaytonaBackend` for full control over auth and sandbox shape:
-
-```python
-from daytona import DaytonaConfig, Resources
-from rho_agent import Agent, AgentConfig, Session
-from rho_agent.tools.handlers.daytona import DaytonaBackend
-
-backend = DaytonaBackend(
-    config=DaytonaConfig(api_key="..."),
-    image="python:3.13",
-    resources=Resources(cpu=2, memory=4, disk=10),
-)
-
-async with Session(Agent(AgentConfig(profile="developer", backend=backend))) as s:
-    result = await s.run(prompt="Set up the project")
-    print(result.text)
-```
-
-**Uploading and downloading files** — use `get_sandbox()` to access the Daytona FS API:
-
-```python
-async with Session(Agent(AgentConfig(profile="developer", backend=backend))) as s:
-    sandbox = await s.get_sandbox()
-
-    # Upload a local repo into the sandbox
-    await sandbox.fs.upload_file("./my-project.tar.gz", "/work/my-project.tar.gz")
-
-    await s.run(prompt="Extract /work/my-project.tar.gz and run the tests")
-
-    # Download results before the sandbox is destroyed
-    await sandbox.fs.download_file("/work/results.json", "./results.json")
-```
-
-### DaytonaBackend
-
-Configuration object for the Daytona sandbox backend.
-
-```python
-@dataclass
-class DaytonaBackend:
-    config: DaytonaConfig | None = None   # SDK auth config (None = env vars)
-    image: str = "ubuntu:latest"          # Container image
-    resources: Resources | None = None    # CPU, memory, disk, GPU
-    auto_stop_interval: int = 0           # Auto-stop after N seconds idle (0 = never)
-```
-
-### CLI flags for Daytona
-
-Use `--backend` and `--upload` to work with Daytona sandboxes from the CLI:
-
-```bash
-# Run with a Daytona sandbox
-rho-agent --backend daytona --profile developer "Analyze the project"
-
-# Upload local files into the sandbox before running
-rho-agent --backend daytona --upload ./my-project:/work/my-project --profile developer
-
-# Multiple uploads
-rho-agent --backend daytona \
-  --upload ./data:/work/data \
-  --upload ./config.yaml:/work/config.yaml \
-  --profile developer
-
-# In interactive mode, download results from the sandbox
-# (use the /download slash command)
-#   /download /work/results.json ./results.json
-```
-
-| Flag | Description |
-|---|---|
-| `--backend <name>` | Execution backend: `local` (default) or `daytona` |
-| `--upload <src>:<dest>` | Upload local file or directory to sandbox (repeatable) |
+See the [Daytona](daytona/) guide for full CLI and Python API usage, including file uploads, sandbox configuration, and `DaytonaBackend`.
