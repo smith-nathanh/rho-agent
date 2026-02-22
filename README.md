@@ -102,7 +102,8 @@ Custom profiles are defined in YAML. See [Profiles](docs/site/profiles.md) for t
 | [Tools](docs/site/tools.md) | Complete tool handler reference |
 | [Profiles](docs/site/profiles.md) | Permission profiles and custom YAML |
 | [Daytona](docs/site/daytona.md) | Remote sandbox execution via Daytona |
-| [Observability](docs/site/observability.md) | Telemetry, monitor, and session traces |
+| [Monitor](docs/site/monitor.md) | Watch, control, and steer running agents |
+| [Observability](docs/site/observability.md) | Session traces, offline inspection, and observers |
 | [Architecture](docs/site/architecture.md) | System design, agent loop, and session protocol |
 
 ## Development

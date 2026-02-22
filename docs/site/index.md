@@ -28,7 +28,9 @@ rho-agent is a configurable runtime for deploying AI agents across software deve
 | [Python SDK](python-sdk/) | Create and run agents programmatically |
 | [Prompt Files](prompt-files/) | Template prompts with frontmatter and variables |
 | [Tools](tools/) | Complete tool handler reference |
-| [Profiles](profiles/) | Capability profiles and custom profile YAML |
-| [Observability](observability/) | Telemetry, dashboard, and monitor |
+| [Profiles](profiles/) | Permission profiles and custom profile YAML |
+| [Daytona](daytona/) | Remote sandbox execution via Daytona |
+| [Observability](observability/) | Session traces, offline inspection, and observers |
+| [Monitor](monitor/) | Watch, control, and steer running agents |
 | [Architecture](architecture/) | System design, session lifecycle, and tool routing |
 | [FAQ](faq/) | Common questions and troubleshooting |

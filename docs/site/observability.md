@@ -1,7 +1,7 @@
 ---
 title: Observability
-description: Session traces, monitor CLI, and custom observers.
-order: 9
+description: Session traces, offline inspection, and custom observers.
+order: 10
 ---
 
 Observability is built into the core. `State` automatically writes `trace.jsonl` to the session directory whenever you use `SessionStore`. There is nothing to enable or configure — tracing is always on.
@@ -53,23 +53,9 @@ Each session directory at `~/.config/rho-agent/sessions/<session_id>/` contains:
 | `pause` | Sentinel file — presence signals pause request |
 | `directives.jsonl` | Operator directives queued for the agent (JSON lines) |
 
-## Monitor CLI
+## Monitor
 
-The `rho-agent monitor <dir>` command provides live observation and control of running sessions. It operates on a sessions directory (defaults to `~/.config/rho-agent/sessions/`).
-
-### Subcommands
-
-**`rho-agent monitor <dir> ps`** — List running sessions. Shows session ID, status, model, profile, and start time.
-
-**`rho-agent monitor <dir> watch`** — Tail `trace.jsonl` for a session in real time. Streams events as they are appended.
-
-**`rho-agent monitor <dir> cancel <prefix>`** — Cancel a running session by writing a `cancel` sentinel file. The `<prefix>` argument matches session IDs by prefix for convenience.
-
-**`rho-agent monitor <dir> pause <prefix>`** — Pause a running session by writing a `pause` sentinel file. The agent will pause before the next tool execution.
-
-**`rho-agent monitor <dir> resume <prefix>`** — Resume a paused session by removing the `pause` sentinel file.
-
-**`rho-agent monitor <dir> directive <prefix> <message>`** — Append a directive to `directives.jsonl` for a running session. The agent picks up directives between turns.
+For live observation and control of running agents, see the [Monitor](monitor/) guide.
 
 ## Offline inspection
 

@@ -1,7 +1,7 @@
 ---
 title: FAQ
 description: Common questions about setup, usage, profiles, and operations.
-order: 11
+order: 13
 ---
 
 ## Setup

@@ -1,7 +1,7 @@
 ---
 title: Architecture
 description: System design, session lifecycle, agent loop, tool routing, and multi-agent coordination.
-order: 10
+order: 12
 ---
 
 ## Overview
