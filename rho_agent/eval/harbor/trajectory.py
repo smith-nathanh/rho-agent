@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from rho_agent.core.agent import AgentEvent
+from rho_agent.core.events import AgentEvent
 
 
 @dataclass

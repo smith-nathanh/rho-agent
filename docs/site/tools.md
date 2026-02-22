@@ -4,7 +4,7 @@ description: Complete reference for all tool handlers available to agents.
 order: 7
 ---
 
-Tools follow a handler pattern where each tool defines a `name`, `description`, JSON-schema `parameters`, and a `handle()` implementation. Tool availability is controlled by the active [capability profile](profiles/).
+Tools follow a handler pattern where each tool defines a `name`, `description`, JSON-schema `parameters`, and a `handle()` implementation. Tool availability is controlled by the active [permission profile](profiles/).
 
 ## File inspection tools
 
@@ -163,32 +163,13 @@ Configured via `VERTICA_HOST`, `VERTICA_DATABASE`, `VERTICA_USER`, `VERTICA_PASS
 
 ## Daytona remote sandbox tools
 
-When the `daytona` profile is active, all file and shell tools (`bash`, `read`, `write`, `edit`, `glob`, `grep`, `list`) are replaced with remote equivalents that execute in a Daytona cloud VM. The tool names and parameter schemas are identical — the model sees the same interface, but execution happens remotely.
+When the Daytona backend is active (`--backend daytona`), all file and shell tools (`bash`, `read`, `write`, `edit`, `glob`, `grep`, `list`) execute in a remote cloud sandbox. The tool names and parameter schemas are identical — the model sees the same interface. Database tools always run locally.
 
-A `SandboxManager` lazily provisions a sandbox on the first tool call and tears it down when the session closes. All handlers share the same sandbox instance.
-
-### How it works
-
-1. Agent dispatches a tool call (e.g., `bash` with `command: "ls -la"`)
-2. The Daytona handler forwards the command to the remote sandbox via the Daytona SDK
-3. Output is returned to the agent in the same format as local handlers
-
-### Configuration
-
-| Environment variable | Default | Description |
-|---|---|---|
-| `DAYTONA_API_KEY` | — | API key for Daytona (required) |
-| `DAYTONA_API_URL` | Daytona default | API endpoint override |
-| `DAYTONA_SANDBOX_IMAGE` | `ubuntu:latest` | Container image for the sandbox |
-| `DAYTONA_SANDBOX_CPU` | — | CPU cores |
-| `DAYTONA_SANDBOX_MEMORY` | — | Memory in MB |
-| `DAYTONA_SANDBOX_DISK` | — | Disk in GB |
-
-Database tools continue to run locally even under the `daytona` profile.
+See the [Daytona](daytona/) guide for setup, configuration, and file upload/download.
 
 ## Sub-agent tools
 
-rho-agent supports two patterns for spawning child agents. Both create independent runtimes and disable further delegation to prevent unbounded recursion.
+rho-agent supports two patterns for spawning child agents. Both create independent sessions and disable further delegation to prevent unbounded recursion.
 
 ### `delegate` (ad-hoc delegation)
 
@@ -207,13 +188,13 @@ Wrap a pre-configured agent as a named tool with typed parameters. Unlike `deleg
 
 ```python
 from rho_agent.tools.handlers import AgentToolHandler
-from rho_agent.runtime.options import RuntimeOptions
+from rho_agent.core.config import AgentConfig
 
 sql_agent = AgentToolHandler(
     tool_name="generate_sql",
     tool_description="Generate SQL from a natural language question.",
     system_prompt="You are an expert SQL developer. ...",
-    options=RuntimeOptions(model="gpt-5-mini", profile="readonly"),
+    config=AgentConfig(model="gpt-5-mini", profile="readonly"),
     input_schema={
         "type": "object",
         "properties": {
@@ -224,18 +205,18 @@ sql_agent = AgentToolHandler(
     },
 )
 
-# Register on an existing runtime's registry
-runtime.registry.register(sql_agent)
+# Register on an existing agent's registry
+agent.registry.register(sql_agent)
 ```
 
-The parent LLM sees `generate_sql(question, dialect)` as a first-class tool. Each invocation spawns an independent runtime — no conversation history is shared.
+The parent LLM sees `generate_sql(question, dialect)` as a first-class tool. Each invocation spawns an independent session — no conversation history is shared.
 
 | Constructor parameter | Type | Description |
 |---|---|---|
 | `tool_name` | string | Tool name the LLM sees (required) |
 | `tool_description` | string | Description for the LLM (required) |
 | `system_prompt` | string | Child agent's system prompt (required) |
-| `options` | RuntimeOptions | Child's model, profile, etc. |
+| `config` | AgentConfig | Child's model, profile, etc. |
 | `input_schema` | dict | JSON Schema for typed parameters |
 | `input_formatter` | callable | Custom `(args) -> instruction` mapper |
 | `requires_approval` | bool | Whether parent needs approval before calling |

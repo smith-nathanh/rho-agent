@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib.metadata
 import json
 import sys
 from datetime import datetime, timezone
 from typing import Any
 
-import yaml
 from rich.markup import escape
 
-from ..runtime import ObservabilityInitializationError
-from ..signals import SignalManager
 from .theme import THEME
 from .state import MARKDOWN_THEME, console, settings
 
@@ -26,42 +22,6 @@ def _markup(text: str, color: str) -> str:
 def _is_interactive_terminal() -> bool:
     """Return True when running in an interactive TTY."""
     return console.is_terminal and sys.stdin.isatty() and sys.stdout.isatty()
-
-
-def _format_observability_init_error(exc: ObservabilityInitializationError) -> str:
-    cause = exc.__cause__
-    if isinstance(cause, FileNotFoundError):
-        return (
-            f"Observability initialization failed: {cause}. "
-            "Fix --observability-config to point to an existing YAML file and retry."
-        )
-
-    if isinstance(cause, yaml.YAMLError):
-        config_location = exc.config_path or "the observability config file"
-        return (
-            f"Observability initialization failed: invalid YAML in {config_location}: "
-            f"{cause}. Fix the YAML syntax and retry."
-        )
-
-    if isinstance(cause, ValueError) and "tenant" in str(cause).lower():
-        return (
-            "Observability initialization failed: missing tenant information. "
-            "Set both --team-id and --project-id, or define "
-            "observability.tenant.team_id and observability.tenant.project_id in "
-            "the observability config."
-        )
-
-    guidance = []
-    if exc.config_path:
-        guidance.append("verify --observability-config points to a valid YAML file")
-    if exc.team_id and not exc.project_id:
-        guidance.append("provide --project-id")
-    if exc.project_id and not exc.team_id:
-        guidance.append("provide --team-id")
-    if not guidance:
-        guidance.append("set both --team-id and --project-id when observability is enabled")
-
-    return f"Observability initialization failed: {cause or exc}. To fix: {'; '.join(guidance)}."
 
 
 def _get_version() -> str:
@@ -108,12 +68,11 @@ class TokenStatus:
         )
 
 
-def _sync_token_status_from_session(token_status: TokenStatus, session: Any) -> None:
-    """Sync UI token status from current session counters."""
-    token_status.context_size = session.last_input_tokens
-    token_status.total_input_tokens = session.total_input_tokens
-    token_status.total_output_tokens = session.total_output_tokens
-    token_status.total_cached_tokens = session.total_cached_tokens
+def _sync_token_status_from_state(token_status: TokenStatus, state: Any) -> None:
+    """Sync UI token status from State usage dict."""
+    token_status.total_input_tokens = state.usage.get("input_tokens", 0)
+    token_status.total_output_tokens = state.usage.get("output_tokens", 0)
+    token_status.total_cached_tokens = state.usage.get("cached_tokens", 0)
 
 
 def _format_token_count(tokens: int) -> str:
@@ -135,23 +94,6 @@ def _format_elapsed(started_at: datetime, ended_at: datetime | None = None) -> s
     if secs < 3600:
         return f"{secs // 60}m{secs % 60}s"
     return f"{secs // 3600}h{(secs % 3600) // 60}m"
-
-
-async def _wait_while_paused(signal_manager: SignalManager, session_id: str) -> bool:
-    """Block at a turn boundary while paused; return False if externally cancelled."""
-    announced = False
-    while signal_manager.is_paused(session_id):
-        if signal_manager.is_cancelled(session_id):
-            return False
-        if not announced:
-            console.print(
-                _markup("Paused by rho-agent monitor; waiting for resume...", THEME.warning)
-            )
-            announced = True
-        await asyncio.sleep(0.5)
-    if announced:
-        console.print(_markup("Resumed by rho-agent monitor", THEME.success))
-    return True
 
 
 def _format_tool_signature(tool_name: str | None, tool_args: dict[str, Any] | None) -> str:

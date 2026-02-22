@@ -18,7 +18,6 @@ variables:
     required: true
   job_id:
     default: "unknown"
-initial_prompt: Investigate job {{ job_id }} on {{ cluster }}.
 ---
 
 You are debugging a failed job on {{ cluster }}.
@@ -34,7 +33,6 @@ Start by reading the log file and identifying error patterns.
 |---|---|---|
 | `description` | string | Human-readable description of the prompt's purpose |
 | `variables` | dict | Variable definitions (see below) |
-| `initial_prompt` | string | Optional initial user message sent to the agent automatically |
 
 ## Variable definitions
 
@@ -69,31 +67,30 @@ From the CLI:
 
 ```bash
 # Individual variables
-rho-agent main --prompt task.md --var cluster=prod --var log_path=/mnt/logs/123
+rho-agent main --system-prompt task.md --var cluster=prod --var log_path=/mnt/logs/123
 
 # Variables file
-rho-agent main --prompt task.md --vars-file vars.yaml
+rho-agent main --system-prompt task.md --vars-file vars.yaml
 ```
 
-From the runtime API:
+From the Python API:
 
-Variables are resolved at prompt load time before being passed to `create_runtime()`.
+Variables are resolved at prompt load time when constructing an `AgentConfig` via the `AgentConfig.vars` field.
 
 ## Prompt precedence
 
 The system prompt is resolved in this order:
 
-1. `--system "..."` — overrides everything
-2. `--prompt file.md` — loads the markdown body as system prompt
-3. `~/.config/rho-agent/default-system.md` — custom default (if the file exists)
-4. Built-in default system prompt
+1. `--system-prompt file.md` — loads the markdown body as system prompt
+2. `~/.config/rho-agent/default.md` — custom default (if the file exists)
+3. Built-in default system prompt
 
 ## Initial message precedence
 
 The first user message sent to the agent is resolved in this order:
 
-1. Positional argument: `rho-agent main --prompt task.md "focus on OOM errors"`
-2. `initial_prompt` field from frontmatter
+1. `--prompt "..."` — explicit prompt text for one-shot mode
+2. Positional argument: `rho-agent main "focus on OOM errors"`
 3. Neither — agent starts in interactive mode waiting for input
 
 ## Example
@@ -108,9 +105,6 @@ variables:
     required: true
   focus_area:
     default: "indexes"
-initial_prompt: >
-  Connect to the {{ database }} database, list all tables,
-  and analyze the {{ focus_area }} for optimization opportunities.
 ---
 
 You are a database performance analyst.
@@ -122,7 +116,7 @@ explain the issue, its performance impact, and a concrete recommendation.
 ```
 
 ```bash
-rho-agent main --prompt schema-analysis.md \
+rho-agent main --system-prompt schema-analysis.md \
   --var database=analytics \
   --var focus_area="query patterns"
 ```

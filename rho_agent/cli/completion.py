@@ -20,6 +20,7 @@ from prompt_toolkit.document import Document
 COMMANDS = [
     "/approve",
     "/compact",
+    "/download",
     "/mode",
     "/write",
     "/resume",

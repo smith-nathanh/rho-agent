@@ -323,7 +323,12 @@ class ModelClient:
                 {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0},
             )
         except Exception as e:
-            return f"Error: {e}", {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0}
+            return f"Error: {e}", {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cached_tokens": 0,
+                "cost_usd": 0.0,
+            }
 
     async def complete_prompt(self, prompt: Prompt) -> tuple[str, dict[str, Any]]:
         """Non-streaming completion from a Prompt, preserving system/tools prefix.
@@ -363,4 +368,9 @@ class ModelClient:
                 {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0},
             )
         except Exception as e:
-            return f"Error: {e}", {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0}
+            return f"Error: {e}", {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cached_tokens": 0,
+                "cost_usd": 0.0,
+            }

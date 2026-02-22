@@ -68,12 +68,12 @@ Database tools support PostgreSQL, MySQL, Oracle, Vertica, and SQLite. See [Tool
 
 ## Run in a remote sandbox
 
-Use the `daytona` profile to execute all tools in a Daytona cloud VM. The agent process stays local — only tool execution happens remotely.
+Use the Daytona backend to execute shell and file tools in a remote cloud sandbox. The agent process stays local — only tool execution happens remotely. Combine with any permission profile.
 
 ```bash
 uv pip install 'rho-agent[daytona]'
 export DAYTONA_API_KEY=your-key
-uv run rho-agent main --profile daytona "explore the filesystem and install Python 3.13"
+uv run rho-agent main --backend daytona --profile developer "explore the filesystem and install Python 3.13"
 ```
 
 A sandbox is provisioned on the first tool call and automatically cleaned up when the session ends.
@@ -81,19 +81,16 @@ A sandbox is provisioned on the first tool call and automatically cleaned up whe
 ## Monitor running agents
 
 ```bash
-# List running agents
-uv run rho-agent ps
-
-# Launch the observability dashboard
-uv run rho-agent dashboard
+# List sessions in a directory
+uv run rho-agent ps ~/.config/rho-agent/sessions
 
 # Open the interactive monitor
-uv run rho-agent monitor
+uv run rho-agent monitor ~/.config/rho-agent/sessions
 ```
 
 ## Next steps
 
 - [Installation](installation/) — all install methods and environment configuration
 - [CLI Reference](cli-reference/) — complete command and flag documentation
-- [Profiles](profiles/) — understand and customize capability profiles
-- [Runtime API](runtime-api/) — embed agents in Python services
+- [Profiles](profiles/) — understand and customize permission profiles
+- [Python SDK](python-sdk/) — create and run agents programmatically

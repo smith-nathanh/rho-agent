@@ -1,10 +1,10 @@
 ---
 title: Profiles
-description: Capability profiles that control shell access, file permissions, database modes, and approval behavior.
+description: Permission profiles that control shell access, file permissions, database modes, and approval behavior.
 order: 8
 ---
 
-Profiles define what an agent can and cannot do. They control shell execution mode, file write permissions, database mutation access, and tool approval requirements. Every agent runs under a profile — the default is `readonly`.
+Permission profiles define what an agent can and cannot do. They control shell execution mode, file write permissions, database mutation access, and tool approval requirements. Every agent runs under a profile — the default is `readonly`.
 
 ## Built-in profiles
 
@@ -53,26 +53,6 @@ Unrestricted profile for sandboxed environments. No restrictions, no approval pr
 rho-agent main --profile eval
 ```
 
-### `daytona`
-
-Remote sandbox profile. All tool execution (bash, read, write, edit, glob, grep, list) happens in a Daytona cloud VM. The agent process stays local — only the LLM conversation loop and tool dispatch run on your machine.
-
-The sandbox is the security boundary, so shell and file write access are unrestricted and no approval prompts are needed. Database tools still run locally in read-only mode.
-
-| Capability | Setting |
-|---|---|
-| Shell | Unrestricted (remote sandbox) |
-| File write | Full (remote sandbox) |
-| Database | SELECT only (local) |
-| Approval | None |
-
-```bash
-export DAYTONA_API_KEY=your-key
-rho-agent main --profile daytona
-```
-
-Requires the Daytona SDK extra: `uv pip install 'rho-agent[daytona]'`. See [Installation](installation/) for environment variable configuration.
-
 ### `developer-bash-only`
 
 Same capabilities as `developer`, but only registers the `bash` tool. File inspection and database tools are not available — the agent must use shell commands for everything.
@@ -114,7 +94,7 @@ shell_working_dir: /app  # Default working directory
 bash_only: false         # Only register bash tool
 ```
 
-### Capability modes
+### Permission modes
 
 **Shell modes**
 
@@ -146,6 +126,10 @@ bash_only: false         # Only register bash tool
 | `dangerous` | Tools classified as dangerous require approval (bash, write, edit, database tools, delegate). |
 | `granular` | Only tools listed in `required_tools` require approval. |
 | `none` | No approval prompts. |
+
+### Remote execution with Daytona
+
+Any profile can be combined with `--backend daytona` to run shell and file tools in a remote cloud sandbox. See the [Daytona](daytona/) guide.
 
 ### Example: read-only with database approval
 

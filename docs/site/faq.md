@@ -1,7 +1,7 @@
 ---
 title: FAQ
 description: Common questions about setup, usage, profiles, and operations.
-order: 11
+order: 13
 ---
 
 ## Setup
@@ -37,11 +37,11 @@ rho-agent main -r latest
 rho-agent main -r abc123
 ```
 
-Conversations are saved automatically to `~/.config/rho-agent/conversations/`.
+Conversations are saved automatically to `~/.config/rho-agent/sessions/`.
 
 ### Can I use prompt templates with one-shot mode?
 
-Yes. Combine `--prompt` with a positional argument — the positional argument becomes the initial user message, overriding the template's `initial_prompt`:
+Yes. Combine `--prompt` with a positional argument — the positional argument becomes the initial user message:
 
 ```bash
 rho-agent main --prompt task.md "focus specifically on OOM errors"
@@ -83,56 +83,35 @@ rho-agent main --profile write-restricted-shell.yaml
 
 ## Daytona remote sandbox
 
-### What is the Daytona profile?
-
-The `daytona` profile routes all file and shell tool execution to a remote cloud VM managed by [Daytona](https://daytona.io). The agent process stays on your machine — only tool calls run remotely. This gives you isolated, disposable environments without needing to manage Docker containers yourself.
-
-### How do I set it up?
-
-Install the SDK extra and set your API key:
-
-```bash
-uv pip install 'rho-agent[daytona]'
-export DAYTONA_API_KEY=your-key
-rho-agent main --profile daytona
-```
-
-### When is the sandbox created and destroyed?
-
-The sandbox is lazily provisioned on the first tool call and automatically deleted when the session closes (via `close_runtime()`). If the process crashes, the sandbox may remain — use the Daytona dashboard to clean up orphaned sandboxes.
-
-### Can I customize the sandbox image or resources?
-
-Yes. Set `DAYTONA_SANDBOX_IMAGE` for a custom image and `DAYTONA_SANDBOX_CPU`, `DAYTONA_SANDBOX_MEMORY`, `DAYTONA_SANDBOX_DISK` for resource limits. See [Installation](installation/) for the full list.
+See the [Daytona](daytona/) guide for setup, usage, sandbox configuration, and file upload/download.
 
 ## Operations
 
 ### How do I see what agents are running?
 
 ```bash
-rho-agent ps
+rho-agent ps ~/.config/rho-agent/sessions
 ```
 
 Or use the monitor for a richer view:
 
 ```bash
-rho-agent monitor
-# then type: overview
+rho-agent monitor ~/.config/rho-agent/sessions
 ```
 
 ### How do I stop a runaway agent?
 
 ```bash
 # Stop a specific agent by session ID prefix
-rho-agent kill abc1
+rho-agent cancel abc1 --dir ~/.config/rho-agent/sessions
 
 # Stop all running agents
-rho-agent kill --all
+rho-agent cancel --all --dir ~/.config/rho-agent/sessions
 ```
 
 ### Where is telemetry data stored?
 
-By default at `~/.config/rho-agent/telemetry.db` (SQLite). You can change this in `observability.yaml` or use the OTLP backend to export to an external collector.
+Telemetry is stored as trace.jsonl files in session directories at `~/.config/rho-agent/sessions/`.
 
 ## Docs publishing
 

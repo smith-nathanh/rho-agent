@@ -1,4 +1,4 @@
-from rho_agent.core.agent import AgentEvent
+from rho_agent.core.events import AgentEvent
 from rho_agent.eval.harbor.trajectory import TrajectoryBuilder
 
 

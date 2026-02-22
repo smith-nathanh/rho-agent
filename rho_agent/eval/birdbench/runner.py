@@ -10,15 +10,15 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from rho_agent.capabilities import (
+from rho_agent.permissions import (
     ApprovalMode,
-    CapabilityProfile,
+    PermissionProfile,
     DatabaseMode,
     FileWriteMode,
     ShellMode,
 )
+from rho_agent.core import Agent, AgentConfig, Session
 from rho_agent.prompts import load_prompt
-from rho_agent.runtime import RuntimeOptions, create_runtime, run_prompt
 
 from .config import BirdMetrics, EvalAbortedError, EvalConfig, TaskResult, TaskStatus
 from .evaluator import BirdEvaluator
@@ -57,7 +57,6 @@ class BirdRunner:
         """
         tmp_db_path = None
         handler = None
-        runtime = None
 
         try:
             # Copy database to temp file (agent safety)
@@ -68,30 +67,23 @@ class BirdRunner:
             os.close(tmp_fd)
             shutil.copy2(task.db_path, tmp_db_path)
 
-            # Build runtime with minimal profile (only custom tools needed)
+            # Build agent with minimal profile
             system_prompt = self._get_system_prompt()
-            profile = CapabilityProfile(
-                name="birdbench",
-                description="BIRD-Bench SQL evaluation profile",
-                shell=ShellMode.RESTRICTED,
-                file_write=FileWriteMode.OFF,
-                database=DatabaseMode.READONLY,
-                approval=ApprovalMode.NONE,
+            agent = Agent(
+                AgentConfig(
+                    system_prompt=system_prompt,
+                    model=self.config.model,
+                    base_url=self.config.base_url,
+                    service_tier=self.config.service_tier,
+                    profile="readonly",
+                    auto_approve=True,
+                )
             )
-            options = RuntimeOptions(
-                model=self.config.model,
-                base_url=self.config.base_url,
-                service_tier=self.config.service_tier,
-                profile=profile,
-                auto_approve=True,
-                enable_delegate=False,
-            )
-            runtime = create_runtime(system_prompt, options=options)
-            runtime.registry.clear()
 
-            # Register BIRD-specific tools
+            # Replace registry with BIRD-specific tools only
+            agent.registry.clear()
             handler = BirdSqliteHandler(db_path=tmp_db_path)
-            runtime.registry.register(handler)
+            agent.registry.register(handler)
 
             submitted_sql: str | None = None
 
@@ -100,7 +92,7 @@ class BirdRunner:
                 submitted_sql = sql
 
             submit_handler = SubmitSqlHandler(on_submit=capture_sql)
-            runtime.registry.register(submit_handler)
+            agent.registry.register(submit_handler)
 
             # Run the task
             prompt = task.get_prompt()
@@ -109,8 +101,8 @@ class BirdRunner:
             consecutive_timeouts = 0
             turn_timeout = 600 if self.config.service_tier == "flex" else 120
 
-            runtime.close_status = "completed"
-            async with runtime:
+            session = Session(agent)
+            async with session:
                 for turn in range(self.config.max_turns):
                     turns += 1
 
@@ -121,7 +113,7 @@ class BirdRunner:
 
                     try:
                         async with asyncio.timeout(turn_timeout):
-                            result = await run_prompt(runtime, turn_input)
+                            result = await session.run(turn_input)
 
                         consecutive_timeouts = 0
 
@@ -141,7 +133,6 @@ class BirdRunner:
                             file=sys.stderr,
                         )
                         if consecutive_timeouts >= 3:
-                            runtime.close_status = "error"
                             raise EvalAbortedError(
                                 "Aborting: 3 consecutive turn timeouts.",
                                 consecutive_timeouts,
@@ -151,7 +142,6 @@ class BirdRunner:
                             status = TaskStatus.AGENT_CONTEXT_LIMIT
                         else:
                             status = TaskStatus.TASK_ERROR
-                        runtime.close_status = "error"
                         break
 
                 if turns >= self.config.max_turns and not submit_handler.is_submitted:
@@ -169,7 +159,7 @@ class BirdRunner:
             return TaskResult(
                 index=task.index,
                 status=status,
-                history=runtime.session.history.copy(),
+                history=session.state.messages.copy(),
                 time=TaskResult.create_time(),
                 result=bird_result,
             )

@@ -1,0 +1,4 @@
+databases:
+  demo:
+    type: sqlite
+    path: "/Users/nate/proj/rho-agent/examples/sql_explorer/sample_data.db"

@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
-from ..runtime.options import RuntimeOptions
+from ..core.config import AgentConfig
 
 
 class TaskStatus(str, Enum):
@@ -121,20 +121,15 @@ class ConductorConfig:
     project_id: str | None = None
     team_id: str | None = None
 
-    def runtime_options(
-        self, *, profile: str, metadata: dict[str, str] | None = None
-    ) -> RuntimeOptions:
-        """Build RuntimeOptions from this config."""
-        return RuntimeOptions(
+    def agent_config(self, *, system_prompt: str, profile: str) -> AgentConfig:
+        """Build an AgentConfig from this config."""
+        return AgentConfig(
+            system_prompt=system_prompt,
             model=self.model,
             service_tier=self.service_tier,
             profile=profile,
             working_dir=self.working_dir,
             auto_approve=True,
-            enable_delegate=False,
-            team_id=self.team_id,
-            project_id=self.project_id,
-            telemetry_metadata=metadata or {},
         )
 
 

@@ -7,8 +7,10 @@ and tears it down on session close.
 from __future__ import annotations
 
 import asyncio
-import os
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .backend import DaytonaBackend
 
 
 class SandboxManager:
@@ -21,12 +23,14 @@ class SandboxManager:
         env_vars: dict[str, str] | None = None,
         resources: dict[str, int] | None = None,
         auto_stop_interval: int = 0,
+        api_config: Any = None,
     ):
         self._image = image
         self._working_dir = working_dir
         self._env_vars = env_vars or {}
         self._resources = resources or {}
         self._auto_stop_interval = auto_stop_interval
+        self._api_config = api_config
         self._sandbox = None
         self._client = None
         self._lock = asyncio.Lock()
@@ -51,7 +55,10 @@ class SandboxManager:
                 Resources,
             )
 
-            self._client = AsyncDaytona()
+            if self._api_config is not None:
+                self._client = AsyncDaytona(self._api_config)
+            else:
+                self._client = AsyncDaytona()
 
             params = CreateSandboxFromImageParams(
                 image=self._image,
@@ -87,28 +94,24 @@ class SandboxManager:
             self._client = None
 
     @classmethod
-    def from_env(
+    def from_backend(
         cls,
+        backend: DaytonaBackend,
         working_dir: str = "/home/daytona",
-        env: Mapping[str, str] | None = None,
     ) -> SandboxManager:
-        """Create a SandboxManager configured from environment variables."""
-        resolved_env = env if env is not None else os.environ
-        image = resolved_env.get("DAYTONA_SANDBOX_IMAGE", "ubuntu:latest")
-        env_vars = {}
-        resources = {}
-
-        # Parse resource env vars
-        if cpu := resolved_env.get("DAYTONA_SANDBOX_CPU"):
-            resources["cpu"] = int(cpu)
-        if memory := resolved_env.get("DAYTONA_SANDBOX_MEMORY"):
-            resources["memory"] = int(memory)
-        if disk := resolved_env.get("DAYTONA_SANDBOX_DISK"):
-            resources["disk"] = int(disk)
+        """Create a SandboxManager from a DaytonaBackend config."""
+        resources: dict[str, int] = {}
+        if backend.resources is not None:
+            # Extract fields from the SDK Resources object
+            for attr in ("cpu", "memory", "disk", "gpu"):
+                val = getattr(backend.resources, attr, None)
+                if val is not None:
+                    resources[attr] = val
 
         return cls(
-            image=image,
+            image=backend.image,
             working_dir=working_dir,
-            env_vars=env_vars,
+            auto_stop_interval=backend.auto_stop_interval,
             resources=resources if resources else None,
+            api_config=backend.config,
         )

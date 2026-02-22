@@ -5,9 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from ..runtime import create_runtime, run_prompt, session_usage
-from ..runtime.types import SessionUsage
+from ..core.agent import Agent
+from ..core.session import Session
 from .models import ConductorConfig, Task, TaskDAG
+from .worker import SessionUsage
 from .prompts import (
     REVIEWER_SYSTEM_PROMPT,
     REVIEWER_USER_TEMPLATE,
@@ -37,15 +38,9 @@ async def run_reviewer(
     The reviewer has developer profile access — it can read files, edit code,
     and run verification commands. It fixes any issues it finds directly.
     """
-    options = config.runtime_options(
-        profile="developer",
-        metadata={"source": "conductor_reviewer", "task_id": task.id},
-    )
-    runtime = create_runtime(
-        REVIEWER_SYSTEM_PROMPT,
-        options=options,
-        cancel_check=cancel_check,
-    )
+    agent = Agent(config.agent_config(system_prompt=REVIEWER_SYSTEM_PROMPT, profile="developer"))
+    session = Session(agent)
+    session.cancel_check = cancel_check
 
     prompt = REVIEWER_USER_TEMPLATE.format(
         task_id=task.id,
@@ -55,10 +50,14 @@ async def run_reviewer(
         verification_commands=format_verification(dag.verification),
     )
 
-    async with runtime:
-        result = await run_prompt(runtime, prompt)
+    result = await session.run(prompt)
 
+    usage = session.state.usage
     return ReviewResult(
         summary=result.text,
-        usage=session_usage(runtime.session),
+        usage=SessionUsage(
+            input_tokens=usage["input_tokens"],
+            output_tokens=usage["output_tokens"],
+            cost_usd=usage["cost_usd"],
+        ),
     )

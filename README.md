@@ -4,7 +4,7 @@ A configurable agent runtime for software development, research, and operations.
 
 <!-- ![demo](assets/demo.gif) -->
 
-rho-agent is a configurable runtime for deploying AI agents across software development, debugging, and operations workflows. It provides a structured agent loop with built-in tool handlers for shell execution, file inspection, database access, and external service integration — all governed by capability profiles that control what each agent can and cannot do.
+rho-agent is a configurable runtime for deploying AI agents across software development, debugging, and operations workflows. It provides a structured agent loop with built-in tool handlers for shell execution, file inspection, database access, and external service integration — all governed by permission profiles that control what each agent can and cannot do.
 
 ## Quickstart
 
@@ -33,36 +33,36 @@ rho-agent --profile developer --working-dir ~/proj/myapp \
 
 # Triage a failed job using a prompt template
 rho-agent --prompt examples/job-failure.md --var cluster=prod --var log_path=/mnt/logs/12345
+
+# Use a saved agent config
+rho-agent --config configs/research-assistant.yaml "Analyze recent failures."
 ```
 
 ## Python API
 
-Embed agents in services, workers, and batch systems using the runtime directly:
+Embed agents in services, workers, and batch systems:
 
 ```python
 import asyncio
-from rho_agent import RuntimeOptions, create_runtime, run_prompt
+from rho_agent import Agent, AgentConfig, Session
 
 async def main() -> None:
-    runtime = create_runtime(
-        "You are a research assistant.",
-        options=RuntimeOptions(profile="developer", working_dir="/tmp/work"),
+    config = AgentConfig(
+        system_prompt="You are a research assistant.",
+        profile="developer",
+        working_dir="/tmp/work",
     )
-    await runtime.start()
-    try:
-        result = await run_prompt(runtime, "Analyze recent failures.")
-        print(result.text, result.status, result.usage)
-    except Exception:
-        raise
-    finally:
-        await runtime.close(result.status if "result" in dir() else "error")
+    agent = Agent(config)
+    session = Session(agent)
+    result = await session.run(prompt="Analyze recent failures.")
+    print(result.text, result.status, result.usage)
 
 asyncio.run(main())
 ```
 
-See the [Runtime API](docs/site/runtime-api.md) docs and [`examples/`](examples/) for more patterns including parallel dispatch and cancellation.
+See the [Python SDK](docs/site/python-sdk.md) docs and [`examples/`](examples/) for more patterns including task-based parallelism and cancellation.
 
-## Capability Profiles
+## Permission Profiles
 
 Every agent runs under a profile that controls shell access, file write permissions, and database mutation behavior. The default is `readonly`.
 
@@ -71,7 +71,6 @@ Every agent runs under a profile that controls shell access, file write permissi
 | `readonly` | Restricted (allowlist) | Off | SELECT only | Safe inspection of production systems |
 | `developer` | Unrestricted | Full | SELECT only | Local development with file editing |
 | `eval` | Unrestricted | Full | Full | Sandboxed benchmark execution |
-| `daytona` | Unrestricted (remote) | Full (remote) | SELECT only | Cloud sandbox via Daytona |
 
 ```bash
 rho-agent --profile readonly
@@ -85,10 +84,11 @@ Custom profiles are defined in YAML. See [Profiles](docs/site/profiles.md) for t
 
 - **Native tool handlers** — shell, file read/write/edit, grep, glob, and five database drivers (SQLite, PostgreSQL, MySQL, Oracle, Vertica) with no external plugins or MCP servers
 - **Prompt templates** — Markdown with YAML frontmatter and Jinja2 variables for repeatable, parameterized agent tasks
-- **Multi-agent coordination** — delegate subtasks to child agents or connect running agents for cross-context collaboration through the monitor
-- **Observability** — session tracking, token usage, and tool execution metrics with SQLite (default) or PostgreSQL backends, session labels, and an interactive CLI monitor (`rho-agent monitor`)
-- **Session management** — list, pause, resume, and kill running agents from another terminal (`rho-agent ps`, `rho-agent kill`)
-- **Remote sandboxing** — execute all tools in a Daytona cloud VM with `--profile daytona`
+- **Agent configs** — define reusable agent configurations in YAML with `AgentConfig`, load via `--config` on the CLI or `AgentConfig.from_file()` in Python
+- **Multi-agent coordination** — delegate subtasks to child agents or interact with running agents through the monitor
+- **Observability** — per-session `trace.jsonl` event logs with token usage, tool execution, and timing data; session directories at `~/.config/rho-agent/sessions/`
+- **Session management** — monitor, pause, resume, and cancel running agents from another terminal (`rho-agent monitor <dir>`)
+- **Remote sandboxing** — execute shell and file tools in a Daytona cloud sandbox with `--backend daytona`
 - **Evaluation integrations** — [BIRD-Bench](rho_agent/eval/birdbench/) (text-to-SQL) and [TerminalBench](rho_agent/eval/harbor/) via Harbor
 
 ## Documentation
@@ -98,11 +98,13 @@ Custom profiles are defined in YAML. See [Profiles](docs/site/profiles.md) for t
 | [Quickstart](docs/site/quickstart.md) | Get running in minutes |
 | [Installation](docs/site/installation.md) | Environment setup and install options |
 | [CLI Reference](docs/site/cli-reference.md) | Commands, flags, and usage examples |
-| [Runtime API](docs/site/runtime-api.md) | Programmatic Python interface for embedding agents |
+| [Python SDK](docs/site/python-sdk.md) | Create and run agents programmatically |
 | [Tools](docs/site/tools.md) | Complete tool handler reference |
-| [Profiles](docs/site/profiles.md) | Capability profiles and custom YAML |
-| [Observability](docs/site/observability.md) | Telemetry, monitor, and dashboard |
-| [Architecture](docs/site/architecture.md) | System design, agent loop, and signal protocol |
+| [Profiles](docs/site/profiles.md) | Permission profiles and custom YAML |
+| [Daytona](docs/site/daytona.md) | Remote sandbox execution via Daytona |
+| [Monitor](docs/site/monitor.md) | Watch, control, and steer running agents |
+| [Observability](docs/site/observability.md) | Session traces, offline inspection, and observers |
+| [Architecture](docs/site/architecture.md) | System design, agent loop, and session protocol |
 
 ## Development
 

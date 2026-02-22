@@ -8,12 +8,8 @@ from rich.markdown import Markdown
 from rich.markup import escape
 from rich.panel import Panel
 
-from ..capabilities import CapabilityProfile
-from ..core.agent import AgentEvent
-from ..runtime import reconfigure_runtime
-from ..runtime.types import LocalRuntime
+from ..core.events import AgentEvent
 from .theme import THEME
-from .errors import InvalidProfileError
 from .formatting import (
     TokenStatus,
     _format_tool_preview,
@@ -179,7 +175,9 @@ def handle_event(
             if total_cached and total_in:
                 cache_str = f", cache: {total_cached / total_in:.0%}"
             cost_str = f", cost: ${total_cost:.4f}" if total_cost else ""
-            print(f"[context: {context_size}{cache_str}, session: {total_in} in | {total_out} out{cost_str}]")
+            print(
+                f"[context: {context_size}{cache_str}, session: {total_in} in | {total_out} out{cost_str}]"
+            )
 
     elif event.type == "error":
         console.print(_markup(f"Error: {event.content}", THEME.error))
@@ -211,10 +209,6 @@ def handle_command(
         # Handled in run_interactive (needs registry/profile context)
         return "write"
 
-    if cmd.startswith("/mode"):
-        # Handled in run_interactive (needs runtime/profile context)
-        return "mode"
-
     if cmd.startswith("/resume"):
         # Handled in run_interactive (needs conversation store/session context)
         return "resume"
@@ -232,7 +226,7 @@ def handle_command(
                 "[bold]Commands:[/bold]",
                 line("/approve", "Enable auto-approve for all tool calls"),
                 line("/compact [guidance]", "Compact conversation history"),
-                line("/mode [name|path|status]", "Switch or show active capability mode"),
+                line("/download <remote> <local>", "Download file from sandbox"),
                 line("/write [on|off|status]", "Toggle create-only write tool (readonly mode)"),
                 line("/resume [latest|id]", "Resume a saved conversation"),
                 line("/help", "Show this help"),
@@ -264,22 +258,3 @@ def handle_command(
         return None
 
     return None
-
-
-def switch_runtime_profile(
-    runtime: LocalRuntime,
-    profile_name_or_path: str,
-    *,
-    working_dir: str,
-) -> CapabilityProfile:
-    """Switch runtime capabilities to a new profile for the active session."""
-    try:
-        capability_profile = reconfigure_runtime(
-            runtime,
-            profile=profile_name_or_path,
-            working_dir=working_dir,
-        )
-    except (ValueError, FileNotFoundError) as e:
-        raise InvalidProfileError(str(e)) from e
-
-    return capability_profile

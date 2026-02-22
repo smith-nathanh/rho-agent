@@ -5,6 +5,9 @@ Each agent runs in read-only mode, analyzes a log file in its assigned
 directory, and reports a structured diagnosis.  Results are collected
 and written to a single consolidated report.
 
+Sessions are stored to disk via SessionStore, so you can monitor running
+agents in another terminal with ``rho-agent monitor <sessions-dir>``.
+
 Usage:
     # With real directories (one --incident per failed service):
     uv run python examples/log_debugger/run.py \
@@ -14,6 +17,9 @@ Usage:
 
     # Demo mode (creates fake log dirs under /tmp and runs against them):
     uv run python examples/log_debugger/run.py --demo --output report.json
+
+    # Monitor agents while they run (in a second terminal):
+    rho-agent monitor /tmp/rho-agent-log-debug-sessions
 """
 
 from __future__ import annotations
@@ -31,12 +37,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from rho_agent.runtime import (
-    AgentHandle,
-    RuntimeOptions,
-    create_runtime,
-    dispatch_prompt,
-)
+from rho_agent import Agent, AgentConfig, Session
+from rho_agent.core.session_store import SessionStore
 
 
 @dataclass
@@ -280,83 +282,98 @@ async def run_dispatcher(args: argparse.Namespace) -> int:
             if len(parts) != 3:
                 print(f"Error: --incident must be dir:logfile:service — got {spec!r}")
                 return 1
-            incidents.append(Incident(working_dir=parts[0], log_file=parts[1], service_name=parts[2]))
+            incidents.append(
+                Incident(working_dir=parts[0], log_file=parts[1], service_name=parts[2])
+            )
 
     if not incidents:
         print("No incidents to investigate. Use --incident or --demo.")
         return 1
 
-    print(f"Dispatching {len(incidents)} debug agents in parallel...\n")
+    # Set up session store so monitor can observe running agents
+    sessions_dir = Path(args.sessions_dir)
+    store = SessionStore(sessions_dir)
 
-    # Create one runtime per incident, each with its own working_dir
-    handles: list[tuple[Incident, AgentHandle]] = []
+    print(f"Dispatching {len(incidents)} debug agents in parallel...")
+    print(f"Monitor with: rho-agent monitor {sessions_dir}\n")
+
+    # Create one agent+session per incident, each with its own working_dir
+    sessions: list[tuple[Incident, Session]] = []
 
     for incident in incidents:
         system_prompt = load_system_prompt(incident)
-        options = RuntimeOptions(
+        config = AgentConfig(
+            system_prompt=system_prompt,
             model=args.model,
             profile="readonly",
             working_dir=incident.working_dir,
             auto_approve=True,
-            enable_delegate=False,
-            team_id="demo",
-            project_id="log-debugger",
-            telemetry_metadata={
-                "source": "examples_log_debugger",
-                "service": incident.service_name,
-            },
         )
-        runtime = create_runtime(system_prompt, options=options)
-        await runtime.start()
-
-        user_prompt = build_user_prompt(incident)
-        handle = dispatch_prompt(runtime, user_prompt)
-        handles.append((incident, handle))
-        print(f"  [{incident.service_name}] dispatched → {incident.working_dir}/{incident.log_file}")
+        agent = Agent(config)
+        session = store.create_session(agent, session_id=incident.service_name)
+        sessions.append((incident, session))
+        print(
+            f"  [{incident.service_name}] dispatched → {incident.working_dir}/{incident.log_file}"
+        )
 
     print()
 
-    # Wait for all agents to complete and collect results
+    # Run all agents concurrently
+    async def run_one(
+        incident: Incident, session: Session
+    ) -> tuple[Incident, object | None, Exception | None]:
+        user_prompt = build_user_prompt(incident)
+        try:
+            result = await session.run(user_prompt)
+            return incident, result, None
+        except Exception as exc:
+            return incident, None, exc
+
+    tasks = [run_one(inc, sess) for inc, sess in sessions]
+    outcomes = await asyncio.gather(*tasks)
+
+    # Collect results
     reports: list[dict] = []
     errors: list[dict] = []
 
-    for incident, handle in handles:
-        try:
-            result = await handle.wait()
-            status = handle.status
+    for incident, result, exc in outcomes:
+        if exc is not None:
+            errors.append(
+                {
+                    "service": incident.service_name,
+                    "error": str(exc),
+                }
+            )
+            print(f"  [{incident.service_name}] failed: {exc}")
+            continue
 
-            if status == "completed" and result.text.strip():
-                try:
-                    report = extract_json(result.text)
-                    reports.append(report)
-                    root_cause = report.get("root_cause", "unknown")
-                    category = report.get("category", "unknown")
-                    severity = report.get("severity", "unknown")
-                    print(f"  [{incident.service_name}] done — {severity} {category}: {root_cause}")
-                except ValueError:
-                    errors.append({
+        if result and result.status == "completed" and result.text.strip():
+            try:
+                report = extract_json(result.text)
+                reports.append(report)
+                root_cause = report.get("root_cause", "unknown")
+                category = report.get("category", "unknown")
+                severity = report.get("severity", "unknown")
+                print(f"  [{incident.service_name}] done — {severity} {category}: {root_cause}")
+            except ValueError:
+                errors.append(
+                    {
                         "service": incident.service_name,
                         "error": "Agent did not return valid JSON",
                         "raw_output": result.text[:500],
-                    })
-                    print(f"  [{incident.service_name}] done — could not parse JSON from output")
-            else:
-                errors.append({
+                    }
+                )
+                print(f"  [{incident.service_name}] done — could not parse JSON from output")
+        else:
+            status = result.status if result else "unknown"
+            errors.append(
+                {
                     "service": incident.service_name,
                     "error": f"Agent finished with status: {status}",
-                    "raw_output": result.text[:500] if result.text else "",
-                })
-                print(f"  [{incident.service_name}] finished with status: {status}")
-        except Exception as exc:
-            errors.append({
-                "service": incident.service_name,
-                "error": str(exc),
-            })
-            print(f"  [{incident.service_name}] failed: {exc}")
-
-    # Close all runtimes
-    for _, handle in handles:
-        await handle.runtime.close(handle.status)
+                    "raw_output": result.text[:500] if result and result.text else "",
+                }
+            )
+            print(f"  [{incident.service_name}] finished with status: {status}")
 
     # Build consolidated report
     consolidated = {
@@ -449,6 +466,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         default="debug_report.json",
         help="Path for the consolidated JSON report (default: debug_report.json)",
+    )
+    parser.add_argument(
+        "--sessions-dir",
+        default="/tmp/rho-agent-log-debug-sessions",
+        help="Directory for session state (monitor with: rho-agent monitor <dir>)",
     )
     parser.add_argument(
         "--model",

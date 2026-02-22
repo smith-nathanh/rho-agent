@@ -8,60 +8,73 @@ import signal
 from pathlib import Path
 from time import monotonic
 
-from ..runtime.types import LocalRuntime
-from ..signals import SignalManager
+from ..core.events import AgentEvent
+from ..core.session import Session
 from .theme import THEME
 from .events import handle_event
 from .formatting import (
     _is_interactive_terminal,
     _markup,
-    _wait_while_paused,
 )
 from .state import RENDER_MARKDOWN, console
 
 
+async def upload_to_sandbox(
+    session: Session,
+    mappings: list[tuple[str, str]],
+) -> None:
+    """Upload local files/directories to the Daytona sandbox.
+
+    Each mapping is (local_src, remote_dest). Directories are walked recursively.
+    Uses streaming upload_file() per file to avoid loading everything into memory.
+    """
+    if not mappings:
+        return
+
+    sandbox = await session.get_sandbox()
+
+    for src_str, dest in mappings:
+        src = Path(src_str).expanduser().resolve()
+        if not src.exists():
+            console.print(_markup(f"Upload source not found: {src}", THEME.error))
+            continue
+
+        if src.is_dir():
+            files = [f for f in src.rglob("*") if f.is_file()]
+            console.print(
+                _markup(f"Uploading {src_str} → {dest} ({len(files)} files)", THEME.accent)
+            )
+            for file_path in files:
+                relative = file_path.relative_to(src)
+                remote_path = f"{dest.rstrip('/')}/{relative}"
+                await sandbox.fs.upload_file(str(file_path), remote_path)
+        else:
+            console.print(_markup(f"Uploading {src_str} → {dest}", THEME.accent))
+            await sandbox.fs.upload_file(str(src), dest)
+
+
 async def run_single(
-    runtime: LocalRuntime,
+    session: Session,
     prompt: str,
-    signal_manager: SignalManager | None = None,
-    session_id: str | None = None,
+    *,
+    upload_mappings: list[tuple[str, str]] | None = None,
 ) -> None:
     """Run a single prompt and exit."""
-    # Start observability session if enabled
-    await runtime.start()
-
     loop = asyncio.get_event_loop()
     interactive_tty = _is_interactive_terminal()
 
     def on_cancel():
         console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
-        runtime.agent.request_cancel()
+        session.cancel()
 
     if platform.system() != "Windows":
         loop.add_signal_handler(signal.SIGINT, on_cancel)
 
     session_status = "completed"
     try:
-        if signal_manager and session_id:
-            if not await _wait_while_paused(signal_manager, session_id):
-                session_status = "cancelled"
-                if runtime.observability:
-                    runtime.observability.context.metadata["cancel_source"] = "kill_command"
-                console.print(_markup("Killed by rho-agent kill", THEME.warning))
-                return
-            directives = signal_manager.consume_directives(session_id)
-            if directives:
-                console.print(
-                    _markup(
-                        "Ignoring queued directives in single-prompt mode.",
-                        THEME.muted,
-                    )
-                )
-
-        # Wrap event stream with observability if enabled
-        events = runtime.agent.run_turn(prompt)
-        if runtime.observability:
-            events = runtime.observability.wrap_turn(events, prompt)
+        # Upload files to sandbox before running
+        if upload_mappings:
+            await upload_to_sandbox(session, upload_mappings)
 
         status_ctx = None
         start = monotonic()
@@ -75,7 +88,8 @@ async def run_single(
         saw_model_output = False
         pending_text_chunks: list[str] = []
 
-        async for event in events:
+        async def on_event(event: AgentEvent) -> None:
+            nonlocal saw_model_output, status_ctx, session_status, pending_text_chunks
             if status_ctx and not saw_model_output:
                 elapsed = int(monotonic() - start)
                 status_ctx.update(f"⠋ working ({elapsed}s • Ctrl+C: cancel)")
@@ -91,21 +105,19 @@ async def run_single(
                     render_markdown=interactive_tty and RENDER_MARKDOWN,
                     pending_text_chunks=pending_text_chunks,
                 )
-                break
+                return
             if event.type == "cancelled":
-                if signal_manager and session_id and signal_manager.is_cancelled(session_id):
-                    session_status = "cancelled"
-                    if runtime.observability:
-                        runtime.observability.context.metadata["cancel_source"] = "kill_command"
-                    console.print(_markup("Killed by rho-agent kill", THEME.warning))
-                else:
-                    console.print(_markup("Cancelled", THEME.muted))
-                break
+                session_status = "cancelled"
+                console.print(_markup("Cancelled", THEME.muted))
+                return
             handle_event(
                 event,
                 render_markdown=interactive_tty and RENDER_MARKDOWN,
                 pending_text_chunks=pending_text_chunks,
             )
+
+        result = await session.run(prompt, on_event=on_event)
+
         if status_ctx:
             status_ctx.__exit__(None, None, None)
     except Exception:
@@ -114,15 +126,15 @@ async def run_single(
     finally:
         if platform.system() != "Windows":
             loop.remove_signal_handler(signal.SIGINT)
-        await runtime.close(session_status)
+        await session.close()
 
 
 async def run_single_with_output(
-    runtime: LocalRuntime,
+    session: Session,
     prompt: str,
     output_path: str,
-    signal_manager: SignalManager | None = None,
-    session_id: str | None = None,
+    *,
+    upload_mappings: list[tuple[str, str]] | None = None,
 ) -> bool:
     """Run a single prompt and write final response to file.
 
@@ -130,7 +142,6 @@ async def run_single_with_output(
     """
     output_file = Path(output_path).expanduser().resolve()
 
-    # Check if output file already exists before running
     if output_file.exists():
         console.print(_markup(f"Output file already exists: {output_file}", THEME.error))
         console.print(
@@ -141,45 +152,25 @@ async def run_single_with_output(
         )
         return False
 
-    # Start observability session if enabled
-    await runtime.start()
-
-    collected_text: list[str] = []
-    cancelled = False
-    had_error = False
-
     loop = asyncio.get_event_loop()
     interactive_tty = _is_interactive_terminal()
 
     def on_cancel():
         console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
-        runtime.agent.request_cancel()
+        session.cancel()
 
     if platform.system() != "Windows":
         loop.add_signal_handler(signal.SIGINT, on_cancel)
 
-    session_status = "completed"
-    try:
-        if signal_manager and session_id:
-            if not await _wait_while_paused(signal_manager, session_id):
-                session_status = "cancelled"
-                if runtime.observability:
-                    runtime.observability.context.metadata["cancel_source"] = "kill_command"
-                console.print(_markup("Killed by rho-agent kill", THEME.warning))
-                return False
-            directives = signal_manager.consume_directives(session_id)
-            if directives:
-                console.print(
-                    _markup(
-                        "Ignoring queued directives in single-prompt mode.",
-                        THEME.muted,
-                    )
-                )
+    collected_text: list[str] = []
+    cancelled = False
+    had_error = False
+    pending_text_chunks: list[str] = []
 
-        # Wrap event stream with observability if enabled
-        events = runtime.agent.run_turn(prompt)
-        if runtime.observability:
-            events = runtime.observability.wrap_turn(events, prompt)
+    try:
+        # Upload files to sandbox before running
+        if upload_mappings:
+            await upload_to_sandbox(session, upload_mappings)
 
         status_ctx = None
         start = monotonic()
@@ -191,9 +182,9 @@ async def run_single_with_output(
             )
             status_ctx.__enter__()
         saw_model_output = False
-        pending_text_chunks: list[str] = []
 
-        async for event in events:
+        async def on_event(event: AgentEvent) -> None:
+            nonlocal saw_model_output, status_ctx, cancelled, had_error
             if status_ctx and not saw_model_output:
                 elapsed = int(monotonic() - start)
                 status_ctx.update(f"⠋ working ({elapsed}s • Ctrl+C: cancel)")
@@ -203,48 +194,39 @@ async def run_single_with_output(
                     status_ctx.__exit__(None, None, None)
                     status_ctx = None
             if event.type == "error":
-                session_status = "error"
                 had_error = True
                 handle_event(
                     event,
                     render_markdown=interactive_tty and RENDER_MARKDOWN,
                     pending_text_chunks=pending_text_chunks,
                 )
-                break
+                return
             if event.type == "cancelled":
-                if signal_manager and session_id and signal_manager.is_cancelled(session_id):
-                    session_status = "cancelled"
-                    if runtime.observability:
-                        runtime.observability.context.metadata["cancel_source"] = "kill_command"
-                    console.print(_markup("Killed by rho-agent kill", THEME.warning))
-                else:
-                    console.print(_markup("Cancelled", THEME.muted))
+                console.print(_markup("Cancelled", THEME.muted))
                 cancelled = True
-                break
+                return
             handle_event(
                 event,
                 render_markdown=interactive_tty and RENDER_MARKDOWN,
                 pending_text_chunks=pending_text_chunks,
             )
-            # Collect text for output file
             if event.type == "text" and event.content:
                 collected_text.append(event.content)
+
+        result = await session.run(prompt, on_event=on_event)
+
         if status_ctx:
             status_ctx.__exit__(None, None, None)
     except Exception:
-        session_status = "error"
         raise
     finally:
         if platform.system() != "Windows":
             loop.remove_signal_handler(signal.SIGINT)
-        await runtime.close(session_status)
+        await session.close()
 
-    if cancelled:
-        return False
-    if had_error:
+    if cancelled or had_error:
         return False
 
-    # Write collected text to output file
     try:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text("".join(collected_text), encoding="utf-8")

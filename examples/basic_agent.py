@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Example: basic single-agent usage via rho_agent.runtime.
+"""Example: basic single-agent usage via rho_agent.
 
 Example:
     uv run python examples/basic_agent.py ~/some/project "Summarize the error handling"
@@ -11,19 +11,12 @@ import sys
 
 from dotenv import load_dotenv
 
-from rho_agent.runtime import (
-    RuntimeOptions,
-    create_runtime,
-    run_prompt,
-)
+from rho_agent import Agent, AgentConfig, Session
 
 
 async def run_agent_with_tools(
     task: str,
     working_dir: str | None = None,
-    auto_approve: bool = True,
-    team_id: str | None = None,
-    project_id: str | None = None,
 ) -> str:
     """Run the agent autonomously with profile-based tools."""
     system_prompt = (
@@ -32,31 +25,18 @@ async def run_agent_with_tools(
     if working_dir:
         system_prompt += f"\n\nWorking directory context: {working_dir}"
 
-    options = RuntimeOptions(
+    config = AgentConfig(
+        system_prompt=system_prompt,
         working_dir=working_dir,
         profile="developer",
-        auto_approve=auto_approve,
-        team_id=team_id,
-        project_id=project_id,
-        telemetry_metadata={
-            "source": "demo_programmatic_usage",
-            "dispatch_kind": "single",
-        },
+        auto_approve=True,
     )
-    runtime = create_runtime(system_prompt, options=options)
-    tool_calls = []
+    agent = Agent(config)
+    session = Session(agent)
 
-    status = "completed"
-    await runtime.start()
-    try:
-        result = await run_prompt(runtime, task)
-        status = result.status
-    except Exception:
-        status = "error"
-        raise
-    finally:
-        await runtime.close(status)
-    for event in result.events:
+    tool_calls: list[str] = []
+
+    async def on_event(event):
         if event.type == "text" and event.content:
             print(event.content, end="", flush=True)
         elif event.type == "tool_start":
@@ -67,19 +47,15 @@ async def run_agent_with_tools(
             print(f"  → {meta.get('summary', 'done')}", flush=True)
         elif event.type == "error":
             print(f"\nError: {event.content}", flush=True)
+
+    result = await session.run(task, on_event=on_event)
+
     usage = result.usage
     print(
         f"\n\n[{usage.get('total_input_tokens', 0)} in, {usage.get('total_output_tokens', 0)} out]"
     )
     print(f"[{len(tool_calls)} tool calls: {', '.join(tool_calls)}]")
     print(f"[status: {result.status}]")
-    if runtime.observability and runtime.observability.context:
-        print(
-            "[telemetry session: "
-            f"{runtime.observability.context.session_id} "
-            f"team={runtime.observability.context.team_id} "
-            f"project={runtime.observability.context.project_id}]"
-        )
     return result.text
 
 
@@ -90,8 +66,6 @@ if __name__ == "__main__":
     task = (
         sys.argv[2] if len(sys.argv) > 2 else "What does this project do? Give me a brief summary."
     )
-    team_id = os.environ.get("RHO_AGENT_TEAM_ID")
-    project_id = os.environ.get("RHO_AGENT_PROJECT_ID")
 
     print(f"=== Running agent on: {target_dir} ===\n")
     print(f"Task: {task}\n")
@@ -101,8 +75,6 @@ if __name__ == "__main__":
         run_agent_with_tools(
             task=task,
             working_dir=target_dir,
-            team_id=team_id,
-            project_id=project_id,
         )
     )
 

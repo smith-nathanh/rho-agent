@@ -5,10 +5,27 @@ Dispatches read-only debug agents in parallel across multiple working directorie
 ## How it works
 
 1. You define a list of **incidents** — each is a `(working_dir, log_file, service_name)` tuple
-2. The orchestrator creates one `readonly` runtime per incident, pointed at that directory
-3. All agents are dispatched concurrently via `dispatch_prompt()`
+2. The orchestrator creates one `readonly` `Agent`/`Session` per incident, pointed at that directory
+3. All agents run concurrently via `asyncio.gather()`
 4. Each agent reads its log file, diagnoses the root cause, and returns structured JSON
 5. Results are merged into a single report with per-incident diagnoses and a summary
+
+## Setup
+
+Requires an OpenAI-compatible API key. Set it via environment variable or `.env` file in the project root:
+
+```bash
+export OPENAI_API_KEY=sk-...
+# or
+echo 'OPENAI_API_KEY=sk-...' >> .env
+```
+
+To use a non-OpenAI provider, set `OPENAI_BASE_URL` as well:
+
+```bash
+export OPENAI_BASE_URL=https://api.together.xyz/v1
+export OPENAI_API_KEY=your-key
+```
 
 ## Usage
 
@@ -25,6 +42,22 @@ uv run python examples/log_debugger/run.py \
 # Use a different model
 uv run python examples/log_debugger/run.py --demo --model gpt-5
 ```
+
+## Monitoring
+
+Sessions are persisted to disk so you can observe agents in real time from a second terminal:
+
+```bash
+# Terminal 1 — start the monitor
+rho-agent monitor /tmp/rho-agent-log-debug-sessions
+
+# Terminal 2 — run the demo
+uv run python examples/log_debugger/run.py --demo
+```
+
+Inside the monitor, use `ps` to list sessions, `watch <service-name>` to tail trace events, or `cancel <service-name>` to stop an agent. Type `help` for the full command list.
+
+Use `--sessions-dir` to customize where session state is written.
 
 The `--incident` format is `DIR:LOGFILE:SERVICE` where:
 - `DIR` — working directory the agent operates in
