@@ -51,7 +51,10 @@ class Agent:
             return self._build_daytona_registry(profile)
 
         factory = ToolFactory(profile)
-        return factory.create_registry(working_dir=self._config.working_dir)
+        return factory.create_registry(
+            working_dir=self._config.working_dir,
+            databases=self._config.databases,
+        )
 
     def _build_daytona_registry(self, profile: Any) -> ToolRegistry:
         """Build registry with Daytona remote handlers for shell/file tools."""
@@ -65,7 +68,9 @@ class Agent:
 
         # Database tools still use the local factory path
         factory = ToolFactory(profile)
-        factory._register_database_tools(registry, dict(os.environ))
+        factory._register_database_tools(
+            registry, dict(os.environ), databases=self._config.databases
+        )
 
         return registry
 

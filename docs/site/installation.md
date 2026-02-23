@@ -15,7 +15,10 @@ order: 3
 git clone https://github.com/smith-nathanh/rho-agent.git
 cd rho-agent
 uv sync
+uv tool install .
 ```
+
+This makes `rho-agent` available as a global command. If you skip `uv tool install`, prefix commands with `uv run`.
 
 To include development tools (pytest, linters):
 
@@ -23,20 +26,10 @@ To include development tools (pytest, linters):
 uv sync --group dev
 ```
 
-## Global CLI install
-
-Install rho-agent as a global command available outside the project directory:
-
-```bash
-uv tool install .
-```
-
-After this, `rho-agent` is available directly without `uv run`.
-
 ## Verify the installation
 
 ```bash
-uv run rho-agent --help
+rho-agent --help
 ```
 
 ## Environment variables
@@ -60,19 +53,15 @@ uv run rho-agent --help
 
 ### Database connections
 
-Database tools are enabled automatically when their environment variables are set.
+Database tools are configured via a YAML config file, not environment variables. See [Tools — Database tools](tools/) for the config format.
 
-| Database | Variables |
-|---|---|
-| SQLite | `SQLITE_DB` |
-| PostgreSQL | `POSTGRES_HOST`, `POSTGRES_DATABASE`, `POSTGRES_USER`, `POSTGRES_PASSWORD` |
-| MySQL | `MYSQL_HOST`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD` |
-| Oracle | `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD` |
-| Vertica | `VERTICA_HOST`, `VERTICA_DATABASE`, `VERTICA_USER`, `VERTICA_PASSWORD` |
+| Variable | Default | Description |
+|---|---|---|
+| `RHO_AGENT_DB_CONFIG` | `~/.config/rho-agent/databases.yaml` | Path to database config file |
 
 ### Daytona remote sandbox
 
-Required for `--backend daytona`. Install the SDK extra with `uv pip install 'rho-agent[daytona]'`. See the [Daytona](daytona/) guide for configuration and environment variables.
+Required for `--backend daytona`. Install the SDK extra with `uv tool install '.[daytona]'`. See the [Daytona](daytona/) guide for configuration and environment variables.
 
 ## Troubleshooting
 

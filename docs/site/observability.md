@@ -1,7 +1,7 @@
 ---
 title: Observability
 description: Session traces, offline inspection, and custom observers.
-order: 10
+order: 11
 ---
 
 Observability is built into the core. `State` automatically writes `trace.jsonl` to the session directory whenever you use `SessionStore`. There is nothing to enable or configure — tracing is always on.

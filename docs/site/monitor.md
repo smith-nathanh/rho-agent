@@ -1,7 +1,7 @@
 ---
 title: Monitor
 description: Watch, control, and steer running agents from another terminal.
-order: 11
+order: 12
 ---
 
 The monitor gives you a live view into running agent sessions. You can watch an agent work in real time, pause it, inject new instructions mid-run, or cancel it — all from a separate terminal.

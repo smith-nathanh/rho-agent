@@ -1,7 +1,7 @@
 ---
 title: Daytona Backend
 description: Run agent tools in a remote Daytona cloud sandbox.
-order: 9
+order: 10
 ---
 
 The Daytona backend routes shell and file tool execution to a remote cloud sandbox managed by [Daytona](https://daytona.io). The agent process stays on your machine — only tool calls run remotely. Any permission profile can be combined with `--backend daytona`.
@@ -11,7 +11,7 @@ The Daytona backend routes shell and file tool execution to a remote cloud sandb
 Install the SDK extra and set your API key:
 
 ```bash
-uv pip install 'rho-agent[daytona]'
+uv tool install '.[daytona]'
 export DAYTONA_API_KEY=your-key
 ```
 

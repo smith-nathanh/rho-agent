@@ -113,6 +113,38 @@ def _parse_database_entry(alias: str, entry: dict[str, Any], env: dict[str, str]
     )
 
 
+def load_database_config_raw(
+    env: dict[str, str] | None = None,
+) -> dict[str, dict[str, Any]] | None:
+    """Load the raw databases dict from the global config file.
+
+    Returns the ``databases`` mapping as-is from YAML (alias → {type, ...}),
+    or None if no config file exists. Intended for the CLI to populate
+    ``AgentConfig.databases`` so that the global config file is only consulted
+    once, at the CLI boundary.
+    """
+    env = env or dict(os.environ)
+    config_path = env.get("RHO_AGENT_DB_CONFIG")
+
+    if config_path is None:
+        default_path = Path.home() / ".config" / "rho-agent" / "databases.yaml"
+        if default_path.exists():
+            config_path = str(default_path)
+
+    if config_path is None:
+        return None
+
+    path = Path(config_path).expanduser()
+    if not path.exists():
+        raise FileNotFoundError(f"Database config file not found: {path}")
+
+    with open(path) as f:
+        data = yaml.safe_load(f) or {}
+
+    databases = data.get("databases")
+    return databases if databases else None
+
+
 def load_database_config(
     config_path: str | None = None, env: dict[str, str] | None = None
 ) -> dict[str, list[DatabaseConfig]]:

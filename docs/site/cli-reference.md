@@ -1,7 +1,7 @@
 ---
 title: CLI Reference
 description: Commands, flags, and usage examples for the rho-agent CLI.
-order: 4
+order: 5
 ---
 
 ## `rho-agent main`

@@ -1,7 +1,7 @@
 ---
 title: Prompt Files
 description: Markdown prompt templates with YAML frontmatter, variable substitution, and initial prompts.
-order: 6
+order: 7
 ---
 
 Prompt files are markdown documents with optional YAML frontmatter. The markdown body becomes the system prompt, with Jinja2 template variables substituted at load time. This makes it easy to define repeatable, parameterized agent tasks.

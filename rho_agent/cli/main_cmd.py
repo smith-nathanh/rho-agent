@@ -362,6 +362,11 @@ def main(
                 console.print(_markup(f"Prompt error: {PromptLoadError(str(exc))}", THEME.error))
                 raise typer.Exit(1) from exc
 
+        # Load global databases.yaml for CLI users (SDK users set databases on AgentConfig directly)
+        from ..tools.handlers.database_config import load_database_config_raw
+
+        cli_databases = load_database_config_raw()
+
         agent_config = AgentConfig(
             system_prompt=system_prompt_text,
             model=model,
@@ -370,6 +375,7 @@ def main(
             base_url=base_url,
             reasoning_effort=reasoning_effort,
             working_dir=resolved_working_dir,
+            databases=cli_databases,
             auto_approve=auto_approve,
         )
         agent = Agent(agent_config)

@@ -4,16 +4,16 @@ A configurable AI agent for software development, research, and operations.
 
 <!-- ![demo](assets/demo.gif) -->
 
-rho-agent is a configurable AI agent for software development, debugging, and operations workflows. It provides a structured agent loop with built-in tool handlers for shell execution, file inspection, database access, and external service integration — all governed by permission profiles that control what each agent can and cannot do. Every session is traced to disk and can be resumed, inspected, or monitored live.
+rho-agent provides a structured agent loop with built-in tool handlers for shell execution, file inspection, database access, and external service integration — all governed by permission profiles that control what each agent can and cannot do. Every session is traced to disk and can be resumed, inspected, or monitored live.
 
 ## Quickstart
 
 ```bash
-# Install globally (adds rho-agent and rho-eval to PATH)
-uv tool install .
-
-# Or for local development
+git clone https://github.com/smith-nathanh/rho-agent.git
+cd rho-agent
 uv sync
+uv tool install .              # adds rho-agent and rho-eval to PATH
+uv tool install '.[daytona]'   # or include optional extras (db, daytona, all)
 ```
 
 ```bash
@@ -97,14 +97,14 @@ Custom profiles are defined in YAML. See [Profiles](docs/site/profiles.md) for t
 |---|---|
 | [Quickstart](docs/site/quickstart.md) | Get running in minutes |
 | [Installation](docs/site/installation.md) | Environment setup and install options |
+| [Architecture](docs/site/architecture.md) | System design, agent loop, and session protocol |
 | [CLI Reference](docs/site/cli-reference.md) | Commands, flags, and usage examples |
 | [Python SDK](docs/site/python-sdk.md) | Create and run agents programmatically |
 | [Tools](docs/site/tools.md) | Complete tool handler reference |
 | [Profiles](docs/site/profiles.md) | Permission profiles and custom YAML |
 | [Daytona](docs/site/daytona.md) | Remote sandbox execution via Daytona |
-| [Monitor](docs/site/monitor.md) | Watch, control, and steer running agents |
 | [Observability](docs/site/observability.md) | Session traces, offline inspection, and observers |
-| [Architecture](docs/site/architecture.md) | System design, agent loop, and session protocol |
+| [Monitor](docs/site/monitor.md) | Watch, control, and steer running agents |
 
 ## Development
 

@@ -26,6 +26,7 @@ rho-agent is a configurable AI agent for software development, debugging, and op
 |---|---|
 | [Quickstart](quickstart/) | Get running in minutes |
 | [Installation](installation/) | Environment setup, install options, and verification |
+| [Architecture](architecture/) | System design, session lifecycle, and tool routing |
 | [CLI Reference](cli-reference/) | Commands, flags, and usage examples |
 | [Python SDK](python-sdk/) | Create and run agents programmatically |
 | [Prompt Files](prompt-files/) | Template prompts with frontmatter and variables |
@@ -34,5 +35,4 @@ rho-agent is a configurable AI agent for software development, debugging, and op
 | [Daytona](daytona/) | Remote sandbox execution via Daytona |
 | [Observability](observability/) | Session traces, offline inspection, and observers |
 | [Monitor](monitor/) | Watch, control, and steer running agents |
-| [Architecture](architecture/) | System design, session lifecycle, and tool routing |
 | [FAQ](faq/) | Common questions and troubleshooting |

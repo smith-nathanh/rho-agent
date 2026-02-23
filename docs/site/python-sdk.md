@@ -1,7 +1,7 @@
 ---
 title: Python SDK
 description: Create and run agents programmatically.
-order: 5
+order: 6
 ---
 
 The API lets you create and run agents from code. The core pattern is: configure an `AgentConfig`, create an `Agent`, open a `Session`, and call `run()`.

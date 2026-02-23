@@ -1,7 +1,7 @@
 ---
 title: Tools
 description: Complete reference for all tool handlers available to agents.
-order: 7
+order: 8
 ---
 
 Tools follow a handler pattern where each tool defines a `name`, `description`, JSON-schema `parameters`, and a `handle()` implementation. Tool availability is controlled by the active [permission profile](profiles/).
@@ -141,25 +141,80 @@ Database tools share a common interface. All support `query`, `list_tables`, `de
 
 Query results are formatted as ASCII tables with a default limit of 100 rows.
 
-### `sqlite`
+### Configuration
 
-Configured via `SQLITE_DB` environment variable. Supports multiple databases as a comma-separated list.
+#### CLI users
 
-### `postgres`
+The CLI reads database configuration from `~/.config/rho-agent/databases.yaml` (or the path in `RHO_AGENT_DB_CONFIG`). Any databases defined there are available to all CLI sessions automatically.
 
-Configured via `POSTGRES_HOST`, `POSTGRES_DATABASE`, `POSTGRES_USER`, `POSTGRES_PASSWORD`.
+```yaml
+# ~/.config/rho-agent/databases.yaml
+databases:
+  sales:
+    type: sqlite
+    path: /data/sales.db
+  analytics:
+    type: postgres
+    host: localhost
+    database: analytics
+    user: reader
+    password: ${ANALYTICS_PASSWORD}
+```
 
-### `mysql`
+#### Python SDK users
 
-Configured via `MYSQL_HOST`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`.
+Set databases on `AgentConfig` directly — either in YAML agent config files or inline in code. No global config file is consulted; you get exactly the databases you configure.
 
-### `oracle`
+**Agent config YAML:**
 
-Configured via `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`.
+```yaml
+# agents/data-analyst.yaml
+system_prompt: You are a data analyst.
+profile: readonly
+databases:
+  sales:
+    type: sqlite
+    path: /data/sales.db
+  analytics:
+    type: postgres
+    host: localhost
+    database: analytics
+    user: reader
+    password: ${ANALYTICS_PASSWORD}
+```
 
-### `vertica`
+**Inline in Python:**
 
-Configured via `VERTICA_HOST`, `VERTICA_DATABASE`, `VERTICA_USER`, `VERTICA_PASSWORD`.
+```python
+config = AgentConfig(
+    system_prompt="You are a data analyst.",
+    profile="readonly",
+    databases={
+        "sales": {"type": "sqlite", "path": "/data/sales.db"},
+        "analytics": {
+            "type": "postgres",
+            "host": "localhost",
+            "database": "analytics",
+            "user": "reader",
+            "password": "${ANALYTICS_PASSWORD}",
+        },
+    },
+)
+```
+
+#### Environment variable interpolation
+
+String values support `${ENV_VAR}` interpolation so secrets stay out of config files.
+
+### Supported databases
+
+| Type | Required fields | Optional fields | Install extra |
+|---|---|---|---|
+| `sqlite` | `path` | — | — |
+| `postgres` | `database` | `host`, `port`, `user`, `password` | `uv pip install '.[db]'` |
+| `mysql` | `database` | `host`, `port`, `user`, `password` | `uv pip install '.[db]'` |
+| `oracle` | `dsn` | `user`, `password` | `uv pip install '.[db]'` |
+| `vertica` | `database` | `host`, `port`, `user`, `password` | `uv pip install '.[db]'` |
 
 ## Daytona remote sandbox tools
 

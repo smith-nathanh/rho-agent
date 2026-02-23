@@ -51,6 +51,7 @@ class AgentConfig:
         default_factory=lambda: os.getenv("RHO_AGENT_REASONING_EFFORT")
     )
     response_format: dict[str, Any] | None = None
+    databases: dict[str, dict[str, Any]] | None = None
     auto_approve: bool = True
     extras: dict[str, Any] = field(default_factory=dict)
 
@@ -67,6 +68,7 @@ class AgentConfig:
             "service_tier",
             "reasoning_effort",
             "response_format",
+            "databases",
             "auto_approve",
         }
     )
@@ -124,6 +126,8 @@ class AgentConfig:
             data["reasoning_effort"] = self.reasoning_effort
         if self.response_format:
             data["response_format"] = self.response_format
+        if self.databases:
+            data["databases"] = self.databases
         data["auto_approve"] = self.auto_approve
         # Merge extras at top level
         data.update(self.extras)

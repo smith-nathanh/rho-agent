@@ -5,7 +5,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from ..tools.handlers.database_config import DatabaseConfig, load_database_config
+from typing import Any
+
+from ..tools.handlers.database_config import (
+    DatabaseConfig,
+    _parse_database_entry,
+)
 from ..tools.registry import ToolRegistry
 from . import (
     PermissionProfile,
@@ -34,13 +39,15 @@ class ToolFactory:
         self,
         working_dir: str | None = None,
         env: dict[str, str] | None = None,
+        databases: dict[str, dict[str, Any]] | None = None,
     ) -> ToolRegistry:
         """Create a configured tool registry.
 
         Args:
             working_dir: Working directory for shell commands.
-            env: Environment variables to check for database configuration.
-                 Defaults to os.environ.
+            env: Environment variables for interpolation. Defaults to os.environ.
+            databases: Database configs (alias → {type, ...}). If None,
+                no database tools are registered.
 
         Returns:
             A configured ToolRegistry with tools enabled per the profile.
@@ -62,7 +69,7 @@ class ToolFactory:
 
         # Register database tools unless bash_only mode
         if not self.profile.bash_only:
-            self._register_database_tools(registry, env)
+            self._register_database_tools(registry, env, databases=databases)
 
         return registry
 
@@ -125,21 +132,45 @@ class ToolFactory:
             requires_edit_approval = self.profile.requires_tool_approval("edit")
             registry.register(EditHandler(requires_approval=requires_edit_approval))
 
-    def _register_database_tools(self, registry: ToolRegistry, env: dict[str, str]) -> None:
-        """Register database tools from config file."""
+    def _register_database_tools(
+        self,
+        registry: ToolRegistry,
+        env: dict[str, str],
+        databases: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        """Register database tools from explicit config.
+
+        Only registers databases when ``databases`` is provided. The global
+        ``databases.yaml`` fallback is the CLI's responsibility — the factory
+        never reads it.
+
+        Args:
+            registry: Tool registry to register handlers on.
+            env: Environment variables for ``${VAR}`` interpolation.
+            databases: Database configs (alias → {type, ...}). If None,
+                no database tools are registered.
+        """
+        if databases is None:
+            return
+
         readonly = self.profile.database == DatabaseMode.READONLY
-        db_configs = self._load_database_configs(env)
+        db_configs = self._parse_inline_databases(databases, env)
 
         for db_type, configs in db_configs.items():
             self._register_db_handler(registry, db_type, configs, readonly)
 
-    def _load_database_configs(self, env: dict[str, str]) -> dict[str, list[DatabaseConfig]]:
-        """Load multi-database configuration if available.
-
-        Raises:
-            ValueError: If config file exists but is malformed.
-        """
-        return load_database_config(env=env)
+    @staticmethod
+    def _parse_inline_databases(
+        databases: dict[str, dict[str, Any]], env: dict[str, str]
+    ) -> dict[str, list[DatabaseConfig]]:
+        """Parse inline database configs into grouped DatabaseConfig objects."""
+        configs_by_type: dict[str, list[DatabaseConfig]] = {}
+        for alias, entry in databases.items():
+            if not isinstance(entry, dict):
+                raise ValueError(f"Database '{alias}' must be a dictionary")
+            config = _parse_database_entry(alias, entry, env)
+            configs_by_type.setdefault(config.type, []).append(config)
+        return configs_by_type
 
     def _register_db_handler(
         self,
@@ -203,18 +234,20 @@ class ToolFactory:
 def create_registry_from_profile(
     profile: PermissionProfile,
     working_dir: str | None = None,
+    databases: dict[str, dict[str, Any]] | None = None,
 ) -> ToolRegistry:
     """Convenience function to create a registry from a profile.
 
     Args:
         profile: The permission profile.
         working_dir: Working directory for shell commands.
+        databases: Database configs (alias → {type, ...}).
 
     Returns:
         Configured tool registry.
     """
     factory = ToolFactory(profile)
-    return factory.create_registry(working_dir=working_dir)
+    return factory.create_registry(working_dir=working_dir, databases=databases)
 
 
 def load_profile(name_or_path: str) -> PermissionProfile:
