@@ -8,7 +8,32 @@ rho-agent provides a structured agent loop with built-in tool handlers for shell
 
 ## Quickstart
 
+### CLI install (recommended for command-line use)
+
 ```bash
+uv tool install rho-agent
+```
+
+```bash
+# Convenience bootstrap installer (binary from GitHub Releases when available,
+# otherwise falls back to `uv tool install` from GitHub source)
+curl -fsSL https://rho-agent.dev/install.sh | bash
+
+# Optional: pin a release tag for the bootstrap installer
+curl -fsSL https://rho-agent.dev/install/v0.1.0.sh | bash
+```
+
+`uv tool install` installs the CLI commands (`rho-agent`, `rho-eval`) in an isolated tool environment and puts them on your `PATH`.
+
+### Python SDK / runtime install (for `import rho_agent`)
+
+```bash
+# In your project directory
+uv add rho-agent
+```
+
+```bash
+# Local development install (from clone)
 git clone https://github.com/smith-nathanh/rho-agent.git
 cd rho-agent
 uv sync
@@ -41,6 +66,11 @@ rho-agent --config configs/research-assistant.yaml "Analyze recent failures."
 ## Python API
 
 Embed agents in services, workers, and batch systems:
+
+```bash
+# In your app/project (recommended for SDK usage)
+uv add rho-agent
+```
 
 ```python
 import asyncio
@@ -112,6 +142,12 @@ Custom profiles are defined in YAML. See [Profiles](docs/site/profiles.md) for t
 uv sync --group dev          # install with dev dependencies
 uv run python -m pytest      # run tests
 ```
+
+## Release Binary Installer Notes
+
+- `install.sh` looks for GitHub release assets named `rho-agent-<target>.tar.gz`
+- The tarball should contain executables named `rho-agent` and `rho-eval`
+- Supported targets in the installer today: macOS/Linux on `x86_64` and `arm64` (`aarch64`)
 
 ## Configuration
 

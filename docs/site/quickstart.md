@@ -7,10 +7,30 @@ order: 2
 ## Prerequisites
 
 - Python 3.13+
-- [uv](https://docs.astral.sh/uv/) package manager
+- `uv` (recommended)
 - An OpenAI-compatible API key (set `OPENAI_API_KEY`)
 
 ## Install
+
+CLI install (recommended):
+
+```bash
+uv tool install rho-agent
+```
+
+Convenience installer:
+
+```bash
+curl -fsSL https://rho-agent.dev/install.sh | bash
+```
+
+Python SDK / runtime install (in your project directory):
+
+```bash
+uv add rho-agent
+```
+
+Local development install:
 
 ```bash
 git clone https://github.com/smith-nathanh/rho-agent.git
@@ -20,6 +40,8 @@ uv tool install .
 ```
 
 This makes `rho-agent` available as a global command. If you skip `uv tool install`, prefix the commands below with `uv run`.
+
+Use `uv add rho-agent` when you want to import `rho_agent` in your own Python project. `uv tool install` is for CLI commands on your `PATH`.
 
 ## Start an interactive session
 
@@ -75,16 +97,28 @@ Then database tools become available automatically:
 rho-agent main "list all tables and describe their schemas"
 ```
 
-SQLite works out of the box. For PostgreSQL, MySQL, Oracle, or Vertica, install the `db` extra: `uv tool install '.[db]'`. See [Tools](tools/) for configuration details.
+SQLite works out of the box.
+
+- CLI install: `uv tool install 'rho-agent[db]'`
+- SDK/project install: `uv add 'rho-agent[db]'`
+
+See [Tools](tools/) for configuration details.
 
 ## Run in a remote sandbox
 
 Use the Daytona backend to execute shell and file tools in a remote cloud sandbox. The agent process stays local — only tool execution happens remotely. Combine with any permission profile.
 
 ```bash
-uv tool install '.[daytona]'
+# CLI install
+uv tool install 'rho-agent[daytona]'
 export DAYTONA_API_KEY=your-key
 rho-agent main --backend daytona --profile developer "explore the filesystem and install Python 3.13"
+```
+
+For SDK/project usage, install the extra in your project:
+
+```bash
+uv add 'rho-agent[daytona]'
 ```
 
 A sandbox is provisioned on the first tool call and automatically cleaned up when the session ends.

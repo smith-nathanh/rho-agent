@@ -7,9 +7,46 @@ order: 3
 ## Requirements
 
 - Python 3.13+
-- [uv](https://docs.astral.sh/uv/) package manager
+- `uv` (recommended)
 
-## Install from source
+## Install the CLI (recommended for command-line use)
+
+```bash
+uv tool install rho-agent
+```
+
+`uv tool install` installs the `rho-agent` and `rho-eval` commands in an isolated tool environment and adds them to your `PATH`.
+
+## Convenience installer
+
+```bash
+curl -fsSL https://rho-agent.dev/install.sh | bash
+```
+
+The hosted installer is a convenience wrapper. It will use a GitHub Releases binary when available for your platform, and otherwise fall back to `uv tool install`.
+
+You can also pin a versioned installer URL:
+
+```bash
+curl -fsSL https://rho-agent.dev/install/v0.1.0.sh | bash
+```
+
+## Use as a Python library / SDK (project dependency)
+
+Install inside your project directory so `import rho_agent` works in your app code:
+
+```bash
+uv add rho-agent
+```
+
+If you need optional features, add extras to the dependency:
+
+```bash
+uv add 'rho-agent[db]'
+uv add 'rho-agent[daytona]'
+```
+
+## Install from source (development)
 
 ```bash
 git clone https://github.com/smith-nathanh/rho-agent.git
@@ -61,7 +98,12 @@ Database tools are configured via a YAML config file, not environment variables.
 
 ### Daytona remote sandbox
 
-Required for `--backend daytona`. Install the SDK extra with `uv tool install '.[daytona]'`. See the [Daytona](daytona/) guide for configuration and environment variables.
+Required for `--backend daytona`.
+
+- CLI install: `uv tool install 'rho-agent[daytona]'`
+- SDK/project install: `uv add 'rho-agent[daytona]'`
+
+See the [Daytona](daytona/) guide for configuration and environment variables.
 
 ## Troubleshooting
 
