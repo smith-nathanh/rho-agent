@@ -1,39 +1,14 @@
 # rho-agent
 
-A configurable AI agent for software development, research, and operations.
+AI agents you can deploy, monitor, and control.
 
 <!-- ![demo](assets/demo.gif) -->
 
-rho-agent provides a structured agent loop with built-in tool handlers for shell execution, file inspection, database access, and external service integration — all governed by permission profiles that control what each agent can and cannot do. Every session is traced to disk and can be resumed, inspected, or monitored live.
+rho-agent gives each agent a permission profile, native shell/file/database tools, and a full event trace — so you can run many agents in parallel and watch, pause, steer, or cancel them from a single monitor.
 
 ## Quickstart
 
-### CLI install (recommended for command-line use)
-
 ```bash
-uv tool install rho-agent
-```
-
-```bash
-# Convenience bootstrap installer (binary from GitHub Releases when available,
-# otherwise falls back to `uv tool install` from GitHub source)
-curl -fsSL https://rho-agent.dev/install.sh | bash
-
-# Optional: pin a release tag for the bootstrap installer
-curl -fsSL https://rho-agent.dev/install/v0.1.0.sh | bash
-```
-
-`uv tool install` installs the CLI commands (`rho-agent`, `rho-eval`) in an isolated tool environment and puts them on your `PATH`.
-
-### Python SDK / runtime install (for `import rho_agent`)
-
-```bash
-# In your project directory
-uv add rho-agent
-```
-
-```bash
-# Local development install (from clone)
 git clone https://github.com/smith-nathanh/rho-agent.git
 cd rho-agent
 uv sync
@@ -66,11 +41,6 @@ rho-agent --config configs/research-assistant.yaml "Analyze recent failures."
 ## Python API
 
 Embed agents in services, workers, and batch systems:
-
-```bash
-# In your app/project (recommended for SDK usage)
-uv add rho-agent
-```
 
 ```python
 import asyncio
