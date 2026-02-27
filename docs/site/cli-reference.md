@@ -105,3 +105,29 @@ rho-agent cancel [PREFIX] --dir <dir> [--all]
 | `--all` | Cancel all running agents |
 
 Pass a session ID prefix to cancel a specific agent, or use `--all` to cancel every running session.
+
+## `rho-agent export`
+
+Export a session trace as [ATIF](https://github.com/laude-institute/harbor) JSON (Agent Trajectory Interchange Format).
+
+```bash
+rho-agent export <session-id> [OPTIONS]
+```
+
+| Flag | Description |
+|---|---|
+| `--dir <dir>` | Sessions directory (default: `~/.config/rho-agent/sessions`) |
+| `--output / -o <path>` | Output file path (default: stdout) |
+
+### Examples
+
+```bash
+# Print ATIF JSON to stdout
+rho-agent export abc123 --dir ~/.config/rho-agent/sessions
+
+# Write to a file
+rho-agent export abc123 -d ~/.config/rho-agent/sessions -o trajectory.json
+
+# Pipe through jq for inspection
+rho-agent export abc123 -d ~/.config/rho-agent/sessions | python -m json.tool
+```
