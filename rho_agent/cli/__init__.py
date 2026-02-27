@@ -24,6 +24,7 @@ from .state import app
 # Import subcommand modules so their @app.command() decorators register
 from . import admin as _admin  # noqa: F401
 from . import monitor as _monitor  # noqa: F401
+from . import export_cmd as _export_cmd  # noqa: F401
 from . import main_cmd as _main_cmd  # noqa: F401
 
 from .main_cmd import main
@@ -42,7 +43,7 @@ def cli() -> None:
         _conduct_registered = True
 
     args = sys.argv[1:]
-    subcommands = {"main", "dashboard", "monitor", "ps", "cancel", "conduct"}
+    subcommands = {"main", "dashboard", "monitor", "ps", "cancel", "conduct", "export"}
 
     if not args or args[0] not in subcommands:
         args = ["main", *args]

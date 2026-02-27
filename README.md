@@ -89,6 +89,7 @@ Custom profiles are defined in YAML. See [Profiles](docs/site/profiles.md) for t
 - **Observability** — per-session `trace.jsonl` event logs with token usage, tool execution, and timing data; session directories at `~/.config/rho-agent/sessions/`
 - **Session management** — monitor, pause, resume, and cancel running agents from another terminal (`rho-agent monitor <dir>`)
 - **Remote sandboxing** — execute shell and file tools in a Daytona cloud sandbox with `--backend daytona`
+- **ATIF export** — convert session traces to [Harbor](https://github.com/laude-institute/harbor)'s Agent Trajectory Interchange Format for SFT/RL training data
 - **Evaluation integrations** — [BIRD-Bench](rho_agent/eval/birdbench/) (text-to-SQL) and [TerminalBench](rho_agent/eval/harbor/) via Harbor
 
 ## Documentation
@@ -104,6 +105,7 @@ Custom profiles are defined in YAML. See [Profiles](docs/site/profiles.md) for t
 | [Profiles](docs/site/profiles.md) | Permission profiles and custom YAML |
 | [Daytona](docs/site/daytona.md) | Remote sandbox execution via Daytona |
 | [Observability](docs/site/observability.md) | Session traces, offline inspection, and observers |
+| [Export](rho_agent/export/README.md) | Convert traces to ATIF for training data |
 | [Monitor](docs/site/monitor.md) | Watch, control, and steer running agents |
 
 ## Development
