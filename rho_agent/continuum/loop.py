@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 from rich.console import Console
+from rich.prompt import Prompt
 
 from ..core.agent import Agent
 from ..core.session import Session
@@ -33,6 +34,7 @@ BUDGET_WARNING = (
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "agent.md"
 
 _PROJECT_COMPLETE_RE = re.compile(r"^PROJECT COMPLETE$", re.MULTILINE)
+_NEEDS_INPUT_RE = re.compile(r"^NEEDS_INPUT$", re.MULTILINE)
 
 
 def _parse_handoff(text: str) -> tuple[str, str] | None:
@@ -143,10 +145,25 @@ async def run_continuum(config: ContinuumConfig) -> ContinuumState:
             session.budget_gate = _make_budget_gate(config)
 
             try:
-                # Run the agent
+                # Run the agent (with NEEDS_INPUT loop)
                 console.print("  [dim]Agent working...[/dim]")
-                result = await session.run(initial_prompt)
-                response_text = result.text or ""
+                prompt = initial_prompt
+                while True:
+                    result = await session.run(prompt)
+                    response_text = result.text or ""
+
+                    # Check for NEEDS_INPUT before PROJECT COMPLETE
+                    if _NEEDS_INPUT_RE.search(response_text):
+                        console.print(f"\n{response_text}\n")
+                        user_response = Prompt.ask(
+                            "[bold]Agent needs your input[/bold]"
+                        )
+                        prompt = user_response
+                        console.print("  [dim]Agent working...[/dim]")
+                        continue
+
+                    # No more NEEDS_INPUT — exit the inner loop
+                    break
 
                 # Check for project completion
                 if _PROJECT_COMPLETE_RE.search(response_text):

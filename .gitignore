@@ -17,6 +17,7 @@ wheels/
 !README.md
 !ARCHITECTURE.md
 !rho_agent/prompts/*.md
+!rho_agent/continuum/prompts/*.md
 !examples/**/*.md
 !docs/site/
 !docs/site/**/*.md
