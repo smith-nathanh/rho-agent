@@ -30,14 +30,14 @@ Every significant event during a session is appended as a JSON line to `trace.js
 ```jsonl
 {"type": "run_start", "run_id": 1, "prompt": "List all tables.", "timestamp": "2026-02-21T10:00:00Z"}
 {"type": "message", "role": "user", "content": "List all tables.", "timestamp": "2026-02-21T10:00:00Z"}
-{"type": "llm_start", "model": "gpt-5-mini", "message_count": 2, "timestamp": "2026-02-21T10:00:00Z"}
-{"type": "llm_end", "usage": {"input_tokens": 150, "output_tokens": 45}, "timestamp": "2026-02-21T10:00:01Z"}
-{"type": "tool_start", "tool_name": "bash", "tool_call_id": "call_abc", "args": {"command": "psql -c '\\dt'"}, "timestamp": "2026-02-21T10:00:01Z"}
-{"type": "tool_end", "tool_name": "bash", "tool_call_id": "call_abc", "duration_ms": 320, "timestamp": "2026-02-21T10:00:01Z"}
-{"type": "llm_start", "model": "gpt-5-mini", "message_count": 4, "timestamp": "2026-02-21T10:00:02Z"}
-{"type": "llm_end", "usage": {"input_tokens": 280, "output_tokens": 90}, "timestamp": "2026-02-21T10:00:03Z"}
+{"type": "llm_start", "model": "gpt-5-mini", "context_size": 150, "timestamp": "2026-02-21T10:00:00Z"}
+{"type": "llm_end", "model": "gpt-5-mini", "input_tokens": 150, "output_tokens": 45, "cache_read_tokens": 0, "cost_usd": 0.0003, "timestamp": "2026-02-21T10:00:01Z"}
+{"type": "tool_start", "tool_name": "bash", "tool_call_id": "call_abc", "tool_args": {"command": "psql -c '\\dt'"}, "timestamp": "2026-02-21T10:00:01Z"}
+{"type": "tool_end", "tool_name": "bash", "tool_call_id": "call_abc", "success": true, "timestamp": "2026-02-21T10:00:01Z"}
+{"type": "llm_start", "model": "gpt-5-mini", "context_size": 280, "timestamp": "2026-02-21T10:00:02Z"}
+{"type": "llm_end", "model": "gpt-5-mini", "input_tokens": 280, "output_tokens": 90, "cache_read_tokens": 0, "cost_usd": 0.0006, "timestamp": "2026-02-21T10:00:03Z"}
 {"type": "message", "role": "assistant", "content": "The database has 12 tables...", "timestamp": "2026-02-21T10:00:03Z"}
-{"type": "run_end", "run_id": 1, "status": "completed", "usage": {"input_tokens": 430, "output_tokens": 135}, "timestamp": "2026-02-21T10:00:03Z"}
+{"type": "run_end", "run_id": 1, "status": "completed", "timestamp": "2026-02-21T10:00:03Z"}
 ```
 
 ## Session directory layout
@@ -116,3 +116,27 @@ result = await session.run(prompt="Analyze the codebase.")
 ```
 
 Observers receive every event that is written to `trace.jsonl`, making them suitable for live dashboards, metrics collection, alerting, or custom logging pipelines.
+
+## ATIF export
+
+Session traces can be exported to [ATIF](https://github.com/laude-institute/harbor) (Agent Trajectory Interchange Format), a structured JSON schema for agent trajectories designed for SFT/RL training data.
+
+```bash
+# Export a session to stdout
+rho-agent export <session-id> --dir ~/.config/rho-agent/sessions
+
+# Write to a file
+rho-agent export <session-id> -d ~/.config/rho-agent/sessions -o trajectory.json
+```
+
+```python
+from rho_agent.export.atif import trace_to_atif
+
+trajectory = trace_to_atif(
+    "path/to/trace.jsonl",
+    session_id="abc123",
+    model_name="gpt-5-mini",
+)
+```
+
+The export maps trace events to ATIF steps, groups tool calls with their results, and populates per-step and session-level metrics. See [`rho_agent/export/`](../../rho_agent/export/README.md) for details and the [CLI reference](cli-reference.md#rho-agent-export) for all flags.
