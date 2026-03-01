@@ -76,6 +76,7 @@ class Session:
         self.cancel_check: Callable[[], bool] | None = None
         self.auto_compact: bool = True
         self.context_window: int | None = None
+        self.budget_gate: Callable[[int], str | None] | None = None
 
         # Mutable copy of registry (frozen from agent, but Session owns its copy)
         self._registry = agent.registry
@@ -534,6 +535,12 @@ class Session:
                     },
                 )
                 return
+
+            # Budget gate — inject a wrap-up message if context is getting full
+            if self.budget_gate is not None:
+                gate_msg = self.budget_gate(self._last_input_tokens)
+                if gate_msg is not None:
+                    self._state.add_user_message(gate_msg)
 
     # --- Compaction ---
 

@@ -30,20 +30,21 @@ from . import main_cmd as _main_cmd  # noqa: F401
 from .main_cmd import main
 
 
-_conduct_registered = False
+_continuum_registered = False
 
 
 def cli() -> None:
     """CLI entrypoint with `main` as the default command."""
-    global _conduct_registered
-    if not _conduct_registered:
-        from ..conductor.cli import conduct as _conduct_fn
+    global _continuum_registered
 
-        app.command(name="conduct")(_conduct_fn)
-        _conduct_registered = True
+    if not _continuum_registered:
+        from ..continuum.cli import continuum as _continuum_fn
+
+        app.command(name="continuum")(_continuum_fn)
+        _continuum_registered = True
 
     args = sys.argv[1:]
-    subcommands = {"main", "dashboard", "monitor", "ps", "cancel", "conduct", "export"}
+    subcommands = {"main", "dashboard", "monitor", "ps", "cancel", "conduct", "export", "continuum"}
 
     if not args or args[0] not in subcommands:
         args = ["main", *args]

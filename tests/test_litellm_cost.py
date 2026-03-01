@@ -1,7 +1,7 @@
 """Tests for LiteLLMClient._extract_usage cost tracking.
 
 Covers the bug where streaming chunks caused completion_cost() to fail,
-leaving cost_usd unset and showing $0.0000 in the conductor summary.
+leaving cost_usd unset and showing $0.0000 in the session summary.
 """
 
 from types import SimpleNamespace

@@ -1,4 +1,4 @@
-"""Atomic state persistence for conductor runs."""
+"""Atomic state persistence for continuum runs."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ import json
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from .models import ConductorState, TaskStatus
+from .models import ContinuumState
 
 
 def _default_state_dir() -> Path:
-    return Path.home() / ".config" / "rho-agent" / "conductor"
+    return Path.home() / ".config" / "rho-agent" / "continuum"
 
 
 def state_path_for_run(run_id: str) -> Path:
@@ -29,7 +29,7 @@ def latest_state_path() -> Path | None:
     return max(paths, key=lambda p: p.stat().st_mtime)
 
 
-def save_state(path: Path, state: ConductorState) -> None:
+def save_state(path: Path, state: ContinuumState) -> None:
     """Atomically write state to JSON file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     data = json.dumps(state.to_dict(), indent=2)
@@ -39,12 +39,7 @@ def save_state(path: Path, state: ConductorState) -> None:
     tmp_path.replace(path)
 
 
-def load_state(path: Path) -> ConductorState:
-    """Load state from JSON, resetting stale IN_PROGRESS tasks to PENDING."""
+def load_state(path: Path) -> ContinuumState:
+    """Load state from JSON."""
     data = json.loads(path.read_text(encoding="utf-8"))
-    state = ConductorState.from_dict(data)
-    if state.dag:
-        for task in state.dag.tasks.values():
-            if task.status == TaskStatus.IN_PROGRESS:
-                task.status = TaskStatus.PENDING
-    return state
+    return ContinuumState.from_dict(data)
