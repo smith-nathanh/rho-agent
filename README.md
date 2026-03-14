@@ -4,9 +4,7 @@ AI agents you can deploy, monitor, and control.
 
 <!-- ![demo](assets/demo.gif) -->
 
-AI coding agents today are stuck in approval gates. Every shell command, every file write — another confirmation. rho-agent takes a different stance: give agents real access to real environments — working directories, databases, production logs — and let them operate. Define a permission profile once, hand off the task, and get back a result. The Session API is deliberately hands-off: you describe what you want, the agent figures out how. Monitor live with the built-in monitor or review the full event trace after the fact and resume from the CLI if you need to follow-up.
-
-It's time to start taking AI agent [time-horizons](https://metr.org/) seriously.
+rho-agent lets you deploy AI agents with predefined permissions into real environments — working directories, databases, production logs — and let them operate autonomously. Define a permission profile, hand off a task, and get back a result. Monitor live, review the full event trace, or resume from the CLI.
 
 ## Quickstart
 
