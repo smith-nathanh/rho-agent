@@ -19,6 +19,12 @@ from .formatting import (
 from .state import RENDER_MARKDOWN, console
 
 
+_UPLOAD_BATCH_SIZE = 100
+
+# Directories to skip when uploading (large, generated, or irrelevant)
+_UPLOAD_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".tox"}
+
+
 async def upload_to_sandbox(
     session: Session,
     mappings: list[tuple[str, str]],
@@ -26,11 +32,14 @@ async def upload_to_sandbox(
     """Upload local files/directories to the Daytona sandbox.
 
     Each mapping is (local_src, remote_dest). Directories are walked recursively.
-    Uses streaming upload_file() per file to avoid loading everything into memory.
+    Uses bulk upload_files() to send batches in a single multipart request.
     """
+    from daytona import FileUpload
+
     if not mappings:
         return
 
+    console.print(_markup("Creating sandbox...", THEME.muted))
     sandbox = await session.get_sandbox()
 
     for src_str, dest in mappings:
@@ -40,17 +49,62 @@ async def upload_to_sandbox(
             continue
 
         if src.is_dir():
-            files = [f for f in src.rglob("*") if f.is_file()]
+            files = [
+                f for f in src.rglob("*")
+                if f.is_file()
+                and not (_UPLOAD_SKIP_DIRS & set(f.relative_to(src).parts))
+            ]
+            total = len(files)
             console.print(
-                _markup(f"Uploading {src_str} → {dest} ({len(files)} files)", THEME.accent)
+                _markup(f"Uploading {src_str} → {dest} ({total} files)", THEME.accent)
             )
-            for file_path in files:
-                relative = file_path.relative_to(src)
-                remote_path = f"{dest.rstrip('/')}/{relative}"
-                await sandbox.fs.upload_file(str(file_path), remote_path)
+            done = 0
+            for i in range(0, total, _UPLOAD_BATCH_SIZE):
+                batch = files[i : i + _UPLOAD_BATCH_SIZE]
+                uploads = [
+                    FileUpload(
+                        source=str(fp),
+                        destination=f"{dest.rstrip('/')}/{fp.relative_to(src)}",
+                    )
+                    for fp in batch
+                ]
+                await sandbox.fs.upload_files(uploads)
+                done += len(batch)
+                console.print(
+                    _markup(f"  {done}/{total} files uploaded", THEME.muted)
+                )
         else:
             console.print(_markup(f"Uploading {src_str} → {dest}", THEME.accent))
             await sandbox.fs.upload_file(str(src), dest)
+
+
+async def run_setup_commands(
+    session: Session,
+    commands: list[str],
+    working_dir: str,
+) -> None:
+    """Run setup commands from .rho-agent.toml on the sandbox.
+
+    Raises RuntimeError on non-zero exit to fail fast before the agent starts.
+    """
+    if not commands:
+        return
+
+    sandbox = await session.get_sandbox()
+
+    # Get env vars from the sandbox manager so setup commands have the right PATH
+    manager = session.agent.sandbox_manager
+    env = manager.env_vars if manager else None
+
+    for cmd in commands:
+        console.print(_markup(f"setup: {cmd}", THEME.accent))
+        resp = await sandbox.process.exec(cmd, cwd=working_dir, env=env)
+        if resp.result:
+            console.print(_markup(resp.result.rstrip(), THEME.muted))
+        if resp.exit_code != 0:
+            raise RuntimeError(
+                f"Setup command failed (exit {resp.exit_code}): {cmd}"
+            )
 
 
 async def run_single(
@@ -58,6 +112,7 @@ async def run_single(
     prompt: str,
     *,
     upload_mappings: list[tuple[str, str]] | None = None,
+    setup_commands: list[str] | None = None,
 ) -> None:
     """Run a single prompt and exit."""
     loop = asyncio.get_event_loop()
@@ -75,6 +130,12 @@ async def run_single(
         # Upload files to sandbox before running
         if upload_mappings:
             await upload_to_sandbox(session, upload_mappings)
+
+        # Run setup commands after upload, before agent starts
+        if setup_commands:
+            await run_setup_commands(
+                session, setup_commands, session.agent.config.working_dir
+            )
 
         status_ctx = None
         start = monotonic()
@@ -135,6 +196,7 @@ async def run_single_with_output(
     output_path: str,
     *,
     upload_mappings: list[tuple[str, str]] | None = None,
+    setup_commands: list[str] | None = None,
 ) -> bool:
     """Run a single prompt and write final response to file.
 
@@ -171,6 +233,12 @@ async def run_single_with_output(
         # Upload files to sandbox before running
         if upload_mappings:
             await upload_to_sandbox(session, upload_mappings)
+
+        # Run setup commands after upload, before agent starts
+        if setup_commands:
+            await run_setup_commands(
+                session, setup_commands, session.agent.config.working_dir
+            )
 
         status_ctx = None
         start = monotonic()

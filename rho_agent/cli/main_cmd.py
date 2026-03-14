@@ -7,10 +7,14 @@ import os
 import platform
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 import yaml
+
+if TYPE_CHECKING:
+    from ..tools.handlers.daytona.backend import DaytonaBackend
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -43,6 +47,112 @@ from .state import (
 
 
 SESSIONS_DIR = CONFIG_DIR / "sessions"
+
+SANDBOX_CONFIG_FILE = ".rho-agent.toml"
+
+
+def _resolve_daytona_config(
+    *,
+    dockerfile: str | None,
+    snapshot: str | None,
+    upload: list[str] | None,
+    working_dir: str | None,
+) -> tuple["DaytonaBackend", list[tuple[str, str]], str, list[str]]:
+    """Resolve Daytona sandbox configuration from .rho-agent.toml + CLI overrides.
+
+    Returns (DaytonaBackend, upload_mappings, working_dir, setup_commands).
+    """
+    import tomllib
+
+    from ..tools.handlers.daytona.backend import DaytonaBackend
+
+    # Walk up from CWD to find .rho-agent.toml (like .gitignore discovery)
+    cwd = Path.cwd()
+    project_root = cwd
+    config_path = None
+    for parent in [cwd, *cwd.parents]:
+        candidate = parent / SANDBOX_CONFIG_FILE
+        if candidate.exists():
+            config_path = candidate
+            project_root = parent
+            break
+
+    project_name = project_root.name
+    remote_project_dir = f"/home/daytona/{project_name}"
+
+    # Load .rho-agent.toml if found
+    toml_config: dict = {}
+    if config_path is not None:
+        with open(config_path, "rb") as f:
+            toml_config = tomllib.load(f)
+        console.print(_markup(f"Loaded {config_path.relative_to(project_root)}", THEME.muted))
+
+    sandbox_cfg = toml_config.get("sandbox", {})
+
+    # Resolve image/snapshot — CLI flags override toml
+    image: str | object = "daytonaio/sandbox:latest"
+    resolved_snapshot: str | None = snapshot or sandbox_cfg.get("snapshot")
+
+    if not resolved_snapshot:
+        dockerfile_path_str = dockerfile or sandbox_cfg.get("dockerfile")
+        if dockerfile_path_str:
+            df_path = Path(dockerfile_path_str)
+            if not df_path.is_absolute():
+                df_path = project_root / df_path
+            df_path = df_path.resolve()
+            if not df_path.exists():
+                console.print(
+                    _markup(f"Dockerfile not found: {df_path}", THEME.error)
+                )
+                raise typer.Exit(1)
+            from daytona import Image
+
+            image = Image.from_dockerfile(
+                str(df_path), context_dir=str(df_path.parent)
+            )
+        else:
+            toml_image = sandbox_cfg.get("image")
+            if toml_image:
+                image = toml_image
+
+    # Environment variables from toml
+    env_vars = {}
+    if "env" in sandbox_cfg:
+        env_vars = {k: str(v) for k, v in sandbox_cfg["env"].items()}
+
+    backend = DaytonaBackend(
+        image=image,
+        snapshot=resolved_snapshot,
+        env_vars=env_vars,
+        uv_version=sandbox_cfg.get("uv_version"),
+    )
+
+    # Resolve upload mappings — CLI overrides, otherwise auto-upload CWD
+    upload_mappings: list[tuple[str, str]] = []
+    if upload:
+        for mapping in upload:
+            if ":" not in mapping:
+                console.print(
+                    _markup(
+                        f"Invalid --upload format (expected ./local:/remote): {mapping}",
+                        THEME.error,
+                    )
+                )
+                raise typer.Exit(1)
+            src, dest = mapping.rsplit(":", 1)
+            upload_mappings.append((src, dest))
+    else:
+        # Auto-upload project root
+        upload_mappings = [(str(project_root), remote_project_dir)]
+
+    # Resolve working dir — CLI overrides toml, toml overrides default
+    if not working_dir:
+        working_dir = sandbox_cfg.get("working_dir", remote_project_dir)
+
+    # Setup commands from toml (run after upload, before agent starts)
+    setup_commands: list[str] = sandbox_cfg.get("setup", [])
+
+    return backend, upload_mappings, working_dir, setup_commands
 
 
 @app.command()
@@ -143,6 +253,20 @@ def main(
             "--upload", help="Upload files to sandbox (repeatable, format: ./local:/remote)"
         ),
     ] = None,
+    dockerfile: Annotated[
+        str | None,
+        typer.Option(
+            "--dockerfile",
+            help="Path to Dockerfile for building a custom sandbox image (Daytona backend)",
+        ),
+    ] = None,
+    snapshot: Annotated[
+        str | None,
+        typer.Option(
+            "--snapshot",
+            help="Named Daytona snapshot to create sandbox from (faster than --dockerfile)",
+        ),
+    ] = None,
     shell_mode: Annotated[
         str | None,
         typer.Option(
@@ -154,9 +278,30 @@ def main(
     """rho-agent: An agent harness and CLI with readonly and developer modes."""
     from ..prompts import load_prompt, parse_vars, prepare_prompt
 
-    # Parse upload mappings (format: ./local:/remote)
+    # --- Daytona sandbox configuration ---
+    # When --backend daytona, read .rho-agent.toml from the project root.
+    # CLI flags (--dockerfile, --snapshot, --upload, --working-dir) override the toml.
+    daytona_backend = None
     upload_mappings: list[tuple[str, str]] = []
-    if upload:
+    setup_commands: list[str] = []
+
+    if backend == "daytona" or (dockerfile or snapshot):
+        if backend == "local" and (dockerfile or snapshot):
+            backend = "daytona"  # --dockerfile/--snapshot implies daytona
+
+        if dockerfile and snapshot:
+            console.print(
+                _markup("Cannot use both --dockerfile and --snapshot", THEME.error)
+            )
+            raise typer.Exit(1)
+
+        daytona_backend, upload_mappings, working_dir, setup_commands = _resolve_daytona_config(
+            dockerfile=dockerfile,
+            snapshot=snapshot,
+            upload=upload,
+            working_dir=working_dir,
+        )
+    elif upload:
         for mapping in upload:
             if ":" not in mapping:
                 console.print(
@@ -218,10 +363,14 @@ def main(
             console.print(_markup("Use --list to see saved sessions.", THEME.muted))
             raise typer.Exit(1)
 
-    # Resolve working directory
-    resolved_working_dir = (
-        str(Path(working_dir).expanduser().resolve()) if working_dir else os.getcwd()
-    )
+    # Resolve working directory — skip local resolution for remote backends
+    # (macOS resolves /home → /System/Volumes/Data/home which breaks remote paths)
+    if working_dir and backend != "local":
+        resolved_working_dir = working_dir
+    elif working_dir:
+        resolved_working_dir = str(Path(working_dir).expanduser().resolve())
+    else:
+        resolved_working_dir = os.getcwd()
 
     # Build AgentConfig from flags or --config file
     if resumed_session:
@@ -347,14 +496,31 @@ def main(
                 )
                 raise typer.Exit(1) from exc
 
-            prompt_vars = {
-                "platform": platform.system(),
-                "home_dir": str(Path.home()),
+            # Remote backends execute on Linux VMs, not the host machine
+            is_remote = backend != "local"
+            sandbox_info = ""
+            if is_remote:
+                sandbox_info = (
+                    "Pre-installed tools: python3, pip, node, git, uv.\n"
+                    "Prefer uv over pip for Python package management.\n"
+                    "PATH includes ~/.local/bin.\n"
+                    "\n"
+                    "Important: uv-managed venvs do not include pip. To install packages:\n"
+                    "- `uv pip install <pkg>` — install into the project venv\n"
+                    "- `uv run --with <pkg> <cmd>` — run a command with a temporary dependency\n"
+                    "- `uv run <cmd>` — run a command using the project venv\n"
+                    "Always use `uv run` or `uv pip install` instead of plain `pip` or `.venv/bin/python -m pip`."
+                )
+
+            prompt_vars: dict[str, str] = {
+                "platform": "Linux" if is_remote else platform.system(),
+                "home_dir": "/home/daytona" if is_remote else str(Path.home()),
                 "working_dir": resolved_working_dir,
                 "profile_name": capability_profile.name,
                 "shell_mode": capability_profile.shell.value,
                 "file_write_mode": capability_profile.file_write.value,
                 "database_mode": capability_profile.database.value,
+                "sandbox_info": sandbox_info,
             }
             try:
                 system_prompt_text, initial_prompt = prepare_prompt(loaded_prompt, prompt_vars)
@@ -371,7 +537,7 @@ def main(
             system_prompt=system_prompt_text,
             model=model,
             profile=effective_profile,
-            backend=backend,
+            backend=daytona_backend or backend,
             base_url=base_url,
             reasoning_effort=reasoning_effort,
             working_dir=resolved_working_dir,
@@ -429,6 +595,7 @@ def main(
                     run_prompt_text,
                     output,
                     upload_mappings=upload_mappings,
+                    setup_commands=setup_commands,
                 )
             )
         else:
@@ -437,6 +604,7 @@ def main(
                     session,
                     run_prompt_text,
                     upload_mappings=upload_mappings,
+                    setup_commands=setup_commands,
                 )
             )
     else:
@@ -448,6 +616,7 @@ def main(
                 resolved_working_dir,
                 session_store,
                 upload_mappings=upload_mappings,
+                setup_commands=setup_commands,
             )
         )
 

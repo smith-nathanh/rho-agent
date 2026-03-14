@@ -71,9 +71,36 @@ class TestDaytonaBackend:
 
         b = DaytonaBackend()
         assert b.config is None
-        assert b.image == "ubuntu:latest"
+        assert b.image == "daytonaio/sandbox:latest"
         assert b.resources is None
         assert b.auto_stop_interval == 0
+        assert b.env_vars == {}
+        assert b.uv_version is None
+
+    def test_snapshot_default_none(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        b = DaytonaBackend()
+        assert b.snapshot is None
+
+    def test_snapshot_overrides_image(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        b = DaytonaBackend(snapshot="my-env")
+        assert b.snapshot == "my-env"
+
+    def test_env_vars(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        b = DaytonaBackend(env_vars={"MY_KEY": "val"})
+        assert b.env_vars == {"MY_KEY": "val"}
+
+    def test_image_accepts_non_string(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        fake_image = MagicMock()
+        b = DaytonaBackend(image=fake_image)
+        assert b.image is fake_image
 
     def test_config_serializes_as_daytona_string(self):
         from rho_agent.core.config import AgentConfig
@@ -92,18 +119,22 @@ class TestDaytonaBackend:
 class TestSandboxManager:
     def test_defaults(self):
         mgr = SandboxManager()
-        assert mgr._image == "ubuntu:latest"
+        assert mgr._image == "daytonaio/sandbox:latest"
         assert mgr._working_dir == "/home/daytona"
         assert mgr._api_config is None
+        # Default PATH is always set, even without from_backend()
+        assert "/home/daytona/.local/bin" in mgr._env_vars["PATH"]
 
     def test_from_backend_defaults(self):
         from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
 
         backend = DaytonaBackend()
         mgr = SandboxManager.from_backend(backend)
-        assert mgr._image == "ubuntu:latest"
+        assert mgr._image == "daytonaio/sandbox:latest"
         assert mgr._auto_stop_interval == 0
         assert mgr._api_config is None
+        # Default PATH is always set
+        assert "/home/daytona/.local/bin" in mgr._env_vars["PATH"]
 
     def test_from_backend_with_config(self):
         from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
@@ -119,6 +150,60 @@ class TestSandboxManager:
         assert mgr._working_dir == "/work"
         assert mgr._auto_stop_interval == 60
         assert mgr._api_config is fake_config
+
+    def test_from_backend_env_vars_override_defaults(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        backend = DaytonaBackend(env_vars={"PATH": "/custom/bin", "MY_VAR": "hello"})
+        mgr = SandboxManager.from_backend(backend)
+        # User PATH overrides default
+        assert mgr._env_vars["PATH"] == "/custom/bin"
+        assert mgr._env_vars["MY_VAR"] == "hello"
+
+    def test_from_backend_merges_env_vars(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        backend = DaytonaBackend(env_vars={"MY_VAR": "hello"})
+        mgr = SandboxManager.from_backend(backend)
+        # Default PATH preserved, user var added
+        assert "PATH" in mgr._env_vars
+        assert mgr._env_vars["MY_VAR"] == "hello"
+
+    def test_from_backend_image_non_string(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        fake_image = MagicMock()
+        backend = DaytonaBackend(image=fake_image)
+        mgr = SandboxManager.from_backend(backend)
+        assert mgr._image is fake_image
+
+    def test_from_backend_snapshot(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        backend = DaytonaBackend(snapshot="my-env")
+        mgr = SandboxManager.from_backend(backend)
+        assert mgr._snapshot == "my-env"
+
+    def test_from_backend_no_snapshot(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        backend = DaytonaBackend()
+        mgr = SandboxManager.from_backend(backend)
+        assert mgr._snapshot is None
+
+    def test_from_backend_uv_version(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        backend = DaytonaBackend(uv_version="0.6.6")
+        mgr = SandboxManager.from_backend(backend)
+        assert mgr._uv_version == "0.6.6"
+
+    def test_from_backend_uv_version_default_none(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+
+        backend = DaytonaBackend()
+        mgr = SandboxManager.from_backend(backend)
+        assert mgr._uv_version is None
 
     def test_from_backend_extracts_resources(self):
         from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
@@ -466,7 +551,7 @@ class TestDaytonaBackendRouting:
             # String "daytona" passes backend=None
             _, kwargs = mock_reg.call_args
             assert kwargs.get("backend") is None
-            assert agent._sandbox_manager is mock_manager
+            assert agent.sandbox_manager is mock_manager
 
     def test_agent_routes_daytona_backend_object(self):
         """Agent with DaytonaBackend instance passes it through."""
@@ -484,4 +569,4 @@ class TestDaytonaBackendRouting:
             mock_reg.assert_called_once()
             _, kwargs = mock_reg.call_args
             assert kwargs["backend"] is backend
-            assert agent._sandbox_manager is mock_manager
+            assert agent.sandbox_manager is mock_manager

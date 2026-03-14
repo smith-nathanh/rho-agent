@@ -78,7 +78,7 @@ class Session:
         self.context_window: int | None = None
         self.budget_gate: Callable[[int], str | None] | None = None
 
-        # Mutable copy of registry (frozen from agent, but Session owns its copy)
+        # Shared reference to agent's registry (treat as frozen during execution)
         self._registry = agent.registry
 
         # Internal run state
@@ -204,14 +204,14 @@ class Session:
         Raises:
             RuntimeError: If the agent is not using a Daytona backend.
         """
-        manager = getattr(self._agent, "_sandbox_manager", None)
+        manager = self._agent.sandbox_manager
         if manager is None:
             raise RuntimeError("get_sandbox() requires a Daytona backend")
         return await manager.get_sandbox()
 
     async def close(self) -> None:
         """Clean up resources (Daytona sandbox teardown, etc.)."""
-        manager = getattr(self._agent, "_sandbox_manager", None)
+        manager = self._agent.sandbox_manager
         if manager is not None:
             await manager.close()
 

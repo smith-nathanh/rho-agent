@@ -16,18 +16,26 @@ if TYPE_CHECKING:
 class SandboxManager:
     """Manages a single Daytona sandbox for the duration of a session."""
 
+    _DEFAULT_ENV: dict[str, str] = {
+        "PATH": "/home/daytona/.local/bin:/usr/local/bin:/usr/bin:/bin",
+    }
+
     def __init__(
         self,
-        image: str = "ubuntu:latest",
+        image: str | Any = "daytonaio/sandbox:latest",
         working_dir: str = "/home/daytona",
         env_vars: dict[str, str] | None = None,
         resources: dict[str, int] | None = None,
         auto_stop_interval: int = 0,
         api_config: Any = None,
+        snapshot: str | None = None,
+        uv_version: str | None = None,
     ):
         self._image = image
+        self._snapshot = snapshot
+        self._uv_version = uv_version
         self._working_dir = working_dir
-        self._env_vars = env_vars or {}
+        self._env_vars = {**self._DEFAULT_ENV, **(env_vars or {})}
         self._resources = resources or {}
         self._auto_stop_interval = auto_stop_interval
         self._api_config = api_config
@@ -38,6 +46,10 @@ class SandboxManager:
     @property
     def working_dir(self) -> str:
         return self._working_dir
+
+    @property
+    def env_vars(self) -> dict[str, str]:
+        return self._env_vars
 
     async def get_sandbox(self) -> Any:
         """Lazily create and return the sandbox (thread-safe)."""
@@ -52,6 +64,7 @@ class SandboxManager:
             from daytona import (
                 AsyncDaytona,
                 CreateSandboxFromImageParams,
+                CreateSandboxFromSnapshotParams,
                 Resources,
             )
 
@@ -60,11 +73,18 @@ class SandboxManager:
             else:
                 self._client = AsyncDaytona()
 
-            params = CreateSandboxFromImageParams(
-                image=self._image,
-                env_vars=self._env_vars if self._env_vars else None,
-                auto_stop_interval=self._auto_stop_interval,
-            )
+            if self._snapshot:
+                params = CreateSandboxFromSnapshotParams(
+                    snapshot=self._snapshot,
+                    env_vars=self._env_vars if self._env_vars else None,
+                    auto_stop_interval=self._auto_stop_interval,
+                )
+            else:
+                params = CreateSandboxFromImageParams(
+                    image=self._image,
+                    env_vars=self._env_vars if self._env_vars else None,
+                    auto_stop_interval=self._auto_stop_interval,
+                )
 
             if self._resources:
                 params.resources = Resources(
@@ -75,6 +95,19 @@ class SandboxManager:
                 )
 
             self._sandbox = await self._client.create(params, timeout=120)
+
+            # Ensure uv is available (not pre-installed in daytonaio/sandbox)
+            check = await self._sandbox.process.exec(
+                "which uv 2>/dev/null", timeout=10
+            )
+            if check.exit_code != 0:
+                uv_path = f"uv/{self._uv_version}" if self._uv_version else "uv"
+                await self._sandbox.process.exec(
+                    f"curl -LsSf https://astral.sh/{uv_path}/install.sh | sh",
+                    env=self._env_vars,
+                    timeout=60,
+                )
+
             return self._sandbox
 
     async def close(self) -> None:
@@ -108,10 +141,16 @@ class SandboxManager:
                 if val is not None:
                     resources[attr] = val
 
+        # Merge default PATH with user-supplied env vars (user wins)
+        merged_env = {**cls._DEFAULT_ENV, **backend.env_vars}
+
         return cls(
             image=backend.image,
             working_dir=working_dir,
+            env_vars=merged_env,
             auto_stop_interval=backend.auto_stop_interval,
             resources=resources if resources else None,
             api_config=backend.config,
+            snapshot=backend.snapshot,
+            uv_version=backend.uv_version,
         )

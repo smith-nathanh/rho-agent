@@ -7,6 +7,8 @@ variables:
     required: true
   working_dir:
     required: true
+  sandbox_info:
+    default: ""
   profile_name:
     default: "readonly"
   shell_mode:
@@ -145,6 +147,12 @@ For debugging:
 - **Working directory:** {{ working_dir }}
 
 Expand `~` paths to the home directory. Use absolute paths in tool calls.
+{% if sandbox_info %}
+
+## Sandbox
+
+{{ sandbox_info }}
+{% endif %}
 
 # Progress Updates
 

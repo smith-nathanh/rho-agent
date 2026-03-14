@@ -75,6 +75,10 @@ class Agent:
         return registry
 
     @property
+    def sandbox_manager(self) -> Any | None:
+        return self._sandbox_manager
+
+    @property
     def config(self) -> AgentConfig:
         return self._config
 

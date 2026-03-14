@@ -15,6 +15,9 @@ class DaytonaBackend:
     """
 
     config: Any = None  # daytona.DaytonaConfig — lazy import
-    image: str = "ubuntu:latest"
+    image: str | Any = "daytonaio/sandbox:latest"  # str or daytona.Image
+    snapshot: str | None = None  # Named snapshot (overrides image when set)
     resources: Any = None  # daytona.Resources — lazy import
     auto_stop_interval: int = 0
+    env_vars: dict[str, str] = field(default_factory=dict)
+    uv_version: str | None = None

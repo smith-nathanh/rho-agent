@@ -401,4 +401,4 @@ await session.run(prompt="Continue where we left off.")
 
 ### Daytona backend
 
-See the [Daytona](daytona/) guide for full CLI and Python API usage, including file uploads, sandbox configuration, and `DaytonaBackend`.
+See the [Daytona](daytona/) guide for full CLI and Python API usage, including file uploads, setup commands, sandbox configuration, `env_vars`, `Image` objects, and `DaytonaBackend`.

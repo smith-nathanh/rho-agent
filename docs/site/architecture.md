@@ -6,21 +6,26 @@ order: 4
 
 ## Overview
 
-rho-agent is structured around four core concepts:
+rho-agent separates *what an agent is* from *what an agent does* from *what an agent has done*.
 
-1. **Agent** — Stateless definition: config, tool registry, system prompt. Reusable across sessions.
-2. **State** — Conversation data: messages, token usage, observers, serialization.
-3. **Session** — Execution context: drives the agent loop, owns State, handles cancellation.
-4. **CLI** — Typer commands for interactive use, session management, and monitoring.
+**Agent** is a stateless blueprint — a system prompt, a permission profile, and a tool registry bundled into a reusable definition. It holds no conversation history and runs nothing on its own. You create one Agent and stamp out as many independent Sessions from it as you need. The registry is built once at construction time and shared across Sessions, so parallel conversations don't duplicate setup work or invalidate each other's prompt caches.
+
+**Session** is where execution happens. It drives the agent loop — LLM call, tool dispatch, repeat — and owns all the lifecycle concerns: cancellation, pause/resume via sentinel files, operator directives injected between turns, auto-compaction when context gets large, and budget gates. Sessions are long-lived. You can call `run()` multiple times for multi-turn conversations, and resume them across process restarts from a saved trace.
+
+**State** is the portable conversation record — messages, cumulative token usage, and cost. Every mutation is appended to `trace.jsonl` immediately, so State is crash-safe with no explicit save step. A trace file can be replayed into a full State object with `State.from_jsonl()`, which is how session resume works and how the monitor reads a running session from another process. State is also observable: attach `StateObserver` instances to stream events to external systems in real time.
+
+The **CLI** ties these together — Typer commands for launching agents, listing saved sessions, resuming past work, and running the live monitor.
 
 ```
 CLI (rho-agent)
-    └── Agent (stateless config + registry)
-            └── Session (execution context)
-                    ├── State (messages, usage, observers)
+    └── Agent (stateless blueprint)
+            └── Session (execution + lifecycle)
+                    ├── State (messages, usage, trace)
                     ├── ToolRegistry (handler dispatch)
                     └── LLM Client (model calls)
 ```
+
+This decomposition is deliberate. Agent is stateless so one definition can back many concurrent sessions without shared mutable state. State is a standalone data object so it can be serialized, replayed, inspected offline, or handed to a monitor — all without a live Session or Agent. Session is the only piece with a lifecycle, which keeps cancellation, pause, and cleanup concerns in one place instead of spread across the system.
 
 ## Session lifecycle
 

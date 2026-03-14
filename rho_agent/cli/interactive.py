@@ -44,6 +44,7 @@ class InteractiveSession:
         working_dir: str,
         session_store: SessionStore,
         upload_mappings: list[tuple[str, str]] | None = None,
+        setup_commands: list[str] | None = None,
     ) -> None:
         self.session = session
         self.approval_handler = approval_handler
@@ -51,6 +52,7 @@ class InteractiveSession:
         self.working_dir = working_dir
         self.session_store = session_store
         self.upload_mappings = upload_mappings or []
+        self.setup_commands = setup_commands or []
         self.session_status = "completed"
         self.token_status = TokenStatus(
             input_tokens=session.state.usage.get("input_tokens", 0),
@@ -101,6 +103,14 @@ class InteractiveSession:
             # Upload files to sandbox before starting interactive loop
             if self.upload_mappings:
                 await upload_to_sandbox(self.session, self.upload_mappings)
+
+            # Run setup commands after upload, before interactive loop
+            if self.setup_commands:
+                from .single import run_setup_commands
+
+                await run_setup_commands(
+                    self.session, self.setup_commands, self.working_dir
+                )
 
             while True:
                 try:
@@ -431,6 +441,7 @@ async def run_interactive(
     session_store: SessionStore,
     *,
     upload_mappings: list[tuple[str, str]] | None = None,
+    setup_commands: list[str] | None = None,
 ) -> None:
     """Run an interactive REPL session."""
     interactive = InteractiveSession(
@@ -440,5 +451,6 @@ async def run_interactive(
         working_dir=working_dir,
         session_store=session_store,
         upload_mappings=upload_mappings,
+        setup_commands=setup_commands,
     )
     await interactive.run()
