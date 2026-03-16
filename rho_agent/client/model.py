@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from openai import AsyncOpenAI, APIStatusError
+from openai import APIStatusError, AsyncOpenAI
 
 
 @dataclass

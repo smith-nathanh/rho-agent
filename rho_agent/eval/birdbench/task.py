@@ -74,7 +74,7 @@ def load_bird_tasks(
     data_file = Path(data_file)
     db_dir = Path(db_dir)
 
-    with open(data_file, "r", encoding="utf-8") as f:
+    with open(data_file, encoding="utf-8") as f:
         data = json.load(f)
 
     tasks = []

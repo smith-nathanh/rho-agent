@@ -9,9 +9,9 @@ from typing import Annotated
 
 import typer
 
+from .formatting import _markup
 from .state import app, console
 from .theme import THEME
-from .formatting import _markup
 
 
 @app.command()

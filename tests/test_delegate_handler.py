@@ -134,7 +134,7 @@ def test_delegate_removes_delegate_from_child_registry() -> None:
 
     # Create a parent-like agent that has delegate
     config = AgentConfig(profile="developer")
-    agent = Agent(config)
+    Agent(config)
     # developer profile may include delegate — check our logic is correct
     # The key behavior: DelegateHandler builds a child Agent and removes delegate
     child_config = AgentConfig(profile="developer", system_prompt="test")

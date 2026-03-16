@@ -20,7 +20,7 @@ from .handoffs import (
     latest_handoff_number,
     write_handoff,
 )
-from .models import ContinuumConfig, ContinuumState, SessionUsage
+from .models import ContinuumConfig, ContinuumState
 from .state import latest_state_path, load_state, save_state, state_path_for_run
 
 console = Console()
@@ -251,7 +251,7 @@ def _accumulate_usage(state: ContinuumState, session: Session) -> None:
 def _print_summary(state: ContinuumState, state_path: Path) -> None:
     """Print run summary."""
     u = state.total_usage
-    console.print(f"\n[bold]Continuum Summary[/bold]")
+    console.print("\n[bold]Continuum Summary[/bold]")
     console.print(f"  Sessions: {state.session_count}")
     console.print(f"  Tokens:   {u.input_tokens:,} in / {u.output_tokens:,} out")
     console.print(f"  Cost:     ${u.cost_usd:.4f}")

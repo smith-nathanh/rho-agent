@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import sys
 
+# Import subcommand modules so their @app.command() decorators register
+from . import admin as _admin  # noqa: F401
+from . import export_cmd as _export_cmd  # noqa: F401
+from . import main_cmd as _main_cmd  # noqa: F401
+from . import monitor as _monitor  # noqa: F401
 from .errors import (
     CliUsageError,
     InvalidModeError,
@@ -18,17 +23,9 @@ from .events import (
 )
 from .formatting import TokenStatus
 from .interactive import run_interactive
+from .main_cmd import main
 from .single import run_single, run_single_with_output
 from .state import app
-
-# Import subcommand modules so their @app.command() decorators register
-from . import admin as _admin  # noqa: F401
-from . import monitor as _monitor  # noqa: F401
-from . import export_cmd as _export_cmd  # noqa: F401
-from . import main_cmd as _main_cmd  # noqa: F401
-
-from .main_cmd import main
-
 
 _continuum_registered = False
 

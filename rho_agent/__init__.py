@@ -15,7 +15,6 @@ from .core import (
 )
 
 __all__ = [
-    "__version__",
     "Agent",
     "AgentConfig",
     "AgentEvent",
@@ -23,4 +22,5 @@ __all__ = [
     "Session",
     "SessionStore",
     "State",
+    "__version__",
 ]

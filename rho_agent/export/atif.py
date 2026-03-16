@@ -13,7 +13,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 _SCHEMA_VERSION = "ATIF-v1.6"
 
 # Event types we skip — they don't map to ATIF steps.

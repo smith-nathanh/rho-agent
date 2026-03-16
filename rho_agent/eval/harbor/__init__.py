@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 # Re-export handlers for convenience
-from rho_agent.tools.handlers import BashHandler, WriteHandler, EditHandler
+from rho_agent.tools.handlers import BashHandler, EditHandler, WriteHandler
 
 __all__ = [
     "BashHandler",
-    "WriteHandler",
     "EditHandler",
+    "WriteHandler",
 ]

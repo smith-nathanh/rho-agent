@@ -13,7 +13,7 @@ load_dotenv()
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 from .config import EvalAbortedError, EvalConfig
 from .output import (
@@ -205,7 +205,7 @@ def bird(
             progress.update(task_id, completed=completed)
 
         try:
-            results, metrics = asyncio.run(
+            _, metrics = asyncio.run(
                 runner.run_tasks(
                     tasks,
                     output_dir=run_dir,
@@ -217,7 +217,7 @@ def bird(
             console.print()
             console.print(f"[red bold]Evaluation aborted:[/red bold] {e}")
             console.print(f"\nPartial results saved to: {run_dir}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from e
 
     # Print summary
     console.print()

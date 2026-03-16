@@ -160,7 +160,7 @@ class GrepHandler(ToolHandler):
                 process.kill()
                 await process.wait()
                 raise
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 process.kill()
                 await process.wait()
                 return ToolOutput(

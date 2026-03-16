@@ -5,7 +5,7 @@ from __future__ import annotations
 import fcntl
 import json
 import shlex
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from time import sleep
 from typing import Annotated
@@ -15,13 +15,13 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ..core.session_store import SessionStore
-from .theme import THEME
 from .formatting import (
     _format_elapsed,
     _format_token_count,
     _markup,
 )
 from .state import app, console
+from .theme import THEME
 
 
 class MonitorSession:
@@ -124,7 +124,7 @@ class MonitorSession:
         table.add_column("Started", justify="right")
         table.add_column("Preview", overflow="fold")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for info in sessions:
             status_color = {
                 "running": THEME.success,

@@ -10,12 +10,10 @@ import pytest
 from rho_agent.client.model import StreamEvent, ToolCall
 from rho_agent.core.agent import Agent
 from rho_agent.core.config import AgentConfig
-from rho_agent.core.events import AgentEvent, ApprovalInterrupt
+from rho_agent.core.events import ApprovalInterrupt
 from rho_agent.core.session import Session
-from rho_agent.core.state import State
 from rho_agent.tools.base import ToolHandler, ToolInvocation, ToolOutput
 from rho_agent.tools.registry import ToolRegistry
-
 
 # ---------------------------------------------------------------------------
 # Helpers

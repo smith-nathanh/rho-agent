@@ -29,10 +29,9 @@ import asyncio
 import json
 import os
 import platform
-import sys
 import textwrap
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -377,7 +376,7 @@ async def run_dispatcher(args: argparse.Namespace) -> int:
 
     # Build consolidated report
     consolidated = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "model": args.model,
         "total_incidents": len(incidents),
         "diagnosed": len(reports),

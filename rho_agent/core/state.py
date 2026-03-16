@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -73,7 +73,7 @@ class State:
     def _emit(self, event: dict[str, Any]) -> None:
         """Write event to trace file and notify observers."""
         if "ts" not in event:
-            event["ts"] = datetime.now(timezone.utc).isoformat()
+            event["ts"] = datetime.now(UTC).isoformat()
         if self.trace_path is not None:
             with open(self.trace_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(event, default=str) + "\n")

@@ -10,7 +10,6 @@ import fcntl
 import json
 import uuid
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
@@ -18,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .agent import Agent
 
-from ..client.model import Message, ModelClient, Prompt
+from ..client.model import Message, Prompt
 from ..tools.base import ToolInvocation
 from ..tools.registry import ToolRegistry
 from .events import (
@@ -55,14 +54,13 @@ class Session:
 
     def __init__(
         self,
-        agent: "Agent",
+        agent: Agent,
         *,
         session_id: str | None = None,
         state: State | None = None,
         session_dir: Path | None = None,
         client: Any | None = None,
     ) -> None:
-        from .agent import Agent as AgentClass
 
         self._agent = agent
         self._id = session_id or str(uuid.uuid4())
@@ -86,7 +84,7 @@ class Session:
         self._call_index: int = 0
 
     @property
-    def agent(self) -> "Agent":
+    def agent(self) -> Agent:
         return self._agent
 
     @property

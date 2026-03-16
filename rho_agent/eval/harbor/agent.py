@@ -60,7 +60,7 @@ class RhoAgent(BaseInstalledAgent):
             reasoning_effort: Reasoning effort level: "low", "medium", "high" (default: None).
             cost_ceiling_usd: Max cost per task in USD, 0 = disabled (default: 0.0).
         """
-        super().__init__(logs_dir, model_name=model_name, logger=logger, *args, **kwargs)
+        super().__init__(logs_dir, *args, model_name=model_name, logger=logger, **kwargs)
         self._bash_only = bash_only
         self._enable_reviewer = enable_reviewer
         self._reviewer_max_iterations = reviewer_max_iterations

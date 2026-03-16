@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .database_config import DatabaseConfig
 from .database import DatabaseHandler
+from .database_config import DatabaseConfig
 
 try:
     import vertica_python

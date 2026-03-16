@@ -10,13 +10,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from rho_agent.permissions import (
-    ApprovalMode,
-    PermissionProfile,
-    DatabaseMode,
-    FileWriteMode,
-    ShellMode,
-)
 from rho_agent.core import Agent, AgentConfig, Session
 from rho_agent.prompts import load_prompt
 
@@ -25,7 +18,6 @@ from .evaluator import BirdEvaluator
 from .output import append_result, update_overall
 from .task import BirdTask
 from .tools import BirdSqliteHandler, SubmitSqlHandler
-
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 _BIRD_PROMPT = _PROMPTS_DIR / "eval_bird.md"
@@ -126,7 +118,7 @@ class BirdRunner:
                         if submit_handler.is_submitted:
                             break
 
-                    except TimeoutError:
+                    except TimeoutError as exc:
                         consecutive_timeouts += 1
                         print(
                             f"[Task {task.index}] Turn {turn} timed out ({consecutive_timeouts}/3)",
@@ -136,7 +128,7 @@ class BirdRunner:
                             raise EvalAbortedError(
                                 "Aborting: 3 consecutive turn timeouts.",
                                 consecutive_timeouts,
-                            )
+                            ) from exc
                     except Exception as e:
                         if "context" in str(e).lower():
                             status = TaskStatus.AGENT_CONTEXT_LIMIT

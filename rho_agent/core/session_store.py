@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from .agent import Agent
 from .config import AgentConfig
@@ -96,7 +95,7 @@ class SessionStore:
         meta = {
             "model": agent.config.model,
             "status": "running",
-            "started_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": datetime.now(UTC).isoformat(),
         }
         (session_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
@@ -186,7 +185,7 @@ class SessionStore:
             sid = session_dir.name
             status = "completed"
             created_at = datetime.fromtimestamp(
-                session_dir.stat().st_mtime, tz=timezone.utc
+                session_dir.stat().st_mtime, tz=UTC
             ).isoformat()
             model = ""
             profile = ""

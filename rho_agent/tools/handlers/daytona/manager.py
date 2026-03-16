@@ -7,7 +7,7 @@ and tears it down on session close.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from .backend import DaytonaBackend
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 class SandboxManager:
     """Manages a single Daytona sandbox for the duration of a session."""
 
-    _DEFAULT_ENV: dict[str, str] = {
+    _DEFAULT_ENV: ClassVar[dict[str, str]] = {
         "PATH": "/home/daytona/.local/bin:/usr/local/bin:/usr/bin:/bin",
     }
 

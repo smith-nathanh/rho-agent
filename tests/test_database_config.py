@@ -1,15 +1,11 @@
 """Tests for multi-database configuration."""
 
-import os
-import tempfile
-from pathlib import Path
 
 import pytest
 
 from rho_agent.tools.handlers.database_config import (
-    DatabaseConfig,
-    load_database_config,
     _interpolate_env_vars,
+    load_database_config,
 )
 
 
@@ -208,7 +204,7 @@ databases:
     user: test
     password: test
 """)
-        with pytest.raises(ValueError, match="unsupported fields.*port"):
+        with pytest.raises(ValueError, match=r"unsupported fields.*port"):
             load_database_config(str(config_file))
 
     def test_oracle_with_host_raises(self, tmp_path):
@@ -223,7 +219,7 @@ databases:
     user: test
     password: test
 """)
-        with pytest.raises(ValueError, match="unsupported fields.*host"):
+        with pytest.raises(ValueError, match=r"unsupported fields.*host"):
             load_database_config(str(config_file))
 
     def test_sqlite_with_host_raises(self, tmp_path):
@@ -240,7 +236,7 @@ databases:
     path: {test_db}
     host: localhost
 """)
-        with pytest.raises(ValueError, match="unsupported fields.*host"):
+        with pytest.raises(ValueError, match=r"unsupported fields.*host"):
             load_database_config(str(config_file))
 
     def test_sqlite_nonexistent_path_raises(self, tmp_path):

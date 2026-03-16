@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from rho_agent.tools.base import ToolHandler, ToolInvocation, ToolOutput
-from rho_agent.tools.handlers.database import format_rows, DEFAULT_ROW_LIMIT
+from rho_agent.tools.handlers.database import DEFAULT_ROW_LIMIT, format_rows
 
 # Per-query timeout for agent exploration queries (seconds).
 _QUERY_TIMEOUT = 30

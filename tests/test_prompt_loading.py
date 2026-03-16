@@ -7,7 +7,6 @@ import pytest
 from rho_agent.prompts.loader import Prompt, PromptVariable, parse_frontmatter
 from rho_agent.prompts.renderer import prepare_prompt, render_string
 
-
 # --- parse_frontmatter ---
 
 

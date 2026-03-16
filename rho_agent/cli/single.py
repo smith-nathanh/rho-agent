@@ -10,14 +10,13 @@ from time import monotonic
 
 from ..core.events import AgentEvent
 from ..core.session import Session
-from .theme import THEME
 from .events import handle_event
 from .formatting import (
     _is_interactive_terminal,
     _markup,
 )
 from .state import RENDER_MARKDOWN, console
-
+from .theme import THEME
 
 _UPLOAD_BATCH_SIZE = 100
 
@@ -177,7 +176,7 @@ async def run_single(
                 pending_text_chunks=pending_text_chunks,
             )
 
-        result = await session.run(prompt, on_event=on_event)
+        await session.run(prompt, on_event=on_event)
 
         if status_ctx:
             status_ctx.__exit__(None, None, None)
@@ -281,7 +280,7 @@ async def run_single_with_output(
             if event.type == "text" and event.content:
                 collected_text.append(event.content)
 
-        result = await session.run(prompt, on_event=on_event)
+        await session.run(prompt, on_event=on_event)
 
         if status_ctx:
             status_ctx.__exit__(None, None, None)

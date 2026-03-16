@@ -33,11 +33,11 @@ class LiteLLMClient:
             import litellm
 
             self._litellm = litellm
-        except ImportError:
+        except ImportError as err:
             raise ImportError(
                 "litellm is required for LiteLLMClient. "
                 "Install with: uv pip install rho-agent[evals]"
-            )
+            ) from err
 
         self._model = model
         self._api_key = api_key
@@ -214,7 +214,7 @@ class LiteLLMClient:
             # Emit done with usage
             yield StreamEvent(type="done", usage=usage)
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             yield StreamEvent(
                 type="error",
                 content=f"Chunk timeout: no response received for {self._chunk_timeout}s",

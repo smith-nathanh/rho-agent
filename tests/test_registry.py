@@ -9,7 +9,6 @@ import pytest
 from rho_agent.tools.base import ToolHandler, ToolInvocation, ToolOutput
 from rho_agent.tools.registry import ToolRegistry, _coerce_arguments
 
-
 # --- Inline stub handler ---
 
 

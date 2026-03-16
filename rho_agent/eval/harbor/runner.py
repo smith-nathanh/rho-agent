@@ -11,11 +11,11 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from rho_agent.permissions import PermissionProfile
 from rho_agent.client.litellm_client import LiteLLMClient
 from rho_agent.core import Agent, AgentConfig, Session
 from rho_agent.core.events import AgentEvent
 from rho_agent.eval.harbor.trajectory import TrajectoryBuilder
+from rho_agent.permissions import PermissionProfile
 from rho_agent.prompts import load_prompt, prepare_prompt
 
 # Load .env file - try multiple locations
@@ -138,8 +138,10 @@ async def run_reviewer_phase(
         # Run actor revision turn and collect events for next review
         revision_events: list[AgentEvent] = []
 
-        async def collect_revision(event: AgentEvent) -> None:
-            revision_events.append(event)
+        async def collect_revision(
+            event: AgentEvent, _events: list[AgentEvent] = revision_events
+        ) -> None:
+            _events.append(event)
             if event.type == "text" and event.content:
                 print(event.content, end="", flush=True)
             elif event.type == "tool_start":
@@ -325,7 +327,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
             return text_content
 
         # Run initial actor turn
-        last_text = await run_turn(instruction)
+        await run_turn(instruction)
 
         # Completion confirmation gate (Terminus-style)
         enable_confirm = os.environ.get("RHO_AGENT_CONFIRM_DONE", "1") == "1"

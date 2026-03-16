@@ -56,7 +56,7 @@ def get_completed_indices(output_dir: Path | str) -> set[int]:
         return set()
 
     indices = set()
-    with open(runs_path, "r", encoding="utf-8") as f:
+    with open(runs_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -121,7 +121,7 @@ def rebuild_metrics_from_runs(output_dir: Path | str) -> BirdMetrics:
     runs_path = Path(output_dir) / "runs.jsonl"
     metrics = BirdMetrics()
 
-    with open(runs_path, "r", encoding="utf-8") as f:
+    with open(runs_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:

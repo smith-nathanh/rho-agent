@@ -58,8 +58,8 @@ class Agent:
 
     def _build_daytona_registry(self, profile: Any) -> ToolRegistry:
         """Build registry with Daytona remote handlers for shell/file tools."""
-        from ..tools.handlers.daytona import DaytonaBackend, register_daytona_tools
         from ..permissions.factory import ToolFactory
+        from ..tools.handlers.daytona import DaytonaBackend, register_daytona_tools
 
         registry = ToolRegistry()
         working_dir = self._config.working_dir or profile.shell_working_dir or "/home/daytona"

@@ -5,8 +5,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from .database_config import DatabaseConfig
 from .database import DatabaseHandler
+from .database_config import DatabaseConfig
 
 
 def _quote_pragma_arg(name: str) -> str:

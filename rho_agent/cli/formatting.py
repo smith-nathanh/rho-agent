@@ -5,13 +5,12 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from rich.markup import escape
 
-from .theme import THEME
-from .state import MARKDOWN_THEME, console, settings
+from .state import console, settings
 
 
 def _markup(text: str, color: str) -> str:
@@ -86,7 +85,7 @@ def _format_token_count(tokens: int) -> str:
 
 def _format_elapsed(started_at: datetime, ended_at: datetime | None = None) -> str:
     """Format the elapsed time between two datetimes as a compact string."""
-    end = ended_at or datetime.now(timezone.utc)
+    end = ended_at or datetime.now(UTC)
     elapsed = end - started_at
     secs = int(elapsed.total_seconds())
     if secs < 60:

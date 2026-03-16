@@ -19,10 +19,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from ..permissions import PermissionProfile, ShellMode
-from ..permissions.factory import load_profile
 from ..core import Agent, AgentConfig, Session, SessionStore
-from .theme import THEME
+from ..permissions import ShellMode
+from ..permissions.factory import load_profile
 from .errors import (
     InvalidModeError,
     InvalidProfileError,
@@ -44,7 +43,7 @@ from .state import (
     console,
     settings,
 )
-
+from .theme import THEME
 
 SESSIONS_DIR = CONFIG_DIR / "sessions"
 
@@ -57,7 +56,7 @@ def _resolve_daytona_config(
     snapshot: str | None,
     upload: list[str] | None,
     working_dir: str | None,
-) -> tuple["DaytonaBackend", list[tuple[str, str]], str, list[str]]:
+) -> tuple[DaytonaBackend, list[tuple[str, str]], str, list[str]]:
     """Resolve Daytona sandbox configuration from .rho-agent.toml + CLI overrides.
 
     Returns (DaytonaBackend, upload_mappings, working_dir, setup_commands).
@@ -358,10 +357,10 @@ def main(
                 # User explicitly set --model, use it as override
                 override_config = AgentConfig(model=model)
             resumed_session = session_store.resume(resume, agent_config=override_config)
-        except FileNotFoundError:
+        except FileNotFoundError as err:
             console.print(_markup(f"Session not found: {resume}", THEME.error))
             console.print(_markup("Use --list to see saved sessions.", THEME.muted))
-            raise typer.Exit(1)
+            raise typer.Exit(1) from err
 
     # Resolve working directory — skip local resolution for remote backends
     # (macOS resolves /home → /System/Volumes/Data/home which breaks remote paths)
@@ -421,14 +420,14 @@ def main(
         if shell_mode:
             try:
                 capability_profile.shell = ShellMode(shell_mode)
-            except ValueError:
+            except ValueError as err:
                 console.print(
                     _markup(
                         str(InvalidModeError("shell mode", shell_mode, "restricted, unrestricted")),
                         THEME.error,
                     )
                 )
-                raise typer.Exit(1)
+                raise typer.Exit(1) from err
 
         # Resolve system prompt
         system_prompt_text: str = ""

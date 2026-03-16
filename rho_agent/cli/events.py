@@ -9,7 +9,6 @@ from rich.markup import escape
 from rich.panel import Panel
 
 from ..core.events import AgentEvent
-from .theme import THEME
 from .formatting import (
     TokenStatus,
     _format_tool_preview,
@@ -18,6 +17,7 @@ from .formatting import (
     _markup,
 )
 from .state import MARKDOWN_THEME, console
+from .theme import THEME
 
 
 class ApprovalHandler:

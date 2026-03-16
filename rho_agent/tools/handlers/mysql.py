@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .database_config import DatabaseConfig
 from .database import DatabaseHandler
+from .database_config import DatabaseConfig
 
 # Check for mysql-connector-python availability
 try:
     import mysql.connector
-    from mysql.connector import Error as MySQLError
 
     MYSQL_AVAILABLE = True
 except ImportError:

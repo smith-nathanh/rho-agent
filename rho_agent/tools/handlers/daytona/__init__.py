@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ...registry import ToolRegistry
@@ -19,20 +19,20 @@ from .write import DaytonaWriteHandler
 
 __all__ = [
     "DaytonaBackend",
-    "SandboxManager",
     "DaytonaBashHandler",
-    "DaytonaReadHandler",
-    "DaytonaWriteHandler",
     "DaytonaEditHandler",
     "DaytonaGlobHandler",
     "DaytonaGrepHandler",
     "DaytonaListHandler",
+    "DaytonaReadHandler",
+    "DaytonaWriteHandler",
+    "SandboxManager",
     "register_daytona_tools",
 ]
 
 
 def register_daytona_tools(
-    registry: "ToolRegistry",
+    registry: ToolRegistry,
     working_dir: str,
     backend: DaytonaBackend | None = None,
 ) -> SandboxManager:

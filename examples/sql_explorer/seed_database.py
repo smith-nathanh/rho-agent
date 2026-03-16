@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate sample SQLite database for the demo."""
 
-import sqlite3
 import random
+import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 

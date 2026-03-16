@@ -151,7 +151,7 @@ class ReadHandler(ToolHandler):
             output_lines = []
             total_lines = 0
 
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
+            with open(path, encoding="utf-8", errors="replace") as f:
                 for line_no, line in enumerate(f, start=1):
                     total_lines = line_no
                     if line_no < start_line:

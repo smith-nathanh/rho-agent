@@ -12,15 +12,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from rho_agent.tools.base import ToolInvocation
-from rho_agent.tools.handlers.daytona.manager import SandboxManager
 from rho_agent.tools.handlers.daytona.bash import DaytonaBashHandler
-from rho_agent.tools.handlers.daytona.read import DaytonaReadHandler
-from rho_agent.tools.handlers.daytona.write import DaytonaWriteHandler
 from rho_agent.tools.handlers.daytona.edit import DaytonaEditHandler
 from rho_agent.tools.handlers.daytona.glob import DaytonaGlobHandler
 from rho_agent.tools.handlers.daytona.grep import DaytonaGrepHandler
 from rho_agent.tools.handlers.daytona.list import DaytonaListHandler
-
+from rho_agent.tools.handlers.daytona.manager import SandboxManager
+from rho_agent.tools.handlers.daytona.read import DaytonaReadHandler
+from rho_agent.tools.handlers.daytona.write import DaytonaWriteHandler
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -283,7 +282,6 @@ class TestDaytonaReadHandler:
         assert h.name == "read"
 
     async def test_read_file(self, manager, sandbox):
-        file_content = "line one\nline two\nline three\n"
         # sed output + wc -l output
         sandbox.process.exec.return_value = _make_exec_response(
             "line one\nline two\nline three\n3", 0

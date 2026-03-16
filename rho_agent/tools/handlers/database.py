@@ -8,10 +8,9 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any
 
-from .database_config import DatabaseConfig
 from ..base import ToolHandler, ToolInvocation, ToolOutput
+from .database_config import DatabaseConfig
 from .paths import is_path_sensitive
-
 
 # SQL patterns that indicate write operations (case-insensitive)
 MUTATION_PATTERNS = [
@@ -266,7 +265,7 @@ class DatabaseHandler(ToolHandler):
             nullable = col[2] if len(col) > 2 else "Y"
 
             null_str = "NULL" if nullable in ("Y", "YES", 1, True, None) else "NOT NULL"
-            lines.append(f"  {str(name):30} {str(dtype):20} {null_str}")
+            lines.append(f"  {name!s:30} {dtype!s:20} {null_str}")
 
         if extra_info:
             if extra_info.get("primary_key"):
@@ -396,7 +395,7 @@ class DatabaseHandler(ToolHandler):
             return ToolOutput(content="No table_name provided", success=False)
 
         sql, params = self._get_describe_sql(table_name, schema)
-        columns, rows = self._execute_query(db_alias, sql, params)
+        _columns, rows = self._execute_query(db_alias, sql, params)
 
         if not rows:
             return ToolOutput(content=f"Table not found: {table_name}", success=False)

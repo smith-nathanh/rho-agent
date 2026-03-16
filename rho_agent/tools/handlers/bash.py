@@ -196,7 +196,7 @@ def extract_base_command(command: str) -> str | None:
 
     # Handle env vars at start (VAR=value cmd)
     parts = command.split()
-    for i, part in enumerate(parts):
+    for _i, part in enumerate(parts):
         if "=" not in part:
             return part
 
@@ -359,7 +359,7 @@ class BashHandler(ToolHandler):
                 process.kill()
                 await process.wait()
                 raise
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 duration = time.perf_counter() - start_time
 
                 # Capture partial output before killing
@@ -370,14 +370,14 @@ class BashHandler(ToolHandler):
                         partial_stdout = await asyncio.wait_for(
                             process.stdout.read(50000), timeout=2.0
                         )
-                except (asyncio.TimeoutError, Exception):
+                except (TimeoutError, Exception):
                     pass
                 try:
                     if process.stderr:
                         partial_stderr = await asyncio.wait_for(
                             process.stderr.read(50000), timeout=2.0
                         )
-                except (asyncio.TimeoutError, Exception):
+                except (TimeoutError, Exception):
                     pass
 
                 process.kill()

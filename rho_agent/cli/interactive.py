@@ -18,9 +18,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from ..core.events import AgentEvent
 from ..core.session import Session
 from ..core.session_store import SessionStore
-from .theme import THEME
 from .completion import create_completer
-from .errors import InvalidProfileError
 from .events import ApprovalHandler, handle_command, handle_event
 from .formatting import (
     TokenStatus,
@@ -29,8 +27,9 @@ from .formatting import (
     _markup,
     _sync_token_status_from_state,
 )
-from .state import CONFIG_DIR, HISTORY_FILE, RENDER_MARKDOWN, console
 from .single import upload_to_sandbox
+from .state import CONFIG_DIR, HISTORY_FILE, RENDER_MARKDOWN, console
+from .theme import THEME
 
 
 class InteractiveSession:
@@ -228,7 +227,7 @@ class InteractiveSession:
                     pending_text_chunks=pending_text_chunks,
                 )
 
-            result = await self.session.run(user_input, on_event=on_event)
+            await self.session.run(user_input, on_event=on_event)
 
             if status_ctx:
                 status_ctx.__exit__(None, None, None)

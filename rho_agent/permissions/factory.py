@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-
 from typing import Any
 
 from ..tools.handlers.database_config import (
@@ -13,9 +12,9 @@ from ..tools.handlers.database_config import (
 )
 from ..tools.registry import ToolRegistry
 from . import (
-    PermissionProfile,
     DatabaseMode,
     FileWriteMode,
+    PermissionProfile,
     ShellMode,
 )
 
@@ -75,10 +74,10 @@ class ToolFactory:
 
     def _register_core_tools(self, registry: ToolRegistry) -> None:
         """Register tools that are always available."""
-        from ..tools.handlers.read import ReadHandler
         from ..tools.handlers.glob import GlobHandler
         from ..tools.handlers.grep import GrepHandler
         from ..tools.handlers.list import ListHandler
+        from ..tools.handlers.read import ReadHandler
 
         registry.register(ReadHandler())
         registry.register(GlobHandler())
@@ -109,8 +108,8 @@ class ToolFactory:
 
     def _register_write_tools(self, registry: ToolRegistry) -> None:
         """Register write and edit tools if enabled."""
-        from ..tools.handlers.write import WriteHandler
         from ..tools.handlers.edit import EditHandler
+        from ..tools.handlers.write import WriteHandler
 
         if self.profile.file_write == FileWriteMode.OFF:
             return

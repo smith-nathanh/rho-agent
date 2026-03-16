@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from ..core.session_store import SessionStore
-from .theme import THEME
 from .formatting import _format_elapsed, _markup
 from .state import app, console
+from .theme import THEME
 
 
 @app.command()
@@ -33,7 +33,7 @@ def ps(
         console.print("[dim]No sessions found[/dim]")
         raise typer.Exit(0)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for info in sessions:
         try:
             started = datetime.fromisoformat(info.created_at)
