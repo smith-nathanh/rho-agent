@@ -6,6 +6,7 @@ import typer
 
 # Import birdbench command
 from .birdbench.cli import bird
+from .harbor.cli import app as harbor_app
 
 app = typer.Typer(
     name="rho-eval",
@@ -21,6 +22,7 @@ def main() -> None:
 
 # Register commands
 app.command(name="bird")(bird)
+app.add_typer(harbor_app, name="harbor")
 
 if __name__ == "__main__":
     app()

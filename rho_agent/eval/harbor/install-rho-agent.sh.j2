@@ -5,28 +5,7 @@ echo "Installing rho-agent..."
 
 # Install system dependencies
 apt-get update
-apt-get install -y curl git
-
-# Clone rho-agent repository
-cd /
-if [ -d "/rho-agent" ]; then
-    echo "rho-agent directory already exists, pulling latest..."
-    cd /rho-agent && git fetch origin && git reset --hard origin/main
-else
-    echo "Cloning rho-agent repository..."
-    {% if repo_url %}
-    git clone {{ repo_url }} /rho-agent
-    {% else %}
-    git clone https://github.com/smith-nathanh/rho-agent.git /rho-agent
-    {% endif %}
-fi
-
-cd /rho-agent
-
-{% if version %}
-echo "Checking out version: {{ version }}"
-git checkout {{ version }}
-{% endif %}
+apt-get install -y curl git python3 python3-venv
 
 # Install uv if not available
 if ! command -v uv &> /dev/null; then
@@ -37,8 +16,27 @@ fi
 # Add uv to PATH for current session
 export PATH="$HOME/.local/bin:$PATH"
 
-# Sync dependencies with evals extra (includes LiteLLM)
-echo "Syncing rho-agent dependencies..."
-uv sync --extra evals
+VENV_PATH="{{ venv_path }}"
+rm -rf "${VENV_PATH}"
+uv venv "${VENV_PATH}"
+
+if [ "{{ install_source }}" = "git" ]; then
+    echo "Installing rho-agent from git checkout..."
+    rm -rf /rho-agent-src
+    git clone {{ repo_url }} /rho-agent-src
+    cd /rho-agent-src
+{% if version %}
+    echo "Checking out git ref: {{ version }}"
+    git checkout {{ version }}
+{% endif %}
+    uv pip install --python "${VENV_PATH}/bin/python" ".[evals]"
+else
+    echo "Installing rho-agent from PyPI..."
+{% if version %}
+    uv pip install --python "${VENV_PATH}/bin/python" "rho-agent[evals]=={{ version }}"
+{% else %}
+    uv pip install --python "${VENV_PATH}/bin/python" "rho-agent[evals]"
+{% endif %}
+fi
 
 echo "rho-agent installation complete!"

@@ -6,7 +6,7 @@ order: 3
 
 ## Requirements
 
-- Python 3.13+
+- Python 3.11+
 - `uv` (recommended)
 
 ## Install the CLI (recommended for command-line use)

@@ -41,7 +41,7 @@ def cli() -> None:
         _continuum_registered = True
 
     args = sys.argv[1:]
-    subcommands = {"main", "dashboard", "monitor", "ps", "cancel", "conduct", "export", "continuum"}
+    subcommands = {"main", "monitor", "ps", "cancel", "export", "continuum"}
 
     if not args or args[0] not in subcommands:
         args = ["main", *args]

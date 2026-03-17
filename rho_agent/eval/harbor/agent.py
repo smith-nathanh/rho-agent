@@ -6,17 +6,20 @@ import json
 import logging
 import os
 import shlex
+from importlib import metadata
 from pathlib import Path
 
 from harbor.agents.installed.base import BaseInstalledAgent, ExecInput
 from harbor.models.agent.context import AgentContext
+
+_CONTAINER_VENV = "/opt/rho-agent-venv"
 
 
 class RhoAgent(BaseInstalledAgent):
     """Runs rho-agent inside Harbor's container environment.
 
     This agent wrapper:
-    1. Installs rho-agent from git in the container during setup
+    1. Installs rho-agent in the container during setup
     2. Runs the rho_agent.eval.harbor.runner module with the task instruction
     3. Returns results for Harbor's verification system
 
@@ -27,13 +30,15 @@ class RhoAgent(BaseInstalledAgent):
     # Harbor agent interface
     SUPPORTS_ATIF: bool = True
 
-    RHO_AGENT_REPO = "https://github.com/smith-nathanh/rho-agent.git"
+    DEFAULT_REPO_URL = "https://github.com/smith-nathanh/rho-agent.git"
 
     def __init__(
         self,
         logs_dir: Path,
         model_name: str | None = None,
         logger: logging.Logger | None = None,
+        install_source: str = "pypi",
+        repo_url: str | None = None,
         bash_only: bool = False,
         enable_reviewer: bool = False,
         reviewer_max_iterations: int = 1,
@@ -51,6 +56,8 @@ class RhoAgent(BaseInstalledAgent):
             logs_dir: Directory to write agent logs to.
             model_name: Model to use (e.g., "openai/gpt-5-mini").
             logger: Logger instance.
+            install_source: How to install rho-agent in the task container: "pypi" or "git".
+            repo_url: Optional git repository URL used when install_source="git".
             bash_only: If True, only provide bash tool (no Read, Grep, etc.).
             enable_reviewer: If True, run post-execution review after actor completes.
             reviewer_max_iterations: Max review-revise loops (0 = review only, no revision).
@@ -60,7 +67,17 @@ class RhoAgent(BaseInstalledAgent):
             reasoning_effort: Reasoning effort level: "low", "medium", "high" (default: None).
             cost_ceiling_usd: Max cost per task in USD, 0 = disabled (default: 0.0).
         """
+        normalized_install_source = install_source.strip().lower()
+        if normalized_install_source not in {"pypi", "git"}:
+            raise ValueError(
+                "install_source must be 'pypi' or 'git', "
+                f"got {install_source!r}"
+            )
+
+        logger = logger or logging.getLogger(__name__)
         super().__init__(logs_dir, *args, model_name=model_name, logger=logger, **kwargs)
+        self._install_source = normalized_install_source
+        self._repo_url = repo_url or self.DEFAULT_REPO_URL
         self._bash_only = bash_only
         self._enable_reviewer = enable_reviewer
         self._reviewer_max_iterations = reviewer_max_iterations
@@ -77,7 +94,19 @@ class RhoAgent(BaseInstalledAgent):
 
     def version(self) -> str | None:
         """Return the agent version."""
-        return self._version or "latest"
+        if self._version:
+            return self._version
+        try:
+            return metadata.version("rho-agent")
+        except metadata.PackageNotFoundError:
+            return None
+
+    def get_version_command(self) -> str:
+        """Return a command that prints the installed rho-agent version in the container."""
+        return (
+            f"{_CONTAINER_VENV}/bin/python -c "
+            "\"import importlib.metadata; print(importlib.metadata.version('rho-agent'))\""
+        )
 
     @property
     def _install_agent_template_path(self) -> Path:
@@ -87,7 +116,11 @@ class RhoAgent(BaseInstalledAgent):
     @property
     def _template_variables(self) -> dict[str, str]:
         """Variables to pass to the install script template."""
-        variables = {"repo_url": self.RHO_AGENT_REPO}
+        variables = {
+            "install_source": self._install_source,
+            "repo_url": self._repo_url,
+            "venv_path": _CONTAINER_VENV,
+        }
         if self._version:
             variables["version"] = self._version
         return variables
@@ -202,14 +235,12 @@ class RhoAgent(BaseInstalledAgent):
         escaped = shlex.quote(instruction)
 
         # Build the run command
-        # Source .env for any additional config, then run the runner module
-        # Use tee to stream output to mounted logs (survives timeout)
-        # Note: .env may not exist (gitignored), so use || true to prevent chain failure
+        # Use tee to stream output to mounted logs (survives timeout).
         bash_only_flag = " --bash-only" if self._bash_only else ""
         cmd = (
-            f"set -a; [ -f /rho-agent/.env ] && source /rho-agent/.env || true; set +a; "
             f'export PATH="$HOME/.local/bin:$PATH"; '
-            f'/rho-agent/.venv/bin/python -B -m rho_agent.eval.harbor.runner {escaped} "$(pwd)"{bash_only_flag} '
+            f'{_CONTAINER_VENV}/bin/python -B -m rho_agent.eval.harbor.runner '
+            f'{escaped} "$(pwd)"{bash_only_flag} '
             f"2>&1 | tee /logs/agent/stdout.txt"
         )
 

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from rho_agent.prompts.loader import Prompt, PromptVariable, parse_frontmatter
+from rho_agent.prompts.loader import Prompt, PromptVariable, load_prompt, parse_frontmatter
 from rho_agent.prompts.renderer import prepare_prompt, render_string
 
 # --- parse_frontmatter ---
@@ -72,3 +74,20 @@ def test_render_string_undefined_variable_renders_empty():
     """Jinja2 default Undefined is permissive — undefined vars render as empty."""
     result = render_string("Hello, {{ missing }}!", {})
     assert "missing" not in result
+
+
+def test_eval_reviewer_prompt_loads_and_renders():
+    prompt = load_prompt(Path("rho_agent/prompts/eval_reviewer.md"))
+
+    system, _ = prepare_prompt(
+        prompt,
+        {
+            "task_instruction": "Fix the failing test and verify it passes.",
+            "agent_trace": "[Tool Call: bash]\npytest\n[Tool Result: bash]\n1 passed",
+        },
+    )
+
+    assert prompt.description
+    assert [var.name for var in prompt.variables] == ["task_instruction", "agent_trace"]
+    assert "Fix the failing test" in system
+    assert "REVISION_NEEDED:" in system

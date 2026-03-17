@@ -1,22 +1,25 @@
 [project]
 name = "rho-agent"
 version = "0.1.0"
-description = "An agent harness and CLI with readonly and developer modes."
+description = "AI agent CLI and SDK with permission profiles, tools, and session control."
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 license = "MIT"
-keywords = ["agent", "cli", "developer-tools", "ops", "research"]
+keywords = ["ai", "agent", "agents", "automation", "cli", "developer-tools", "llm", "terminal"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development",
     "Topic :: System :: Systems Administration",
     "Topic :: Utilities",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
@@ -54,43 +57,17 @@ db-oracle = ["oracledb>=3.4.1"]
 db-vertica = ["vertica-python>=1.4.0"]
 db = ["rho-agent[db-postgres,db-mysql,db-oracle,db-vertica]"]
 
-# Dashboard (Streamlit + pandas)
-dashboard = ["streamlit>=1.40", "pandas>=2.0"]
-
 # Excel file support
 excel = ["openpyxl>=3.1.0"]
 
-# Harbor integration for TerminalBench evaluation
-# Install harbor from: https://github.com/laude-institute/harbor
-harbor = []  # Harbor is installed separately via pip install -e ~/proj/harbor
-
 # Eval dependencies (LiteLLM for multi-provider support and cost tracking)
 evals = ["litellm>=1.50.0"]
-
-# Observability dependencies
-observability = [
-    "opentelemetry-api>=1.20.0",
-    "opentelemetry-sdk>=1.20.0",
-]
-
-# Observability: PostgreSQL backend (multi-user, multi-node)
-obs-postgres = ["psycopg[binary,pool]>=3.3.2"]  # adds connection pooling on top of db-postgres
-
-# Optional: OTLP export to external backends (Jaeger, Datadog, etc.)
-otlp = [
-    "opentelemetry-exporter-otlp>=1.20.0",
-]
-
-# Optional: Redis for real-time session tracking
-redis = [
-    "redis>=5.0.0",
-]
 
 # Optional: Daytona cloud sandbox integration
 daytona = ["daytona>=0.1.0"]
 
 # Everything
-all = ["rho-agent[db,dashboard,excel,daytona,observability,obs-postgres,otlp,redis,evals]"]
+all = ["rho-agent[db,excel,daytona,evals]"]
 
 [dependency-groups]
 dev = [
@@ -108,7 +85,7 @@ addopts = "-ra"
 
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+target-version = "py311"
 exclude = [
     ".git",
     ".venv",

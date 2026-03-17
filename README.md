@@ -23,7 +23,7 @@ rho-agent --profile developer --working-dir ~/proj/myapp
 > now run the tests and make sure it passes
 
 # Investigate a production database interactively
-POSTGRES_HOST=db.internal rho-agent --profile readonly
+RHO_AGENT_DB_CONFIG=~/.config/rho-agent/databases.yaml rho-agent --profile readonly
 > correlate the 3am latency spike with recent deployments and slow queries
 > which tables are missing indexes?
 
@@ -32,10 +32,10 @@ rho-agent --profile developer --working-dir ~/proj/myapp \
   "migrate sync_client.py to async using aiohttp, update all callers, run tests"
 
 # Triage a failed job using a prompt template
-rho-agent --prompt examples/job-failure.md --var cluster=prod --var log_path=/mnt/logs/12345
+rho-agent --prompt examples/log_debugger/debug.md --var log_path=/mnt/logs/12345
 
 # Use a saved agent config
-rho-agent --config configs/research-assistant.yaml "Analyze recent failures."
+rho-agent --config /path/to/agent.yaml "Analyze recent failures."
 ```
 
 ## Python API
@@ -130,4 +130,4 @@ OPENAI_MODEL=gpt-5-mini                   # optional
 OPENAI_BASE_URL=http://localhost:8000/v1   # optional
 ```
 
-Database tools activate automatically when their environment variables are set (e.g. `SQLITE_DB`, `POSTGRES_HOST`). See [Tools](docs/site/tools.md) for the full list.
+Database tools are loaded from `~/.config/rho-agent/databases.yaml` or the path in `RHO_AGENT_DB_CONFIG`. See [Tools](docs/site/tools.md) for the config format.
