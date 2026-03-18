@@ -130,4 +130,18 @@ OPENAI_MODEL=gpt-5-mini                   # optional
 OPENAI_BASE_URL=http://localhost:8000/v1   # optional
 ```
 
+To make these available to child processes like `rho-agent` and `harbor`, export them before running commands:
+
+```bash
+set -a
+source .env
+set +a
+```
+
+Or export them directly:
+
+```bash
+export OPENAI_API_KEY=your-key
+```
+
 Database tools are loaded from `~/.config/rho-agent/databases.yaml` or the path in `RHO_AGENT_DB_CONFIG`. See [Tools](docs/site/tools.md) for the config format.

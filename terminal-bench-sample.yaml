@@ -1,0 +1,43 @@
+# Harbor job configuration for rho-agent on Terminal-Bench sample (10 tasks)
+#
+# Run with:
+#   rho-eval harbor write-config terminal-bench-sample --output ./terminal-bench-sample.yaml
+#   harbor run --config ./terminal-bench-sample.yaml
+
+jobs_dir: ./jobs/rho-agent-terminal-bench
+n_attempts: 1
+timeout_multiplier: 1.0
+
+orchestrator:
+  type: local
+  n_concurrent_trials: 4
+  quiet: false
+
+environment:
+  type: docker
+  force_build: false
+  delete: false  # Keep images/containers around for easier debugging on sample runs
+  override_gpus: 0  # We use API, no local GPU needed
+
+agents:
+  - import_path: rho_agent.eval.harbor.agent:RhoAgent
+    model_name: openai/gpt-5.4
+    version: main
+    kwargs:
+      install_source: git
+      repo_url: https://github.com/smith-nathanh/rho-agent.git
+      bash_only: true              # If true, only provide bash tool (no Read, Grep, etc.)
+      enable_reviewer: false       # If true, run post-execution review after actor completes
+      reviewer_max_iterations: 1   # Max review-revise loops (0 = review only, no revision)
+      enable_confirm_done: false   # If true, require explicit CONFIRM_DONE after actor completes
+      confirm_done_max: 3          # Max confirm retries before proceeding
+#      temperature: 0.0             # Model temperature (0.0 for deterministic eval)
+      reasoning_effort: high       # Reasoning effort: "low", "medium", "high"
+      cost_ceiling_usd: 2.00       # Max cost per task in USD (None for no limit)
+
+datasets:
+  - name: terminal-bench-sample
+    version: "2.0"
+    registry: {}
+    exclude_task_names:
+      - "qemu-*"  # QEMU tasks fail on ARM Macs (Rosetta cannot emulate nested x86 VMs)

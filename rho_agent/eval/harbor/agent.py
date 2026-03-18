@@ -15,6 +15,18 @@ from harbor.models.agent.context import AgentContext
 _CONTAINER_VENV = "/opt/rho-agent-venv"
 
 
+def _normalize_model_for_comparison(model: str | None) -> str | None:
+    """Return a minimal normalized form for conflict detection."""
+    if model is None:
+        return None
+    normalized = model.strip()
+    if not normalized:
+        return None
+    if normalized.count("/") == 1:
+        _, normalized = normalized.split("/", 1)
+    return normalized
+
+
 class RhoAgent(BaseInstalledAgent):
     """Runs rho-agent inside Harbor's container environment.
 
@@ -173,20 +185,45 @@ class RhoAgent(BaseInstalledAgent):
 
     def create_run_agent_commands(self, instruction: str) -> list[ExecInput]:
         """Create commands to run rho-agent on the task."""
-        # Build environment variables
-        # Strip provider prefix from model name (e.g., "openai/gpt-5-mini" -> "gpt-5-mini")
-        model = (
-            os.environ.get("RHO_AGENT_MODEL")
-            or os.environ.get("OPENAI_MODEL")
-            or self.model_name
-            or "gpt-5-mini"
-        )
-        if "/" in model:
-            model = model.split("/", 1)[1]
+        raw_rho_agent_model = os.environ.get("RHO_AGENT_MODEL")
+        raw_openai_model = os.environ.get("OPENAI_MODEL")
+        raw_config_model = self.model_name
+
+        env_model = raw_rho_agent_model or raw_openai_model
+        env_source = "RHO_AGENT_MODEL" if raw_rho_agent_model else "OPENAI_MODEL"
+
+        normalized_env_model = _normalize_model_for_comparison(env_model)
+        normalized_config_model = _normalize_model_for_comparison(raw_config_model)
+
+        if (
+            normalized_env_model is not None
+            and normalized_config_model is not None
+            and normalized_env_model != normalized_config_model
+        ):
+            raise ValueError(
+                "Model conflict between Harbor config and environment: "
+                f"config model_name={raw_config_model!r}, "
+                f"{env_source}={env_model!r}. "
+                "Remove one source or make them match."
+            )
+
+        if env_model:
+            selected_model = env_model.strip()
+            selected_source = env_source
+        elif raw_config_model:
+            selected_model = raw_config_model.strip()
+            selected_source = "Harbor config"
+        else:
+            selected_model = "gpt-5-mini"
+            selected_source = "default"
+
+        effective_model = _normalize_model_for_comparison(selected_model)
+        if effective_model is None:
+            raise ValueError("Resolved model is empty after normalization")
 
         env = {
             "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", ""),
-            "RHO_AGENT_MODEL": model,
+            "RHO_AGENT_MODEL": selected_model,
             "RHO_AGENT_TELEMETRY_DB": "/logs/agent/telemetry.db",
         }
 
@@ -222,7 +259,17 @@ class RhoAgent(BaseInstalledAgent):
             env["RHO_AGENT_COST_CEILING_USD"] = str(self._cost_ceiling_usd)
 
         self.logger.info(
-            f"Running rho-agent with model: {model}, "
+            "Resolved Harbor model selection: "
+            f"source={selected_source}, "
+            f"selected={selected_model!r}, "
+            f"effective={effective_model!r}, "
+            f"config_model={raw_config_model!r}, "
+            f"RHO_AGENT_MODEL={raw_rho_agent_model!r}, "
+            f"OPENAI_MODEL={raw_openai_model!r}"
+        )
+        self.logger.info(
+            f"Running rho-agent with model: {selected_model}, "
+            f"effective_model: {effective_model}, "
             f"bash_only: {self._bash_only}, "
             f"reviewer: {self._enable_reviewer}, "
             f"confirm_done: {self._enable_confirm_done}, "

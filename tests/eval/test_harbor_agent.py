@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import sys
 import types
 from dataclasses import dataclass
@@ -110,13 +111,43 @@ def test_invalid_install_source_raises(harbor_agent_module) -> None:
 def test_run_command_uses_stable_container_venv(harbor_agent_module, monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("OPENAI_MODEL", "openai/gpt-5-mini")
-    agent = harbor_agent_module.RhoAgent(logs_dir=Path("/tmp/logs"), bash_only=True)
+    agent = harbor_agent_module.RhoAgent(
+        logs_dir=Path("/tmp/logs"),
+        bash_only=True,
+        logger=logging.getLogger("test"),
+    )
 
     [command] = agent.create_run_agent_commands("solve task")
 
     assert command.env is not None
     assert command.env["OPENAI_API_KEY"] == "sk-test"
-    assert command.env["RHO_AGENT_MODEL"] == "gpt-5-mini"
+    assert command.env["RHO_AGENT_MODEL"] == "openai/gpt-5-mini"
     assert "/opt/rho-agent-venv/bin/python -B -m rho_agent.eval.harbor.runner" in command.command
     assert "/rho-agent/.venv/bin/python" not in command.command
     assert "--bash-only" in command.command
+
+
+def test_model_conflict_raises(harbor_agent_module, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_MODEL", "openai/gpt-5.2")
+    agent = harbor_agent_module.RhoAgent(
+        logs_dir=Path("/tmp/logs"),
+        model_name="openai/gpt-5.4",
+        logger=logging.getLogger("test"),
+    )
+
+    with pytest.raises(ValueError, match="Model conflict"):
+        agent.create_run_agent_commands("solve task")
+
+
+def test_equivalent_model_names_do_not_conflict(harbor_agent_module, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-5.4")
+    agent = harbor_agent_module.RhoAgent(
+        logs_dir=Path("/tmp/logs"),
+        model_name="openai/gpt-5.4",
+        logger=logging.getLogger("test"),
+    )
+
+    [command] = agent.create_run_agent_commands("solve task")
+
+    assert command.env is not None
+    assert command.env["RHO_AGENT_MODEL"] == "gpt-5.4"

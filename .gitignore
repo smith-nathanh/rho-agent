@@ -21,6 +21,7 @@ wheels/
 !examples/**/*.md
 !docs/site/
 !docs/site/**/*.md
+jobs
 plans
 
 .rho_agent_history
