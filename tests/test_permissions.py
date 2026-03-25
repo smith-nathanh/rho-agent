@@ -24,15 +24,15 @@ def test_developer_profile_modes():
     assert p.file_write == FileWriteMode.FULL
 
 
-def test_eval_profile_modes():
-    p = PermissionProfile.eval()
+def test_unrestricted_profile_modes():
+    p = PermissionProfile.unrestricted()
     assert p.shell == ShellMode.UNRESTRICTED
     assert p.database == DatabaseMode.MUTATIONS
     assert p.approval == ApprovalMode.NONE
 
 
 def test_requires_approval_none_mode():
-    p = PermissionProfile.eval()
+    p = PermissionProfile.unrestricted()
     assert p.requires_tool_approval("bash") is False
     assert p.requires_tool_approval("write") is False
     assert p.requires_tool_approval("read") is False

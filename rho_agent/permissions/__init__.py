@@ -133,11 +133,11 @@ class PermissionProfile:
         )
 
     @classmethod
-    def eval(cls, working_dir: str = "/app") -> PermissionProfile:
-        """Evaluation profile for sandboxed containers - no restrictions."""
+    def unrestricted(cls, working_dir: str = "/app") -> PermissionProfile:
+        """Unrestricted profile - no approval gates, full access."""
         return cls(
-            name="eval",
-            description="Evaluation profile for sandboxed environments",
+            name="unrestricted",
+            description="Unrestricted profile for sandboxed and autonomous environments",
             shell=ShellMode.UNRESTRICTED,
             file_write=FileWriteMode.FULL,
             database=DatabaseMode.MUTATIONS,

@@ -8,7 +8,7 @@ rho-agent is a configurable AI agent for software development, debugging, and op
 
 ## Key capabilities
 
-**Permission profiles** control shell access, file write permissions, and database mutation behavior per agent. A `readonly` agent can safely inspect production systems. A `developer` agent can edit files and run arbitrary commands. An `eval` agent has unrestricted access for sandboxed benchmark execution. The **Daytona backend** (`--backend daytona`) routes shell and file tool execution to a remote cloud sandbox.
+**Permission profiles** control shell access, file write permissions, and database mutation behavior per agent. A `readonly` agent can safely inspect production systems. A `developer` agent can edit files and run arbitrary commands. An `unrestricted` agent has full access for sandboxed benchmark execution. The **Daytona backend** (`--backend daytona`) routes shell and file tool execution to a remote cloud sandbox.
 
 **Native tool handlers** give agents direct access to shells, files, databases (PostgreSQL, MySQL, Oracle, Vertica, SQLite), and Excel files — without relying on external plugins or MCP servers.
 

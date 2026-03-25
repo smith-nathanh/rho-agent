@@ -88,7 +88,7 @@ class DatabaseHandler(ToolHandler):
     for their specific database systems.
 
     By default, the handler operates in readonly mode, blocking mutation queries.
-    When readonly=False (for eval/sandbox scenarios), mutations are allowed.
+    When readonly=False (for unrestricted/sandbox scenarios), mutations are allowed.
 
     Multi-database support:
     - Pass `configs` list to support multiple databases of the same type

@@ -209,19 +209,19 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     else:
         context_window = 128_000  # conservative default
 
-    # Build agent with eval profile
+    # Build agent with unrestricted profile
     agent = Agent(
         AgentConfig(
             system_prompt=system_prompt,
             model=model,
-            profile="eval",
+            profile="unrestricted",
             working_dir=working_dir,
             auto_approve=True,
         )
     )
 
-    # Replace registry with eval-appropriate tools
-    profile = PermissionProfile.eval(working_dir=working_dir)
+    # Replace registry with unrestricted tools
+    profile = PermissionProfile.unrestricted(working_dir=working_dir)
     profile.bash_only = bash_only
     from rho_agent.permissions.factory import ToolFactory
 

@@ -23,7 +23,7 @@ wheels/
 !docs/site/**/*.md
 jobs
 plans
-
+research
 .rho_agent_history
 test_data.db
 results/

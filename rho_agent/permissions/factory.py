@@ -253,7 +253,7 @@ def load_profile(name_or_path: str) -> PermissionProfile:
     """Load a profile by name or path.
 
     Args:
-        name_or_path: Either a built-in profile name ('readonly', 'developer', 'eval')
+        name_or_path: Either a built-in profile name ('readonly', 'developer', 'unrestricted')
                      or a path to a YAML profile file.
 
     Returns:
@@ -267,7 +267,7 @@ def load_profile(name_or_path: str) -> PermissionProfile:
     builtins = {
         "readonly": PermissionProfile.readonly,
         "developer": PermissionProfile.developer,
-        "eval": PermissionProfile.eval,
+        "unrestricted": PermissionProfile.unrestricted,
     }
 
     if name_or_path in builtins:
@@ -291,5 +291,5 @@ def load_profile(name_or_path: str) -> PermissionProfile:
 
     raise ValueError(
         f"Unknown profile: {name_or_path}. "
-        f"Use 'readonly', 'developer', 'eval', or provide a path to a YAML file."
+        f"Use 'readonly', 'developer', 'unrestricted', or provide a path to a YAML file."
     )

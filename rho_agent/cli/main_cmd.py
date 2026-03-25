@@ -239,7 +239,7 @@ def main(
         str | None,
         typer.Option(
             "--profile",
-            help="Capability profile: 'readonly' (default), 'developer', 'eval', or path to YAML",
+            help="Capability profile: 'readonly' (default), 'developer', 'unrestricted', or path to YAML",
         ),
     ] = os.getenv("RHO_AGENT_PROFILE"),
     backend: Annotated[

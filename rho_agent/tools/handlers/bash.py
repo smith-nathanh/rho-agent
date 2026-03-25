@@ -260,7 +260,7 @@ class BashHandler(ToolHandler):
             DEFAULT_TIMEOUT_RESTRICTED if restricted else DEFAULT_TIMEOUT_UNRESTRICTED
         )
         # Default approval: not required for restricted (allowlist protects),
-        # required for unrestricted outside sandboxes (but factory overrides for eval)
+        # required for unrestricted outside sandboxes (but factory overrides for unrestricted profile)
         self._requires_approval = (
             requires_approval if requires_approval is not None else (not restricted)
         )
