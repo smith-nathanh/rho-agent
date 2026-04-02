@@ -28,11 +28,12 @@ from .single import run_single, run_single_with_output
 from .state import app
 
 _continuum_registered = False
+_evolve_registered = False
 
 
 def cli() -> None:
     """CLI entrypoint with `main` as the default command."""
-    global _continuum_registered
+    global _continuum_registered, _evolve_registered
 
     if not _continuum_registered:
         from ..continuum.cli import continuum as _continuum_fn
@@ -40,8 +41,14 @@ def cli() -> None:
         app.command(name="continuum")(_continuum_fn)
         _continuum_registered = True
 
+    if not _evolve_registered:
+        from ..evolve.cli import evolve as _evolve_fn
+
+        app.command(name="evolve")(_evolve_fn)
+        _evolve_registered = True
+
     args = sys.argv[1:]
-    subcommands = {"main", "monitor", "ps", "cancel", "export", "continuum"}
+    subcommands = {"main", "monitor", "ps", "cancel", "export", "continuum", "evolve"}
 
     if not args or args[0] not in subcommands:
         args = ["main", *args]
