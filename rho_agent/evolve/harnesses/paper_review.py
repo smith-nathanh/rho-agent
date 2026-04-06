@@ -53,18 +53,39 @@ def _stable_shuffle(scenarios: list[dict[str, Any]], seed: int = 42) -> list[dic
     return shuffled
 
 
+def _balanced_take(
+    accepts: list[dict[str, Any]],
+    rejects: list[dict[str, Any]],
+    n: int,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """Take n items balanced across accept/reject, starting at offset in each list."""
+    half = n // 2
+    taken = accepts[offset : offset + half] + rejects[offset : offset + (n - half)]
+    return taken
+
+
 def _split_dataset(
     scenarios: list[dict[str, Any]],
     train_n: int = 100,
     val_n: int = 100,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Split into train (evolve loop), val (staged filter), test (held-out)."""
+    """Split into balanced train/val/test sets (equal accept/reject per split)."""
     shuffled = _stable_shuffle(scenarios)
-    return {
-        "train": shuffled[:train_n],
-        "val": shuffled[train_n : train_n + val_n],
-        "test": shuffled[train_n + val_n :],
-    }
+    accepts = [s for s in shuffled if s["outcome"] == "accept"]
+    rejects = [s for s in shuffled if s["outcome"] == "reject"]
+
+    train_half = train_n // 2
+    val_half = val_n // 2
+
+    train = _balanced_take(accepts, rejects, train_n, offset=0)
+    val = _balanced_take(accepts, rejects, val_n, offset=train_half)
+    # Test gets everything remaining
+    used_accept = train_half + val_half
+    used_reject = (train_n - train_half) + (val_n - val_half)
+    test = accepts[used_accept:] + rejects[used_reject:]
+
+    return {"train": train, "val": val, "test": test}
 
 
 def _extract_decision(text: str) -> str:

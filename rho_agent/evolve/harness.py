@@ -53,8 +53,15 @@ class DomainHarness(ABC):
         return "\n".join(lines)
 
     def staged_sample(self, n: int) -> list[dict[str, Any]]:
-        """Return a small subset of scenarios for quick filtering."""
-        return self.scenarios()[:n]
+        """Return a small disjoint subset of scenarios for quick filtering.
+
+        Subclasses must override this to provide a validation set that does not
+        overlap with the full evaluation scenarios.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement staged_sample() "
+            "with a disjoint validation set"
+        )
 
 
 def load_harness(dotted_path: str, **kwargs: Any) -> DomainHarness:

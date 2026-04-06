@@ -14,16 +14,20 @@ from rho_agent.evolve.archive import (
     append_generation,
     best_generation,
     load_archive,
+    mark_invalid_parent,
     select_parent,
 )
 from rho_agent.evolve.harness import DomainHarness, load_harness
 from rho_agent.evolve.models import EvolveConfig, Generation
 from rho_agent.evolve.workspace import (
     build_agent_from_workspace,
-    copy_workspace,
+    commit_pre_mutation,
     create_workspace,
+    extract_diff,
+    get_lineage,
     load_prompt_from_workspace,
     load_tools_from_workspace,
+    materialize_workspace,
 )
 
 
@@ -41,7 +45,6 @@ class TrivialHarness(DomainHarness):
         ]
 
     async def run_agent(self, agent: Agent, scenario: dict[str, Any]) -> dict[str, Any]:
-        # Don't actually run the agent — just check if prompt mentions math
         prompt = agent.config.system_prompt
         return {
             "scenario_id": scenario["id"],
@@ -54,6 +57,12 @@ class TrivialHarness(DomainHarness):
             return 0.0
         return sum(1.0 for r in results if r.get("success")) / len(results)
 
+    def staged_sample(self, n: int) -> list[dict[str, Any]]:
+        return [
+            {"id": "v1", "question": "What is 7+7?", "expected": "14"},
+            {"id": "v2", "question": "What is 9+1?", "expected": "10"},
+        ][:n]
+
 
 # --- Workspace tests ---
 
@@ -63,19 +72,8 @@ def test_create_workspace(tmp_path: Path) -> None:
     assert workspace.exists()
     assert (workspace / "tools").is_dir()
     assert (workspace / "lib").is_dir()
+    assert (workspace / ".git").is_dir()
     assert workspace.name == "gen-0001-abc123"
-
-
-def test_copy_workspace(tmp_path: Path) -> None:
-    src = create_workspace(str(tmp_path), "gen-0001-src")
-    (src / "prompt.md").write_text("You are helpful.")
-    (src / "tools" / "my_tool.py").write_text("# tool code")
-
-    dest = tmp_path / "workspaces" / "gen-0002-dest"
-    copy_workspace(src, dest)
-
-    assert (dest / "prompt.md").read_text() == "You are helpful."
-    assert (dest / "tools" / "my_tool.py").read_text() == "# tool code"
 
 
 def test_load_prompt_from_workspace(tmp_path: Path) -> None:
@@ -136,6 +134,80 @@ def test_load_tools_empty_workspace(tmp_path: Path) -> None:
     workspace = create_workspace(str(tmp_path), "gen-empty")
     handlers = load_tools_from_workspace(workspace)
     assert handlers == []
+
+
+# --- Diff tracking tests ---
+
+
+def test_extract_diff(tmp_path: Path) -> None:
+    """Extract a diff after modifying a workspace."""
+    workspace = create_workspace(str(tmp_path), "gen-diff")
+    commit_pre_mutation(workspace)
+
+    # Simulate meta-agent writing a prompt
+    (workspace / "prompt.md").write_text("You are a helpful assistant.")
+
+    diff_path = extract_diff(workspace, str(tmp_path), "gen-diff")
+    assert diff_path.exists()
+    content = diff_path.read_text()
+    assert "prompt.md" in content
+    assert "helpful assistant" in content
+
+
+def test_extract_diff_empty_mutation(tmp_path: Path) -> None:
+    """No changes → empty diff file."""
+    workspace = create_workspace(str(tmp_path), "gen-noop")
+    commit_pre_mutation(workspace)
+
+    diff_path = extract_diff(workspace, str(tmp_path), "gen-noop")
+    assert diff_path.exists()
+    assert diff_path.read_text().strip() == ""
+
+
+def test_materialize_workspace(tmp_path: Path) -> None:
+    """Materialize a workspace from a chain of diffs."""
+    run_dir = str(tmp_path)
+
+    # Gen 0: create prompt
+    ws0 = create_workspace(run_dir, "g0")
+    (ws0 / "prompt.md").write_text("version 1")
+    extract_diff(ws0, run_dir, "g0")
+
+    # Gen 1: modify prompt
+    ws1 = create_workspace(run_dir, "g1-tmp")
+    (ws1 / "prompt.md").write_text("version 1")
+    commit_pre_mutation(ws1)
+    (ws1 / "prompt.md").write_text("version 2")
+    extract_diff(ws1, run_dir, "g1")
+
+    archive = [
+        Generation(gen_id="g0", generation=0, parent_id=None, workspace_path=str(ws0),
+                   diff_path=str(tmp_path / "diffs" / "g0.diff"), created_at=""),
+        Generation(gen_id="g1", generation=1, parent_id="g0", workspace_path=str(ws1),
+                   diff_path=str(tmp_path / "diffs" / "g1.diff"), created_at=""),
+    ]
+
+    # Materialize gen 1 from scratch by replaying g0 + g1 diffs
+    materialized = materialize_workspace(run_dir, "g1-rebuilt", archive, parent_id="g1")
+    assert (materialized / "prompt.md").read_text() == "version 2"
+
+
+def test_get_lineage() -> None:
+    """Walk parent chain from root to target."""
+    archive = [
+        Generation(gen_id="g0", generation=0, parent_id=None, workspace_path="", created_at=""),
+        Generation(gen_id="g1", generation=1, parent_id="g0", workspace_path="", created_at=""),
+        Generation(gen_id="g2", generation=2, parent_id="g1", workspace_path="", created_at=""),
+        Generation(gen_id="g3", generation=3, parent_id="g1", workspace_path="", created_at=""),  # branch
+    ]
+    chain = get_lineage("g2", archive)
+    assert [g.gen_id for g in chain] == ["g0", "g1", "g2"]
+
+    chain_branch = get_lineage("g3", archive)
+    assert [g.gen_id for g in chain_branch] == ["g0", "g1", "g3"]
+
+    chain_root = get_lineage("g0", archive)
+    assert [g.gen_id for g in chain_root] == ["g0"]
 
 
 # --- Archive tests ---
@@ -205,7 +277,7 @@ def test_select_parent_recent_best(tmp_path: Path) -> None:
 
     parent = select_parent(archive_path, strategy="recent_best")
     assert parent is not None
-    assert parent.gen_id == "g9"  # best of last 5
+    assert parent.gen_id == "g9"
 
 
 def test_select_parent_tournament(tmp_path: Path) -> None:
@@ -218,9 +290,27 @@ def test_select_parent_tournament(tmp_path: Path) -> None:
     assert parent.gen_id in ("g1", "g2")
 
 
+def test_select_parent_score_child_prop(tmp_path: Path) -> None:
+    archive_path = tmp_path / "archive.jsonl"
+    # g1 has high score but 3 children; g2 has lower score but 0 children
+    append_generation(archive_path, _make_gen("g1", 0, score=0.9))
+    append_generation(archive_path, _make_gen("g2", 1, score=0.5, parent_id="g1"))
+    append_generation(archive_path, _make_gen("g3", 2, score=0.4, parent_id="g1"))
+    append_generation(archive_path, _make_gen("g4", 3, score=0.3, parent_id="g1"))
+
+    # Run many selections — g2 should be picked sometimes due to 0 children
+    selected_ids = set()
+    for _ in range(50):
+        p = select_parent(archive_path, strategy="score_child_prop")
+        assert p is not None
+        selected_ids.add(p.gen_id)
+    # Should select from multiple nodes, not just the best
+    assert len(selected_ids) > 1
+
+
 def test_select_parent_no_scored(tmp_path: Path) -> None:
     archive_path = tmp_path / "archive.jsonl"
-    append_generation(archive_path, _make_gen("g1", 0))  # no score
+    append_generation(archive_path, _make_gen("g1", 0))
     assert select_parent(archive_path) is None
 
 
@@ -265,7 +355,78 @@ def test_harness_staged_sample() -> None:
     harness = TrivialHarness()
     sample = harness.staged_sample(2)
     assert len(sample) == 2
-    assert sample[0]["id"] == "s1"
+    assert sample[0]["id"] == "v1"
+
+
+def test_harness_staged_sample_not_implemented() -> None:
+    """Base DomainHarness.staged_sample raises NotImplementedError."""
+
+    class BareHarness(DomainHarness):
+        def scenarios(self) -> list[dict[str, Any]]:
+            return []
+
+        async def run_agent(self, agent: Agent, scenario: dict[str, Any]) -> dict[str, Any]:
+            return {}
+
+        def score(self, results: list[dict[str, Any]]) -> float:
+            return 0.0
+
+    with pytest.raises(NotImplementedError):
+        BareHarness().staged_sample(2)
+
+
+# --- Sanitize results tests ---
+
+
+def test_sanitize_results() -> None:
+    from rho_agent.evolve.loop import _sanitize_results
+
+    results = [
+        {"scenario_id": "s1", "success": True, "expected": "4"},
+        {"scenario_id": "s2", "success": False, "expected": "6", "error": "wrong"},
+    ]
+    sanitized = _sanitize_results(results)
+    assert len(sanitized) == 2
+    for r in sanitized:
+        assert "expected" not in r
+    assert sanitized[0]["scenario_id"] == "s1"
+    assert sanitized[1]["error"] == "wrong"
+
+
+# --- Config tests ---
+
+
+def test_evolve_config_new_fields() -> None:
+    config = EvolveConfig(
+        harness="test.Harness",
+        parent_strategy="best",
+        meta_timeout=1800,
+    )
+    assert config.parent_strategy == "best"
+    assert config.meta_timeout == 1800
+    assert config.daytona_backend is None
+
+
+def test_evolve_config_defaults() -> None:
+    config = EvolveConfig(harness="test.Harness")
+    assert config.parent_strategy == "tournament"
+    assert config.meta_timeout == 3600
+    assert config.daytona_backend is None
+
+
+def test_evolve_config_serializable() -> None:
+    config = EvolveConfig(
+        harness="test.Harness",
+        model="gpt-5.4",
+        task_model="gpt-5.4-mini",
+        harness_kwargs={"train_n": "50"},
+    )
+    d = config.to_serializable_dict()
+    roundtripped = json.loads(json.dumps(d))
+    assert roundtripped["model"] == "gpt-5.4"
+    assert roundtripped["task_model"] == "gpt-5.4-mini"
+    assert roundtripped["daytona_backend"] is None
+    assert roundtripped["harness_kwargs"] == {"train_n": "50"}
 
 
 # --- Model tests ---
@@ -278,6 +439,18 @@ def test_generation_roundtrip() -> None:
     assert restored.gen_id == "g1"
     assert restored.score == 0.75
     assert restored.status == "scored"
+
+
+def test_generation_diff_path() -> None:
+    gen = Generation(
+        gen_id="g1", generation=0, parent_id=None,
+        workspace_path="/tmp/ws/g1",
+        diff_path="/tmp/diffs/g1.diff",
+        created_at="",
+    )
+    d = gen.to_dict()
+    restored = Generation.from_dict(d)
+    assert restored.diff_path == "/tmp/diffs/g1.diff"
 
 
 def test_evolve_config_effective_task_model() -> None:
@@ -301,3 +474,79 @@ def test_build_agent_from_workspace(tmp_path: Path) -> None:
     assert agent.config.system_prompt == "You are a math expert."
     assert agent.config.profile == "unrestricted"
     assert agent.config.model == "gpt-5-mini"
+
+
+# --- Valid parent tracking tests ---
+
+
+def test_mark_invalid_parent(tmp_path: Path) -> None:
+    archive_path = tmp_path / "archive.jsonl"
+    append_generation(archive_path, _make_gen("g1", 0, score=0.9))
+    append_generation(archive_path, _make_gen("g2", 1, score=0.5, parent_id="g1"))
+
+    mark_invalid_parent(archive_path, "g1")
+
+    archive = load_archive(archive_path)
+    assert archive[0].valid_parent is False
+    assert archive[1].valid_parent is True
+
+
+def test_select_parent_skips_invalid(tmp_path: Path) -> None:
+    archive_path = tmp_path / "archive.jsonl"
+    append_generation(archive_path, _make_gen("g1", 0, score=0.9))
+    append_generation(archive_path, _make_gen("g2", 1, score=0.3, parent_id="g1"))
+
+    # g1 is the best, but mark it invalid
+    mark_invalid_parent(archive_path, "g1")
+
+    parent = select_parent(archive_path, strategy="best")
+    assert parent is not None
+    assert parent.gen_id == "g2"  # falls back to g2
+
+
+def test_select_parent_all_invalid(tmp_path: Path) -> None:
+    archive_path = tmp_path / "archive.jsonl"
+    append_generation(archive_path, _make_gen("g1", 0, score=0.9))
+    mark_invalid_parent(archive_path, "g1")
+
+    assert select_parent(archive_path, strategy="best") is None
+
+
+# --- Workspace validation tests ---
+
+
+def test_validate_workspace_valid(tmp_path: Path) -> None:
+    from rho_agent.evolve.loop import _validate_workspace
+
+    workspace = create_workspace(str(tmp_path), "gen-valid")
+    (workspace / "tools" / "good.py").write_text("x = 1 + 2\n")
+    assert _validate_workspace(workspace) is None
+
+
+def test_validate_workspace_syntax_error(tmp_path: Path) -> None:
+    from rho_agent.evolve.loop import _validate_workspace
+
+    workspace = create_workspace(str(tmp_path), "gen-broken")
+    (workspace / "tools" / "bad.py").write_text("def f(\n")
+    error = _validate_workspace(workspace)
+    assert error is not None
+    assert "Syntax error" in error
+    assert "bad.py" in error
+
+
+def test_validate_workspace_lib_syntax_error(tmp_path: Path) -> None:
+    from rho_agent.evolve.loop import _validate_workspace
+
+    workspace = create_workspace(str(tmp_path), "gen-broken-lib")
+    (workspace / "lib" / "helper.py").write_text("class Foo(:\n")
+    error = _validate_workspace(workspace)
+    assert error is not None
+    assert "helper.py" in error
+
+
+def test_validate_workspace_skips_underscored(tmp_path: Path) -> None:
+    from rho_agent.evolve.loop import _validate_workspace
+
+    workspace = create_workspace(str(tmp_path), "gen-skip")
+    (workspace / "tools" / "__init__.py").write_text("def f(\n")  # broken but skipped
+    assert _validate_workspace(workspace) is None

@@ -53,6 +53,18 @@ def evolve(
         list[str] | None,
         typer.Option("--harness-arg", help="key=value pairs passed to harness constructor"),
     ] = None,
+    daytona: Annotated[
+        bool,
+        typer.Option("--daytona/--no-daytona", help="Run meta-agent in Daytona sandbox"),
+    ] = False,
+    parent_strategy: Annotated[
+        str,
+        typer.Option("--parent-strategy", help="Parent selection strategy"),
+    ] = "tournament",
+    meta_timeout: Annotated[
+        int,
+        typer.Option("--meta-timeout", help="Meta-agent wall-clock timeout in seconds"),
+    ] = 3600,
 ) -> None:
     """Run an evolutionary loop to build and improve task-agents."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -67,6 +79,12 @@ def evolve(
 
     resolved_dir = str(Path(run_dir).expanduser().resolve())
 
+    daytona_backend = None
+    if daytona:
+        from ..tools.handlers.daytona.backend import DaytonaBackend
+
+        daytona_backend = DaytonaBackend()
+
     config = EvolveConfig(
         harness=harness,
         run_dir=resolved_dir,
@@ -77,6 +95,9 @@ def evolve(
         seed_workspace=seed,
         staged_sample_n=staged_sample,
         harness_kwargs=harness_kwargs,
+        daytona_backend=daytona_backend,
+        parent_strategy=parent_strategy,
+        meta_timeout=meta_timeout,
     )
 
     from .loop import run_evolve

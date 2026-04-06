@@ -22,10 +22,21 @@ class EvolveConfig:
     parallel: int = 1
     seed_workspace: str | None = None
     harness_kwargs: dict[str, Any] = field(default_factory=dict)
+    daytona_backend: Any = None  # DaytonaBackend | None
+    parent_strategy: str = "tournament"
+    meta_timeout: int = 3600  # seconds
 
     @property
     def effective_task_model(self) -> str:
         return self.task_model or self.model
+
+    def to_serializable_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe dict for persisting run config."""
+        d = asdict(self)
+        # daytona_backend is a dataclass or None — normalize to string
+        if self.daytona_backend is not None:
+            d["daytona_backend"] = "daytona"
+        return d
 
 
 @dataclass
@@ -36,9 +47,11 @@ class Generation:
     generation: int  # ordinal
     parent_id: str | None
     workspace_path: str
+    diff_path: str | None = None  # path to .diff file (source of truth)
     score: float | None = None
     staged_score: float | None = None
     status: str = "pending"  # pending | evaluating | scored | error | filtered
+    valid_parent: bool = True  # set false when meta-agent consistently fails from this node
     error: str | None = None
     meta_usage: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""  # ISO timestamp
