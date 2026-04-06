@@ -60,7 +60,7 @@ def evolve(
     parent_strategy: Annotated[
         str,
         typer.Option("--parent-strategy", help="Parent selection strategy"),
-    ] = "tournament",
+    ] = "score_child_prop",
     meta_timeout: Annotated[
         int,
         typer.Option("--meta-timeout", help="Meta-agent wall-clock timeout in seconds"),
@@ -75,6 +75,7 @@ def evolve(
 ) -> None:
     """Run an evolutionary loop to build and improve task-agents."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     if transfer_from and seed:
         raise typer.BadParameter("--transfer-from and --seed are mutually exclusive")
@@ -151,3 +152,84 @@ def evolve(
     else:
         typer.echo("\nNo scored generations.")
         raise typer.Exit(1)
+
+
+def evolve_eval(
+    harness: Annotated[
+        str,
+        typer.Argument(help="Dotted path to DomainHarness subclass"),
+    ],
+    workspace: Annotated[
+        str,
+        typer.Argument(help="Path to workspace directory to evaluate"),
+    ],
+    task_model: Annotated[
+        str,
+        typer.Option("--task-model", help="Task-agent model"),
+    ] = DEFAULT_MODEL,
+    split: Annotated[
+        str,
+        typer.Option("--split", help="Dataset split to evaluate on: train, val, or test"),
+    ] = "test",
+    harness_arg: Annotated[
+        list[str] | None,
+        typer.Option("--harness-arg", help="key=value pairs passed to harness constructor"),
+    ] = None,
+) -> None:
+    """Evaluate a workspace against a harness split (default: test set)."""
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    harness_kwargs: dict[str, str] = {}
+    if harness_arg:
+        for arg in harness_arg:
+            if "=" not in arg:
+                raise typer.BadParameter(f"Expected key=value format: {arg}")
+            key, value = arg.split("=", 1)
+            harness_kwargs[key] = value
+
+    from .harness import load_harness
+    from .models import EvolveConfig
+    from .workspace import build_agent_from_workspace
+
+    ws_path = Path(workspace).expanduser().resolve()
+    if not ws_path.exists():
+        raise typer.BadParameter(f"Workspace not found: {ws_path}")
+
+    h = load_harness(harness, **harness_kwargs)
+
+    if split == "train":
+        scenarios = h.scenarios()
+    elif split == "val":
+        scenarios = h.staged_sample(len(h.scenarios()))  # full val set
+    elif split == "test":
+        if not hasattr(h, "_splits"):
+            raise typer.BadParameter("Harness does not expose a test split")
+        scenarios = h._splits["test"]  # type: ignore[attr-defined]
+    else:
+        raise typer.BadParameter(f"Unknown split: {split}")
+
+    # Build a minimal config just for the task model
+    config = EvolveConfig(harness=harness, task_model=task_model)
+    agent = build_agent_from_workspace(ws_path, config)
+
+    typer.echo(f"Evaluating {ws_path.name} on {split} split ({len(scenarios)} scenarios)...")
+
+    async def _run() -> None:
+        results = []
+        for i, scenario in enumerate(scenarios):
+            try:
+                result = await h.run_agent(agent, scenario)
+                results.append(result)
+                status = "correct" if result.get("success") else "wrong"
+                typer.echo(f"  [{i+1}/{len(scenarios)}] {scenario.get('id', '?')}: {status}")
+            except Exception as e:
+                results.append({"scenario_id": scenario.get("id", "?"), "success": False, "error": str(e)})
+                typer.echo(f"  [{i+1}/{len(scenarios)}] {scenario.get('id', '?')}: error - {e}")
+
+        score = h.score(results)
+        feedback = h.feedback(results)
+        typer.echo(f"\nScore: {score:.4f}")
+        typer.echo(f"\n{feedback}")
+
+    asyncio.run(_run())

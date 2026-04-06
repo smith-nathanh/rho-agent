@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 from pathlib import Path
 
@@ -73,12 +74,11 @@ def select_parent(path: str | Path, strategy: str = "best") -> Generation | None
     Only considers generations marked as valid_parent=True.
 
     Strategies:
-        best: Always pick the highest-scoring generation.
-        recent_best: Pick the best from the last 5 generations.
-        tournament: Random selection weighted toward higher scores.
-        score_child_prop: Score-proportional, inversely weighted by child count.
-            Matches HyperAgents' default — biases toward high scorers while
-            preserving exploration by favoring nodes with fewer children.
+        best: Always pick the highest-scoring generation (greedy, no exploration).
+        score_child_prop: Sigmoid-transformed score × inverse child count.
+            Matches HyperAgents (Appendix A.2): scores are passed through a
+            sigmoid centered on the mean of the top-3 agents (λ=10), then
+            multiplied by 1/(1+n_children). This is the default strategy.
     """
     archive = load_archive(path)
     scored = [g for g in archive if g.score is not None and g.valid_parent]
@@ -88,22 +88,19 @@ def select_parent(path: str | Path, strategy: str = "best") -> Generation | None
     if strategy == "best":
         return max(scored, key=lambda g: g.score)  # type: ignore[arg-type]
 
-    elif strategy == "recent_best":
-        recent = scored[-5:]
-        return max(recent, key=lambda g: g.score)  # type: ignore[arg-type]
-
-    elif strategy == "tournament":
-        candidates = random.sample(scored, min(3, len(scored)))
-        return max(candidates, key=lambda g: g.score)  # type: ignore[arg-type]
-
     elif strategy == "score_child_prop":
         children = _child_counts(archive)
-        # Weight = score / (1 + num_children)
+        scores = [g.score for g in scored]  # type: ignore[misc]
+        # Dynamic midpoint: mean of top-m scores (m=3)
+        top_m = sorted(scores, reverse=True)[:3]
+        alpha_mid = sum(top_m) / len(top_m)
+        # Sigmoid + child-count weighting (HyperAgents Appendix A.2)
+        lam = 10.0
         weights = []
         for g in scored:
-            s = max(g.score, 0.001)  # type: ignore[arg-type]  # avoid zero weights
-            w = s / (1 + children.get(g.gen_id, 0))
-            weights.append(w)
+            s_i = 1.0 / (1.0 + math.exp(-lam * (g.score - alpha_mid)))  # type: ignore[operator]
+            h_i = 1.0 / (1 + children.get(g.gen_id, 0))
+            weights.append(s_i * h_i)
         total = sum(weights)
         if total == 0:
             return random.choice(scored)

@@ -69,6 +69,7 @@ def _split_dataset(
     scenarios: list[dict[str, Any]],
     train_n: int = 100,
     val_n: int = 100,
+    test_n: int = 100,
 ) -> dict[str, list[dict[str, Any]]]:
     """Split into balanced train/val/test sets (equal accept/reject per split)."""
     shuffled = _stable_shuffle(scenarios)
@@ -80,10 +81,8 @@ def _split_dataset(
 
     train = _balanced_take(accepts, rejects, train_n, offset=0)
     val = _balanced_take(accepts, rejects, val_n, offset=train_half)
-    # Test gets everything remaining
-    used_accept = train_half + val_half
-    used_reject = (train_n - train_half) + (val_n - val_half)
-    test = accepts[used_accept:] + rejects[used_reject:]
+    test_offset = train_half + val_half
+    test = _balanced_take(accepts, rejects, test_n, offset=test_offset)
 
     return {"train": train, "val": val, "test": test}
 
@@ -120,6 +119,7 @@ class PaperReviewHarness(DomainHarness):
         max_chars: Max paper text characters (default: 40000)
         train_n: Number of training scenarios (default: 100)
         val_n: Number of validation scenarios (default: 100)
+        test_n: Number of test scenarios (default: 100)
         max_turns: Max agent turns per scenario (default: 5)
     """
 
@@ -129,12 +129,14 @@ class PaperReviewHarness(DomainHarness):
         max_chars: int | str = _DEFAULT_MAX_CHARS,
         train_n: int | str = 100,
         val_n: int | str = 100,
+        test_n: int | str = 100,
         max_turns: int | str = 5,
     ) -> None:
         # CLI passes strings via --harness-arg; coerce to int
         max_chars = int(max_chars)
         train_n = int(train_n)
         val_n = int(val_n)
+        test_n = int(test_n)
         max_turns = int(max_turns)
         path = Path(dataset_path) if dataset_path else _DEFAULT_DATASET
         if not path.exists():
@@ -143,7 +145,7 @@ class PaperReviewHarness(DomainHarness):
                 "Expected HyperAgents dataset at ~/proj/HyperAgents/domains/paper_review/dataset.csv"
             )
         all_scenarios = _load_dataset(path, max_chars)
-        self._splits = _split_dataset(all_scenarios, train_n, val_n)
+        self._splits = _split_dataset(all_scenarios, train_n, val_n, test_n)
         self._max_turns = max_turns
 
     def scenarios(self) -> list[dict[str, Any]]:
@@ -187,7 +189,7 @@ class PaperReviewHarness(DomainHarness):
         return correct / len(results)
 
     def feedback(self, results: list[dict[str, Any]]) -> str:
-        """Detailed feedback showing accuracy breakdown and failure patterns."""
+        """Detailed feedback with confusion matrix, precision/recall/F1 per class."""
         if not results:
             return "No results to analyze."
 
@@ -195,25 +197,37 @@ class PaperReviewHarness(DomainHarness):
         correct = sum(1 for r in results if r.get("success"))
         accuracy = correct / total
 
-        # Break down by expected outcome
-        accept_results = [r for r in results if r.get("expected") == "accept"]
-        reject_results = [r for r in results if r.get("expected") == "reject"]
+        # Confusion matrix counts
+        tp = sum(1 for r in results if r.get("prediction") == "accept" and r.get("expected") == "accept")
+        fp = sum(1 for r in results if r.get("prediction") == "accept" and r.get("expected") == "reject")
+        fn = sum(1 for r in results if r.get("prediction") == "reject" and r.get("expected") == "accept")
+        tn = sum(1 for r in results if r.get("prediction") == "reject" and r.get("expected") == "reject")
 
-        accept_correct = sum(1 for r in accept_results if r.get("success"))
-        reject_correct = sum(1 for r in reject_results if r.get("success"))
+        # Per-class precision, recall, F1
+        accept_precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        accept_recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        accept_f1 = 2 * accept_precision * accept_recall / (accept_precision + accept_recall) if (accept_precision + accept_recall) > 0 else 0.0
+
+        reject_precision = tn / (tn + fn) if (tn + fn) > 0 else 0.0
+        reject_recall = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+        reject_f1 = 2 * reject_precision * reject_recall / (reject_precision + reject_recall) if (reject_precision + reject_recall) > 0 else 0.0
+
+        pred_accepts = tp + fp
+        pred_rejects = tn + fn
 
         lines = [
             f"Overall accuracy: {accuracy:.1%} ({correct}/{total})",
-            f"Accept recall: {accept_correct}/{len(accept_results)} "
-            f"({accept_correct/len(accept_results):.1%})" if accept_results else "No accept papers",
-            f"Reject recall: {reject_correct}/{len(reject_results)} "
-            f"({reject_correct/len(reject_results):.1%})" if reject_results else "No reject papers",
+            "",
+            "Confusion matrix:",
+            f"                 pred_accept  pred_reject",
+            f"  actual_accept  {tp:>11}  {fn:>11}",
+            f"  actual_reject  {fp:>11}  {tn:>11}",
+            "",
+            f"Accept — precision: {accept_precision:.1%}, recall: {accept_recall:.1%}, F1: {accept_f1:.3f}",
+            f"Reject — precision: {reject_precision:.1%}, recall: {reject_recall:.1%}, F1: {reject_f1:.3f}",
+            "",
+            f"Prediction distribution: {pred_accepts} accept / {pred_rejects} reject",
         ]
-
-        # Identify bias
-        pred_accepts = sum(1 for r in results if r.get("prediction") == "accept")
-        pred_rejects = total - pred_accepts
-        lines.append(f"Prediction distribution: {pred_accepts} accept / {pred_rejects} reject")
 
         if pred_accepts > total * 0.7:
             lines.append("WARNING: Agent is biased toward accepting papers.")

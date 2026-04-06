@@ -42,13 +42,14 @@ def cli() -> None:
         _continuum_registered = True
 
     if not _evolve_registered:
-        from ..evolve.cli import evolve as _evolve_fn
+        from ..evolve.cli import evolve as _evolve_fn, evolve_eval as _evolve_eval_fn
 
         app.command(name="evolve")(_evolve_fn)
+        app.command(name="evolve-eval")(_evolve_eval_fn)
         _evolve_registered = True
 
     args = sys.argv[1:]
-    subcommands = {"main", "monitor", "ps", "cancel", "export", "continuum", "evolve"}
+    subcommands = {"main", "monitor", "ps", "cancel", "export", "continuum", "evolve", "evolve-eval"}
 
     if not args or args[0] not in subcommands:
         args = ["main", *args]

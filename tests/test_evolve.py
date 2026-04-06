@@ -270,26 +270,6 @@ def test_select_parent_best(tmp_path: Path) -> None:
     assert parent.gen_id == "g2"
 
 
-def test_select_parent_recent_best(tmp_path: Path) -> None:
-    archive_path = tmp_path / "archive.jsonl"
-    for i in range(10):
-        append_generation(archive_path, _make_gen(f"g{i}", i, score=float(i) / 10))
-
-    parent = select_parent(archive_path, strategy="recent_best")
-    assert parent is not None
-    assert parent.gen_id == "g9"
-
-
-def test_select_parent_tournament(tmp_path: Path) -> None:
-    archive_path = tmp_path / "archive.jsonl"
-    append_generation(archive_path, _make_gen("g1", 0, score=0.5))
-    append_generation(archive_path, _make_gen("g2", 1, score=0.7))
-
-    parent = select_parent(archive_path, strategy="tournament")
-    assert parent is not None
-    assert parent.gen_id in ("g1", "g2")
-
-
 def test_select_parent_score_child_prop(tmp_path: Path) -> None:
     archive_path = tmp_path / "archive.jsonl"
     # g1 has high score but 3 children; g2 has lower score but 0 children
@@ -409,7 +389,7 @@ def test_evolve_config_new_fields() -> None:
 
 def test_evolve_config_defaults() -> None:
     config = EvolveConfig(harness="test.Harness")
-    assert config.parent_strategy == "tournament"
+    assert config.parent_strategy == "score_child_prop"
     assert config.meta_timeout == 3600
     assert config.daytona_backend is None
 

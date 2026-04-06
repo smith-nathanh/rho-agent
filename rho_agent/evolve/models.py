@@ -23,7 +23,7 @@ class EvolveConfig:
     seed_workspace: str | None = None
     harness_kwargs: dict[str, Any] = field(default_factory=dict)
     daytona_backend: Any = None  # DaytonaBackend | None
-    parent_strategy: str = "tournament"
+    parent_strategy: str = "score_child_prop"
     meta_timeout: int = 3600  # seconds
     transfer_from: str | None = None  # path to a previous run dir for cross-run transfer
 
