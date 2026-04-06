@@ -36,6 +36,7 @@ def create_workspace(run_dir: str, gen_id: str) -> Path:
     workspace.mkdir(parents=True, exist_ok=True)
     (workspace / "tools").mkdir(exist_ok=True)
     (workspace / "lib").mkdir(exist_ok=True)
+    (workspace / "memory").mkdir(exist_ok=True)
 
     _run_git(workspace, "init", "-b", "main")
     _run_git(workspace, "config", "user.email", "evolve@rho-agent")

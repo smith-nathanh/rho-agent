@@ -550,3 +550,159 @@ def test_validate_workspace_skips_underscored(tmp_path: Path) -> None:
     workspace = create_workspace(str(tmp_path), "gen-skip")
     (workspace / "tools" / "__init__.py").write_text("def f(\n")  # broken but skipped
     assert _validate_workspace(workspace) is None
+
+
+# --- Metacognitive self-modification tests ---
+
+
+def test_create_workspace_has_memory_dir(tmp_path: Path) -> None:
+    workspace = create_workspace(str(tmp_path), "gen-mem")
+    assert (workspace / "memory").is_dir()
+
+
+def test_render_meta_prompt_uses_workspace_template(tmp_path: Path) -> None:
+    from rho_agent.evolve.loop import _render_meta_prompt
+
+    workspace = create_workspace(str(tmp_path), "gen-meta")
+    # Write a custom meta_prompt.md that includes a distinctive marker
+    (workspace / "meta_prompt.md").write_text(
+        "CUSTOM_MARKER gen={{ generation }} score={{ parent_score }}"
+    )
+
+    harness = TrivialHarness()
+    result = _render_meta_prompt(
+        generation=5,
+        parent_score=0.75,
+        best_score=0.9,
+        parent_feedback="",
+        lineage_summary="",
+        workspace=workspace,
+        harness=harness,
+        scenario_sample=[],
+    )
+    assert "CUSTOM_MARKER" in result
+    assert "gen=5" in result
+    assert "score=0.75" in result
+
+
+def test_render_meta_prompt_fallback_on_broken_template(tmp_path: Path) -> None:
+    from rho_agent.evolve.loop import _render_meta_prompt
+
+    workspace = create_workspace(str(tmp_path), "gen-broken-meta")
+    # Write a broken Jinja2 template
+    (workspace / "meta_prompt.md").write_text("{% if %}")
+
+    harness = TrivialHarness()
+    result = _render_meta_prompt(
+        generation=1,
+        parent_score=0.5,
+        best_score=0.5,
+        parent_feedback="",
+        lineage_summary="",
+        workspace=workspace,
+        harness=harness,
+        scenario_sample=[],
+    )
+    # Should fall back to built-in template (contains "meta-agent")
+    assert "meta-agent" in result.lower()
+    # Should NOT contain the broken template
+    assert "{% if %}" not in result
+
+
+def test_render_meta_prompt_includes_preamble(tmp_path: Path) -> None:
+    from rho_agent.evolve.loop import _METACOGNITIVE_PREAMBLE, _render_meta_prompt
+
+    workspace = create_workspace(str(tmp_path), "gen-preamble")
+    harness = TrivialHarness()
+
+    # Without workspace meta_prompt.md (uses built-in)
+    result = _render_meta_prompt(
+        generation=1,
+        parent_score=0.5,
+        best_score=0.5,
+        parent_feedback="",
+        lineage_summary="",
+        workspace=workspace,
+        harness=harness,
+        scenario_sample=[],
+    )
+    assert result.startswith(_METACOGNITIVE_PREAMBLE)
+
+    # With workspace meta_prompt.md
+    (workspace / "meta_prompt.md").write_text("Custom template {{ generation }}")
+    result2 = _render_meta_prompt(
+        generation=1,
+        parent_score=0.5,
+        best_score=0.5,
+        parent_feedback="",
+        lineage_summary="",
+        workspace=workspace,
+        harness=harness,
+        scenario_sample=[],
+    )
+    assert result2.startswith(_METACOGNITIVE_PREAMBLE)
+
+
+def test_build_performance_history() -> None:
+    from rho_agent.evolve.loop import _build_performance_history
+
+    archive = [
+        _make_gen("g0", 0, score=0.3),
+        _make_gen("g1", 1, score=0.5, parent_id="g0"),
+        _make_gen("g2", 2, score=0.7, parent_id="g1"),
+        _make_gen("g3", 3, score=None, parent_id="g2"),  # unscored
+    ]
+    history = _build_performance_history(archive)
+
+    assert len(history["generations"]) == 3  # only scored
+    assert history["statistics"]["best_score"] == 0.7
+    assert history["statistics"]["worst_score"] == 0.3
+    assert history["statistics"]["total_scored"] == 3
+
+
+def test_build_performance_history_empty() -> None:
+    from rho_agent.evolve.loop import _build_performance_history
+
+    history = _build_performance_history([])
+    assert history["generations"] == []
+    assert history["statistics"] == {}
+
+
+def test_memory_persists_through_diffs(tmp_path: Path) -> None:
+    """Files in memory/ survive diff extraction and workspace materialization."""
+    run_dir = str(tmp_path)
+
+    # Gen 0: create workspace with a memory file
+    ws0 = create_workspace(run_dir, "g0")
+    (ws0 / "memory" / "notes.json").write_text('{"insight": "test"}')
+    extract_diff(ws0, run_dir, "g0")
+
+    archive = [
+        Generation(
+            gen_id="g0", generation=0, parent_id=None,
+            workspace_path=str(ws0),
+            diff_path=str(tmp_path / "diffs" / "g0.diff"),
+            created_at="",
+        ),
+    ]
+
+    # Materialize a child — memory should be inherited
+    child = materialize_workspace(run_dir, "g1", archive, parent_id="g0")
+    assert (child / "memory" / "notes.json").exists()
+    data = json.loads((child / "memory" / "notes.json").read_text())
+    assert data["insight"] == "test"
+
+
+# --- Cross-run transfer tests ---
+
+
+def test_evolve_config_transfer_from() -> None:
+    config = EvolveConfig(harness="test.Harness", transfer_from="/tmp/old-run")
+    assert config.transfer_from == "/tmp/old-run"
+    d = config.to_serializable_dict()
+    assert d["transfer_from"] == "/tmp/old-run"
+
+
+def test_evolve_config_transfer_from_default() -> None:
+    config = EvolveConfig(harness="test.Harness")
+    assert config.transfer_from is None

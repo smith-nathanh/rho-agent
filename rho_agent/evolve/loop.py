@@ -49,6 +49,10 @@ _META_PROMPT_TEMPLATE = (Path(__file__).parent / "prompts" / "meta_agent.md").re
     encoding="utf-8"
 )
 
+_METACOGNITIVE_PREAMBLE = (
+    Path(__file__).parent / "prompts" / "metacognitive_preamble.md"
+).read_text(encoding="utf-8")
+
 
 def _gen_id(generation: int) -> str:
     short = uuid.uuid4().hex[:6]
@@ -110,6 +114,41 @@ def _build_lineage_summary(gen_id: str, archive: list[Generation]) -> str:
     return "\n".join(lines)
 
 
+def _build_performance_history(archive: list[Generation]) -> dict[str, Any]:
+    """Build performance history from the archive for memory/performance_history.json."""
+    scored = [g for g in archive if g.score is not None]
+    if not scored:
+        return {"generations": [], "statistics": {}}
+
+    scores = [g.score for g in scored]
+    entries = []
+    for g in scored:
+        entries.append({
+            "gen_id": g.gen_id,
+            "generation": g.generation,
+            "score": g.score,
+            "status": g.status,
+            "parent_id": g.parent_id,
+            "created_at": g.created_at,
+        })
+
+    stats: dict[str, Any] = {
+        "total_scored": len(scored),
+        "best_score": max(scores),
+        "worst_score": min(scores),
+        "average_score": sum(scores) / len(scores),
+    }
+
+    # Moving-average trend (last 5 vs previous 5)
+    if len(scores) >= 4:
+        window = min(5, len(scores) // 2)
+        recent_avg = sum(scores[-window:]) / window
+        older_avg = sum(scores[-window * 2 : -window]) / window
+        stats["improvement_trend"] = round(recent_avg - older_avg, 4)
+
+    return {"generations": entries, "statistics": stats}
+
+
 def _render_meta_prompt(
     *,
     generation: int,
@@ -123,20 +162,32 @@ def _render_meta_prompt(
 ) -> str:
     from ..prompts.renderer import render_string
 
-    return render_string(
-        _META_PROMPT_TEMPLATE,
-        {
-            "generation": generation,
-            "parent_score": parent_score if parent_score is not None else "N/A",
-            "best_score": best_score if best_score is not None else "N/A",
-            "parent_feedback": parent_feedback,
-            "lineage_summary": lineage_summary,
-            "workspace_inventory": _workspace_inventory(workspace),
-            "tool_handler_api": _TOOL_HANDLER_SOURCE,
-            "domain_description": harness.__class__.__doc__ or "No domain description.",
-            "scenario_sample": json.dumps(scenario_sample, indent=2, default=str),
-        },
-    )
+    context = {
+        "generation": generation,
+        "parent_score": parent_score if parent_score is not None else "N/A",
+        "best_score": best_score if best_score is not None else "N/A",
+        "parent_feedback": parent_feedback,
+        "lineage_summary": lineage_summary,
+        "workspace_inventory": _workspace_inventory(workspace),
+        "tool_handler_api": _TOOL_HANDLER_SOURCE,
+        "domain_description": harness.__class__.__doc__ or "No domain description.",
+        "scenario_sample": json.dumps(scenario_sample, indent=2, default=str),
+    }
+
+    # Try workspace-local meta_prompt.md first (metacognitive self-modification)
+    ws_meta = workspace / "meta_prompt.md"
+    if ws_meta.exists():
+        try:
+            template_str = ws_meta.read_text(encoding="utf-8")
+            rendered = render_string(template_str, context)
+            return _METACOGNITIVE_PREAMBLE + "\n" + rendered
+        except (ValueError, Exception) as e:
+            logger.warning(
+                "Workspace meta_prompt.md failed to render (%s), using built-in", e
+            )
+
+    # Fallback to built-in template
+    return _METACOGNITIVE_PREAMBLE + "\n" + render_string(_META_PROMPT_TEMPLATE, context)
 
 
 def _sanitize_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -285,6 +336,17 @@ async def run_evolve(config: EvolveConfig) -> list[Generation]:
                 else:
                     shutil.copy2(item, dest)
 
+        # Seed meta_prompt.md if not already present (from seed or transfer)
+        meta_prompt_dest = gen0_workspace / "meta_prompt.md"
+        if not meta_prompt_dest.exists():
+            meta_prompt_dest.write_text(_META_PROMPT_TEMPLATE, encoding="utf-8")
+
+        # Clean up transfer workspace if we materialized one
+        if config.transfer_from and config.seed_workspace:
+            transfer_ws = Path(config.seed_workspace)
+            if transfer_ws.exists() and "_transfer_" in transfer_ws.name:
+                _cleanup_workspace(transfer_ws)
+
         gen0_diff = extract_diff(gen0_workspace, config.run_dir, gen0_id)
 
         gen0 = Generation(
@@ -355,6 +417,15 @@ async def run_evolve(config: EvolveConfig) -> list[Generation]:
                 parent_feedback = harness.feedback(parent_results)
 
             lineage_summary = _build_lineage_summary(parent.gen_id, archive)
+
+            # Populate performance history for the meta-agent
+            perf_history = _build_performance_history(archive)
+            memory_dir = workspace / "memory"
+            memory_dir.mkdir(exist_ok=True)
+            (memory_dir / "performance_history.json").write_text(
+                json.dumps(perf_history, indent=2, default=str),
+                encoding="utf-8",
+            )
 
             meta_prompt = _render_meta_prompt(
                 generation=gen_num,

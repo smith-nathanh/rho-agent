@@ -65,9 +65,19 @@ def evolve(
         int,
         typer.Option("--meta-timeout", help="Meta-agent wall-clock timeout in seconds"),
     ] = 3600,
+    transfer_from: Annotated[
+        str | None,
+        typer.Option(
+            "--transfer-from",
+            help="Path to a previous run dir; seeds from its best generation",
+        ),
+    ] = None,
 ) -> None:
     """Run an evolutionary loop to build and improve task-agents."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+    if transfer_from and seed:
+        raise typer.BadParameter("--transfer-from and --seed are mutually exclusive")
 
     harness_kwargs: dict[str, str] = {}
     if harness_arg:
@@ -78,6 +88,34 @@ def evolve(
             harness_kwargs[key] = value
 
     resolved_dir = str(Path(run_dir).expanduser().resolve())
+
+    # Cross-run transfer: materialize best generation from source run as seed
+    resolved_seed = seed
+    resolved_transfer = None
+    if transfer_from:
+        from .archive import best_generation as _best_gen, load_archive as _load_archive
+        from .workspace import materialize_workspace as _materialize
+
+        source_dir = Path(transfer_from).expanduser().resolve()
+        source_archive_path = source_dir / "archive.jsonl"
+        if not source_archive_path.exists():
+            raise typer.BadParameter(f"No archive.jsonl found in {source_dir}")
+        source_archive = _load_archive(source_archive_path)
+        best = _best_gen(source_archive_path)
+        if best is None:
+            raise typer.BadParameter(f"No scored generations in {source_dir}")
+        typer.echo(
+            f"Transferring from {best.gen_id} (score={best.score:.4f}) in {source_dir}"
+        )
+        # Re-materialize from diff chain in case workspace was cleaned up
+        transfer_ws = _materialize(
+            str(source_dir),
+            f"_transfer_{best.gen_id}",
+            source_archive,
+            parent_id=best.gen_id,
+        )
+        resolved_seed = str(transfer_ws)
+        resolved_transfer = str(source_dir)
 
     daytona_backend = None
     if daytona:
@@ -92,12 +130,13 @@ def evolve(
         task_model=task_model,
         max_generations=max_generations,
         parallel=parallel,
-        seed_workspace=seed,
+        seed_workspace=resolved_seed,
         staged_sample_n=staged_sample,
         harness_kwargs=harness_kwargs,
         daytona_backend=daytona_backend,
         parent_strategy=parent_strategy,
         meta_timeout=meta_timeout,
+        transfer_from=resolved_transfer,
     )
 
     from .loop import run_evolve

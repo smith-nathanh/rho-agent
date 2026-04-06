@@ -25,6 +25,7 @@ class EvolveConfig:
     daytona_backend: Any = None  # DaytonaBackend | None
     parent_strategy: str = "tournament"
     meta_timeout: int = 3600  # seconds
+    transfer_from: str | None = None  # path to a previous run dir for cross-run transfer
 
     @property
     def effective_task_model(self) -> str:
