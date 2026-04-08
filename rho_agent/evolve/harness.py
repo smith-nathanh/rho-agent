@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 
 from ..core.agent import Agent
@@ -15,6 +16,14 @@ class DomainHarness(ABC):
     Subclass this to define how task-agents are evaluated in a specific domain
     (prediction markets, security auditing, research, etc.).
     """
+
+    async def ensure_loaded(self) -> None:
+        """Async initialization hook. Called once before scenarios/eval.
+
+        Override for harnesses that need async setup (e.g., downloading tasks).
+        Default: no-op.
+        """
+        pass
 
     @abstractmethod
     def scenarios(self) -> list[dict[str, Any]]:
@@ -52,6 +61,26 @@ class DomainHarness(ABC):
             lines.append(f"  ... and {len(failures) - 10} more")
         return "\n".join(lines)
 
+    async def run_all(
+        self, agent: Agent, scenarios: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Run the agent on all scenarios and return results.
+
+        Default: sequential. Override for concurrent execution.
+        """
+        results = []
+        for scenario in scenarios:
+            try:
+                result = await self.run_agent(agent, scenario)
+                results.append(result)
+            except Exception as e:
+                results.append({
+                    "scenario_id": scenario.get("id", scenario.get("name", "unknown")),
+                    "success": False,
+                    "error": str(e),
+                })
+        return results
+
     def staged_sample(self, n: int) -> list[dict[str, Any]]:
         """Return a small disjoint subset of scenarios for quick filtering.
 
@@ -62,6 +91,14 @@ class DomainHarness(ABC):
             f"{type(self).__name__} must implement staged_sample() "
             "with a disjoint validation set"
         )
+
+    def set_trace_dir(self, trace_dir: Path | None) -> None:
+        """Set trace directory for saving execution traces. Optional override."""
+        pass
+
+    def set_workspace(self, workspace: Path, config: Any) -> None:
+        """Set workspace + config for building fresh agents per scenario. Optional override."""
+        pass
 
 
 def load_harness(dotted_path: str, **kwargs: Any) -> DomainHarness:

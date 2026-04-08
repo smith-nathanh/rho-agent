@@ -149,6 +149,41 @@ def _build_performance_history(archive: list[Generation]) -> dict[str, Any]:
     return {"generations": entries, "statistics": stats}
 
 
+def _write_trace_summary(trace_dir: Path, results: list[dict[str, Any]]) -> None:
+    """Write a summary.md in the traces dir for the meta-agent to read first."""
+    if not trace_dir.exists():
+        trace_dir.mkdir(parents=True, exist_ok=True)
+
+    lines = ["# Evaluation Trace Summary", ""]
+    solved = sum(1 for r in results if r.get("success"))
+    lines.append(f"**Overall: {solved}/{len(results)} solved**")
+    lines.append("")
+
+    # Successes
+    successes = [r for r in results if r.get("success")]
+    if successes:
+        lines.append("## Solved")
+        for r in successes:
+            tokens = r.get("tokens_used", "?")
+            lines.append(f"- {r.get('scenario_id', '?')} ({tokens} tokens)")
+        lines.append("")
+
+    # Failures
+    failures = [r for r in results if not r.get("success")]
+    if failures:
+        lines.append("## Failed")
+        for r in failures:
+            sid = r.get("scenario_id", "?")
+            err = r.get("error") or "tests failed"
+            tokens = r.get("tokens_used", "?")
+            has_trace = (trace_dir / sid / "trace.jsonl").exists() if sid != "?" else False
+            trace_note = f" [trace: traces/{sid}/trace.jsonl]" if has_trace else ""
+            lines.append(f"- **{sid}** ({tokens} tokens): {err[:120]}{trace_note}")
+        lines.append("")
+
+    (trace_dir / "summary.md").write_text("\n".join(lines), encoding="utf-8")
+
+
 def _render_meta_prompt(
     *,
     generation: int,
@@ -266,17 +301,7 @@ async def _run_eval(
     scenarios: list[dict[str, Any]],
 ) -> tuple[float, list[dict[str, Any]]]:
     """Evaluate an agent on a list of scenarios, return (score, results)."""
-    results = []
-    for scenario in scenarios:
-        try:
-            result = await harness.run_agent(agent, scenario)
-            results.append(result)
-        except Exception as e:
-            results.append({
-                "scenario_id": scenario.get("id", "unknown"),
-                "success": False,
-                "error": str(e),
-            })
+    results = await harness.run_all(agent, scenarios)
     score = harness.score(results)
     return score, results
 
@@ -307,6 +332,7 @@ async def run_evolve(config: EvolveConfig) -> list[Generation]:
     )
 
     harness = load_harness(config.harness, **config.harness_kwargs)
+    await harness.ensure_loaded()
     all_scenarios = harness.scenarios()
 
     # --- Resume support ---
@@ -361,6 +387,10 @@ async def run_evolve(config: EvolveConfig) -> list[Generation]:
         try:
             agent = build_agent_from_workspace(gen0_workspace, config)
             gen0.status = "evaluating"
+            # Set trace dir and workspace for harnesses that support it
+            trace_dir = gen0_workspace / "traces"
+            harness.set_trace_dir(trace_dir)
+            harness.set_workspace(gen0_workspace, config)
             score, results = await _run_eval(harness, agent, all_scenarios)
             gen0.score = score
             gen0.status = "scored"
@@ -368,6 +398,7 @@ async def run_evolve(config: EvolveConfig) -> list[Generation]:
                 json.dumps(_sanitize_results(results), indent=2, default=str),
                 encoding="utf-8",
             )
+            _write_trace_summary(trace_dir, results)
         except Exception as e:
             gen0.status = "error"
             gen0.error = str(e)
@@ -390,11 +421,17 @@ async def run_evolve(config: EvolveConfig) -> list[Generation]:
         # Materialize workspace from parent's lineage diff chain
         workspace = materialize_workspace(config.run_dir, gen_id, archive, parent_id=parent.gen_id)
 
-        # Copy parent's eval_results.json so the meta-agent can read it
+        # Copy parent's eval_results.json and traces so the meta-agent can read them
         parent_workspace = Path(parent.workspace_path)
         parent_results_file = parent_workspace / "eval_results.json"
         if parent_results_file.exists():
             shutil.copy2(parent_results_file, workspace / "eval_results.json")
+        parent_traces = parent_workspace / "traces"
+        if parent_traces.exists():
+            dest_traces = workspace / "traces"
+            if dest_traces.exists():
+                shutil.rmtree(dest_traces)
+            shutil.copytree(parent_traces, dest_traces)
 
         gen = Generation(
             gen_id=gen_id,
@@ -457,7 +494,7 @@ async def run_evolve(config: EvolveConfig) -> list[Generation]:
 
                 result = await asyncio.wait_for(
                     session.run(
-                        "Improve the task-agent. Read the workspace first, then make one targeted improvement.",
+                        "Modify any part of the workspace to improve the agent.",
                         max_turns=30,
                     ),
                     timeout=config.meta_timeout,
@@ -527,6 +564,10 @@ async def run_evolve(config: EvolveConfig) -> list[Generation]:
         # --- Full eval ---
         try:
             gen.status = "evaluating"
+            # Set trace dir and workspace so harnesses can save traces / build fresh agents
+            trace_dir = workspace / "traces"
+            harness.set_trace_dir(trace_dir)
+            harness.set_workspace(workspace, config)
             score, results = await _run_eval(harness, task_agent, all_scenarios)
             gen.score = score
             gen.status = "scored"
@@ -534,6 +575,8 @@ async def run_evolve(config: EvolveConfig) -> list[Generation]:
                 json.dumps(_sanitize_results(results), indent=2, default=str),
                 encoding="utf-8",
             )
+            # Write trace summary for the meta-agent
+            _write_trace_summary(trace_dir, results)
         except Exception as e:
             gen.status = "error"
             gen.error = f"Full eval failed: {e}"

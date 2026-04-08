@@ -33,3 +33,4 @@ examples/sql_explorer/*db
 
 # Reference prompts from Codex CLI
 .codex-prompts/
+evolve-runs/
