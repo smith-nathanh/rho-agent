@@ -477,11 +477,16 @@ async def run_evolve(config: EvolveConfig) -> list[Generation]:
 
             commit_pre_mutation(workspace)
 
+            # When using Daytona, the workspace is uploaded to a remote path
+            _DAYTONA_WORKSPACE = "/home/daytona/workspace"
+            meta_working_dir = (
+                _DAYTONA_WORKSPACE if config.daytona_backend else str(workspace)
+            )
             meta_config = AgentConfig(
                 system_prompt=meta_prompt,
                 model=config.model,
                 profile="unrestricted",
-                working_dir=str(workspace),
+                working_dir=meta_working_dir,
                 auto_approve=True,
                 backend=config.daytona_backend or "local",
             )

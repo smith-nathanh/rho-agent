@@ -198,34 +198,36 @@ def evolve_eval(
 
     h = load_harness(harness, **harness_kwargs)
 
-    if split == "train":
-        scenarios = h.scenarios()
-    elif split == "val":
-        scenarios = h.staged_sample(len(h.scenarios()))  # full val set
-    elif split == "test":
-        if not hasattr(h, "_splits"):
-            raise typer.BadParameter("Harness does not expose a test split")
-        scenarios = h._splits["test"]  # type: ignore[attr-defined]
-    else:
-        raise typer.BadParameter(f"Unknown split: {split}")
-
     # Build a minimal config just for the task model
     config = EvolveConfig(harness=harness, task_model=task_model)
-    agent = build_agent_from_workspace(ws_path, config)
-
-    typer.echo(f"Evaluating {ws_path.name} on {split} split ({len(scenarios)} scenarios)...")
 
     async def _run() -> None:
-        results = []
-        for i, scenario in enumerate(scenarios):
-            try:
-                result = await h.run_agent(agent, scenario)
-                results.append(result)
-                status = "correct" if result.get("success") else "wrong"
-                typer.echo(f"  [{i+1}/{len(scenarios)}] {scenario.get('id', '?')}: {status}")
-            except Exception as e:
-                results.append({"scenario_id": scenario.get("id", "?"), "success": False, "error": str(e)})
-                typer.echo(f"  [{i+1}/{len(scenarios)}] {scenario.get('id', '?')}: error - {e}")
+        await h.ensure_loaded()
+
+        if split == "train":
+            scenarios = h.scenarios()
+        elif split == "val":
+            scenarios = h.staged_sample(len(h.scenarios()))  # full val set
+        elif split == "test":
+            if hasattr(h, "test_scenarios"):
+                scenarios = h.test_scenarios()
+            elif hasattr(h, "_splits"):
+                scenarios = h._splits["test"]  # type: ignore[attr-defined]
+            else:
+                raise typer.BadParameter("Harness does not expose a test split")
+        else:
+            raise typer.BadParameter(f"Unknown split: {split}")
+
+        agent = build_agent_from_workspace(ws_path, config)
+        h.set_workspace(ws_path, config)
+
+        typer.echo(f"Evaluating {ws_path.name} on {split} split ({len(scenarios)} scenarios)...")
+
+        results = await h.run_all(agent, scenarios)
+        for i, result in enumerate(results):
+            sid = result.get("scenario_id", "?")
+            status = "correct" if result.get("success") else "wrong"
+            typer.echo(f"  [{i+1}/{len(scenarios)}] {sid}: {status}")
 
         score = h.score(results)
         feedback = h.feedback(results)

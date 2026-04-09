@@ -16,6 +16,7 @@ import logging
 import random
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,6 @@ from ...core.agent import Agent
 from ...core.config import AgentConfig
 from ...core.session import Session
 from ...core.state import State
-from ...tools.base import ToolHandler
 from ..harness import DomainHarness
 from ..workspace import build_agent_from_workspace
 from .docker_bash import DockerBashHandler
@@ -268,7 +268,7 @@ class TerminalBenchHarness(DomainHarness):
         env = DockerEnvironment(
             environment_dir=task.paths.environment_dir,
             environment_name=task_name,
-            session_id=f"evolve__{task_name}",
+            session_id=f"evolve__{task_name}__{uuid.uuid4().hex[:8]}",
             trial_paths=trial_paths,
             task_env_config=task.config.environment,
         )
@@ -291,17 +291,14 @@ class TerminalBenchHarness(DomainHarness):
             else:
                 task_agent = agent
 
-            # Inject Docker environment into the bash handler
-            bash_handler = _find_bash_handler(task_agent)
-            if bash_handler is not None:
-                if hasattr(bash_handler, "environment"):
-                    bash_handler.environment = env
-                if hasattr(bash_handler, "_environment"):
-                    bash_handler._environment = env
-            else:
-                # No workspace bash tool — register the fallback
-                fallback = DockerBashHandler(env, timeout_sec=self._turn_timeout)
-                task_agent.registry.register(fallback)
+            # Inject Docker environment into all workspace tools that accept it
+            _inject_environment(task_agent, env)
+
+            # Ensure there's at least a bash tool
+            if task_agent.registry.get("bash") is None:
+                task_agent.registry.register(
+                    DockerBashHandler(env, timeout_sec=self._turn_timeout)
+                )
 
             # Set up trace saving
             trace_path = None
@@ -356,7 +353,15 @@ class TerminalBenchHarness(DomainHarness):
 
         async def _run_one(scenario: dict[str, Any]) -> dict[str, Any]:
             async with sem:
-                return await self.run_agent(agent, scenario)
+                try:
+                    return await self.run_agent(agent, scenario)
+                except Exception as e:
+                    return {
+                        "scenario_id": scenario.get("name", "unknown"),
+                        "success": False,
+                        "error": str(e),
+                        "tokens_used": 0,
+                    }
 
         return await asyncio.gather(*[_run_one(s) for s in scenarios])
 
@@ -449,9 +454,16 @@ class TerminalBenchHarness(DomainHarness):
         self._agent_config = config
 
 
-def _find_bash_handler(agent: Agent) -> ToolHandler | None:
-    """Find a bash-named tool in the agent's registry."""
-    for tool in agent.registry.get_all():
-        if tool.name == "bash":
-            return tool
-    return None
+def _inject_environment(agent: Agent, env: Any) -> None:
+    """Inject the Docker environment into all workspace tools that accept it.
+
+    Any ToolHandler with an ``environment`` or ``_environment`` attribute
+    gets the running DockerEnvironment set on it. This lets the meta-agent
+    create arbitrary tools that use ``self.environment`` without special wiring.
+    """
+    for name in list(agent.registry._handlers):
+        handler = agent.registry._handlers[name]
+        if hasattr(handler, "environment"):
+            handler.environment = env
+        if hasattr(handler, "_environment"):
+            handler._environment = env
