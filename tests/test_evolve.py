@@ -623,6 +623,28 @@ def test_render_meta_prompt_includes_preamble(tmp_path: Path) -> None:
     assert result2.startswith(_METACOGNITIVE_PREAMBLE)
 
 
+def test_render_meta_prompt_task_agent_first_contract(tmp_path: Path) -> None:
+    from rho_agent.evolve.loop import _render_meta_prompt
+
+    workspace = create_workspace(str(tmp_path), "gen-contract")
+    harness = TrivialHarness()
+
+    result = _render_meta_prompt(
+        generation=2,
+        parent_score=0.4,
+        best_score=0.6,
+        parent_feedback="failed task x",
+        lineage_summary="some history",
+        workspace=workspace,
+        harness=harness,
+        scenario_sample=[],
+    )
+
+    assert "../" not in result
+    assert "authoritative lineage context available in this workspace" in result
+    assert "Treat task-agent behavior as the primary optimization target" in result
+
+
 def test_build_performance_history() -> None:
     from rho_agent.evolve.loop import _build_performance_history
 
@@ -646,6 +668,92 @@ def test_build_performance_history_empty() -> None:
     history = _build_performance_history([])
     assert history["generations"] == []
     assert history["statistics"] == {}
+
+
+class _FakeProcessResponse:
+    def __init__(self, exit_code: int, result: str = "") -> None:
+        self.exit_code = exit_code
+        self.result = result
+
+
+class _FakeProcess:
+    def __init__(self, files: dict[str, bytes]) -> None:
+        self._files = files
+
+    async def exec(self, command: str, timeout: int = 30) -> _FakeProcessResponse:
+        if "find . -type f | sort" not in command:
+            return _FakeProcessResponse(1, "unexpected command")
+        lines = sorted(path.removeprefix("/home/daytona/workspace/") for path in self._files)
+        return _FakeProcessResponse(0, "\n".join(lines))
+
+
+class _FakeFS:
+    def __init__(self, files: dict[str, bytes]) -> None:
+        self._files = files
+
+    async def download_file(self, remote_path: str, local_path: str) -> None:
+        Path(local_path).write_bytes(self._files[remote_path])
+
+
+class _FakeSandbox:
+    def __init__(self, files: dict[str, bytes]) -> None:
+        self.process = _FakeProcess(files)
+        self.fs = _FakeFS(files)
+
+
+@pytest.mark.asyncio
+async def test_download_workspace_recurses_and_removes_deleted_files(tmp_path: Path) -> None:
+    from rho_agent.evolve.loop import _download_workspace
+
+    workspace = create_workspace(str(tmp_path), "gen-sync")
+    stale_file = workspace / "tools" / "stale.py"
+    stale_file.write_text("old")
+    keep_file = workspace / "prompt.md"
+    keep_file.write_text("outdated")
+
+    remote_files = {
+        "/home/daytona/workspace/prompt.md": b"fresh prompt",
+        "/home/daytona/workspace/tools/docker_bash.py": b"class DockerBashHandler: pass\n",
+        "/home/daytona/workspace/lib/helper.py": b"VALUE = 1\n",
+        "/home/daytona/workspace/memory/notes.json": b'{"note": "kept"}',
+    }
+    sandbox = _FakeSandbox(remote_files)
+
+    await _download_workspace(sandbox, workspace)
+
+    assert keep_file.read_text() == "fresh prompt"
+    assert (workspace / "tools" / "docker_bash.py").exists()
+    assert (workspace / "lib" / "helper.py").exists()
+    assert (workspace / "memory" / "notes.json").exists()
+    assert not stale_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_download_workspace_ignores_internal_and_unsafe_paths(tmp_path: Path) -> None:
+    from rho_agent.evolve.loop import _download_workspace
+
+    workspace = create_workspace(str(tmp_path), "gen-sync-skip")
+    git_head_before = (workspace / ".git" / "HEAD").read_text()
+    pycache_dir = workspace / "tools" / "__pycache__"
+    pycache_dir.mkdir(parents=True, exist_ok=True)
+    stale_pyc = pycache_dir / "stale.pyc"
+    stale_pyc.write_bytes(b"old")
+
+    remote_files = {
+        "/home/daytona/workspace/prompt.md": b"fresh prompt",
+        "/home/daytona/workspace/.git/HEAD": b"ref: refs/heads/hijacked\n",
+        "/home/daytona/workspace/tools/__pycache__/cache.pyc": b"cache",
+        "/home/daytona/workspace/../escape.txt": b"nope",
+    }
+    sandbox = _FakeSandbox(remote_files)
+
+    await _download_workspace(sandbox, workspace)
+
+    assert (workspace / "prompt.md").read_text() == "fresh prompt"
+    assert (workspace / ".git" / "HEAD").read_text() == git_head_before
+    assert not (workspace / "tools" / "__pycache__" / "cache.pyc").exists()
+    assert stale_pyc.exists()
+    assert not (workspace / "escape.txt").exists()
 
 
 def test_memory_persists_through_diffs(tmp_path: Path) -> None:

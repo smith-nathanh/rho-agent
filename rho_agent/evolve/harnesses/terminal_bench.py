@@ -153,6 +153,10 @@ class TerminalBenchHarness(DomainHarness):
     and must solve it using terminal commands. Performance is measured by
     Harbor's verifier (test.sh execution → reward.txt).
 
+    This harness is fixed infrastructure, not part of the search surface.
+    Search happens inside the task-agent workspace (prompt, tools, helper
+    modules, memory) while task loading, grading, and split policy stay stable.
+
     Harness kwargs:
         train_n: Number of training scenarios from tb-pro (default: 25)
         staged_n: Number of staged/validation scenarios from tb-pro (default: 5)

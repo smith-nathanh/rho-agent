@@ -261,18 +261,58 @@ async def _upload_workspace(sandbox: Any, workspace: Path) -> None:
     await sandbox.fs.upload_files(uploads)
 
 
+def _is_syncable_workspace_relpath(rel: str) -> bool:
+    """Return True if a sandbox path is safe to mirror into the local workspace."""
+    rel_path = Path(rel)
+    if rel_path.is_absolute():
+        return False
+
+    parts = rel_path.parts
+    if not parts or "." in parts or ".." in parts:
+        return False
+
+    return not (_UPLOAD_SKIP_DIRS & set(parts))
+
+
 async def _download_workspace(sandbox: Any, workspace: Path) -> None:
-    """Download mutated workspace from the Daytona sandbox back to local."""
+    """Mirror mutated workspace contents from the Daytona sandbox back to local.
+
+    Downloads all remote files recursively and removes local files that no
+    longer exist in the sandboxed workspace so the extracted diff reflects the
+    true sandbox mutation.
+    """
     remote_root = "/home/daytona/workspace"
-    file_list = await sandbox.fs.list_dir(remote_root)
-    for entry in file_list:
-        remote_path = entry.name if hasattr(entry, "name") else str(entry)
-        if not remote_path.startswith(remote_root):
-            remote_path = f"{remote_root}/{remote_path}"
-        rel = remote_path[len(remote_root) + 1:]
+    response = await sandbox.process.exec(
+        f"cd {remote_root} && find . -type f | sort",
+        timeout=30,
+    )
+    if response.exit_code != 0:
+        raise RuntimeError(
+            f"Failed to list Daytona workspace files: {response.result or 'unknown error'}"
+        )
+
+    remote_rel_paths = {
+        line.removeprefix("./")
+        for line in (response.result or "").splitlines()
+        if line.strip() and _is_syncable_workspace_relpath(line.removeprefix("./"))
+    }
+
+    for rel in sorted(remote_rel_paths):
         local_path = workspace / rel
         local_path.parent.mkdir(parents=True, exist_ok=True)
-        await sandbox.fs.download_file(remote_path, str(local_path))
+        await sandbox.fs.download_file(f"{remote_root}/{rel}", str(local_path))
+
+    local_files = {
+        str(fp.relative_to(workspace))
+        for fp in workspace.rglob("*")
+        if fp.is_file() and not (_UPLOAD_SKIP_DIRS & set(fp.relative_to(workspace).parts))
+    }
+    for rel in sorted(local_files - remote_rel_paths):
+        (workspace / rel).unlink(missing_ok=True)
+
+    for path in sorted(workspace.rglob("*"), reverse=True):
+        if path.is_dir() and not any(path.iterdir()) and ".git" not in path.parts:
+            path.rmdir()
 
 
 def _validate_workspace(workspace: Path) -> str | None:

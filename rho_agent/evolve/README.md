@@ -35,6 +35,8 @@ Each generation:
 
 The meta-agent has unrestricted access to the workspace via bash/read/write/edit/glob/grep. It can modify `prompt.md`, create `ToolHandler` subclasses in `tools/`, or add helper modules in `lib/`.
 
+For benchmark-focused setups such as TerminalBench, the intended design is narrower than HyperAgents: keep the outer loop, parent selection, and evaluation harness fixed while searching over the task-agent workspace. Prompt-level proposer tuning via `meta_prompt.md` is supported, but task-agent behavior remains the primary optimization target.
+
 ## Mutation hierarchy
 
 The meta-agent prompt encourages improvements in this priority order:
@@ -95,7 +97,7 @@ Optionally override `feedback()` for domain-specific analysis and `staged_sample
 - **Config-first, not code-first.** HyperAgents puts the task agent and meta agent in one editable Python file. We separate concerns: the workspace holds the task-agent definition (prompt + tools + code), the meta-agent is a standard rho-agent Session, and the harness is a pluggable ABC.
 - **Structured feedback.** HyperAgents dumps raw results into the container for the meta-agent to discover via bash. We inject `harness.feedback()` directly into the meta-agent prompt and write `eval_results.json` to the workspace for deeper inspection.
 - **Structured mutation space.** The workspace layout (`prompt.md`, `tools/`, `lib/`) gives the meta-agent a clear hierarchy of what to change, rather than an arbitrary codebase.
-- **No self-referential modification.** HyperAgents allows the meta-agent to modify itself (metacognitive self-modification). We keep the meta-agent fixed — only the task-agent workspace is mutable. This is a simplification; self-referential modification is a potential extension.
+- **Task-agent-first optimization.** HyperAgents emphasizes self-referential modification of a unified editable program. In rho-agent evolve, the practical default is narrower: keep the search loop and evaluation harness fixed, and optimize the task-agent workspace. Prompt-level proposer tuning is optional, not the primary target.
 
 ## Initial results
 

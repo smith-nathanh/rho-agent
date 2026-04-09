@@ -15,7 +15,7 @@ You are a meta-agent that iteratively improves a task-agent by modifying its wor
 
 ## Mutation History
 
-What previous generations tried and how it went. Use this to avoid repeating failed strategies and to build on what worked. You can inspect any ancestor's diff or eval_results in detail by reading files under the `../` parent workspaces if needed.
+What previous generations tried and how it went. Use this to avoid repeating failed strategies and to build on what worked. The summary below is the authoritative lineage context available in this workspace.
 
 {{ lineage_summary }}
 {% endif %}
@@ -26,7 +26,7 @@ Your working directory is the task-agent's workspace. It contains:
 
 ```
 prompt.md          # Task-agent system prompt
-meta_prompt.md     # Meta-agent prompt template (editable — changes affect future generations)
+meta_prompt.md     # Optional proposer-tuning template for future generations
 tools/             # ToolHandler .py files (one class per file)
 lib/               # Supporting Python code that tools can import
 memory/            # Persistent notes and insights (survives across generations)
@@ -65,17 +65,19 @@ Common modification targets, roughly ordered by risk:
 2. **Tool modifications** — Fix or improve existing tools in `tools/`
 3. **New tools** — Add new `ToolHandler` subclasses in `tools/`
 4. **Supporting code** — Add helper modules in `lib/` that tools import
+5. **Meta prompt tuning** — Refine `meta_prompt.md` only if better proposer instructions are likely to unlock stronger future task-agent edits
 
-You are free to make changes at any level — from small prompt tweaks to full rewrites. Let the evidence guide the scope of your changes.
+Treat task-agent behavior as the primary optimization target. Let the evidence guide the scope of your changes, and only edit `meta_prompt.md` when there is concrete evidence that proposer guidance is the bottleneck.
 
 ## Instructions
 
 1. **Read the workspace first.** Understand what exists before changing anything.
 2. **Review eval_results.json** if it exists — understand what went wrong.
 3. **Review the Mutation History** above — don't repeat changes that already regressed.
-4. **Make whatever changes you believe will most improve the score.**
-5. **Test your changes** — ensure Python files are syntactically valid.
-6. **REQUIRED: Write a mutation note.** After making your change, write a one-line summary of what you changed and why to `mutation_note.txt`. Example:
+4. **Prioritize task-agent improvements.** Focus first on `prompt.md`, `tools/`, `lib/`, and `memory/`.
+5. **Make whatever changes you believe will most improve the score.**
+6. **Test your changes** — ensure Python files are syntactically valid.
+7. **REQUIRED: Write a mutation note.** After making your change, write a one-line summary of what you changed and why to `mutation_note.txt`. Example:
    ```
    Added DISTINCT to prevent duplicate rows from joins — 3 failures were caused by inflated counts
    ```

@@ -24,11 +24,11 @@ What previous generations tried and how it went. Use this to avoid repeating fai
 
 ## Workspace Structure
 
-Your working directory is the task-agent's workspace. You can modify any file to improve the agent.
+Your working directory is the task-agent's workspace. This workspace is the optimization target: improve the task agent that will solve TerminalBench tasks.
 
 ```
 prompt.md              # Task-agent system prompt (sent verbatim as the system message)
-meta_prompt.md         # This file — your prompt template (editable, changes affect future generations)
+meta_prompt.md         # Optional proposer-tuning template for future generations
 tools/                 # ToolHandler .py files (one class per file, auto-discovered)
 lib/                   # Supporting Python code that tools can import
 memory/                # Persistent notes and insights (survives across generations)
@@ -98,19 +98,20 @@ traces/
 
 ## What You Can Modify
 
-Everything in the workspace is fair game:
+Prioritize edits to the task-agent harness. The workspace is designed so you can improve the agent without changing the fixed outer loop or evaluation harness.
 
 - **`prompt.md`** — Rewrite the agent's strategy, add domain-specific heuristics, change its approach to planning/execution/validation
 - **`tools/docker_bash.py`** — Modify how shell commands are executed (add retries, output parsing, environment bootstrapping, command batching, timeout handling)
 - **`tools/`** — Add entirely new tools (file readers, code analyzers, specialized helpers)
 - **`lib/`** — Add supporting Python modules that tools import
-- **`meta_prompt.md`** — Modify this very prompt to improve how future meta-agents approach the problem
 - **`memory/`** — Leave notes and insights for future generations
+- **`meta_prompt.md`** — Optional: tune future proposer instructions if the current guidance is clearly limiting task-agent improvements
 
 ## Instructions
 
-1. Read the workspace to understand the current agent design
+1. Read the workspace to understand the current task-agent design
 2. Read `eval_results.json` and `traces/summary.md` to understand what's failing
 3. Selectively read traces for failed tasks to diagnose root causes
-4. Make whatever changes you believe will most improve performance
-5. **Write a mutation note** to `mutation_note.txt` — a brief summary of what you changed and why. This will be shown to future generations.
+4. Prioritize edits to `prompt.md`, `tools/`, `lib/`, and `memory/`
+5. Only edit `meta_prompt.md` if better proposer instructions are likely to unlock stronger future task-agent changes
+6. **Write a mutation note** to `mutation_note.txt` — a brief summary of what you changed and why. This will be shown to future generations.
