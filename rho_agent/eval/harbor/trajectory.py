@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import uuid
+from copy import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -234,14 +236,39 @@ class TrajectoryBuilder:
             "metadata": metadata,
         }
 
-    def save(self, path: Path | str) -> None:
-        """Write trajectory to JSON file.
+    def save(self, path: Path | str, *, incomplete: bool = False) -> None:
+        """Atomically write trajectory JSON, preserving the last complete checkpoint.
 
         Args:
             path: Output file path.
+            incomplete: Mark an observed prefix that may omit later activity.
         """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
         trajectory = self.to_trajectory()
-        path.write_text(json.dumps(trajectory, indent=2))
+        if incomplete:
+            trajectory["metadata"]["incomplete"] = True
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", dir=path.parent, prefix="." + path.name + ".", suffix=".tmp", delete=False
+            ) as stream:
+                temporary = Path(stream.name)
+                json.dump(trajectory, stream, indent=2)
+            temporary.replace(path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def checkpoint(self, path: Path | str, events: list[AgentEvent], *, user_input: str) -> None:
+        """Save completed turns plus the observed prefix of the current turn.
+
+        Keep the completed-turn builder unchanged, so later checkpoints and the
+        final trajectory cannot duplicate an in-progress turn.
+        """
+        snapshot = copy(self)
+        # Completed steps are read-only; only the snapshot's list is appended to.
+        snapshot._steps = self._steps.copy()
+        snapshot.build_from_events(events, user_input=user_input)
+        snapshot.save(path, incomplete=True)
