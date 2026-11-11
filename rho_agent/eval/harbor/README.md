@@ -1,197 +1,92 @@
-# Harbor Integration
+# rho-agent on Harbor (Terminal-Bench)
 
-This package exposes `rho_agent.eval.harbor.agent:RhoAgent` for running `rho-agent` inside [Harbor](https://github.com/laude-institute/harbor) jobs.
-
-Harbor already supports loading installed agent classes by import path, so the supported integration point is:
-
-```text
-rho_agent.eval.harbor.agent:RhoAgent
-```
-
-## User Workflow
-
-Use this when you want to run Harbor with a locally installed `rho-agent` package while task containers install `rho-agent` from git.
-
-### Prerequisites
-
-- Python 3.12+ for Harbor
-- Docker
-- API credentials exported in your shell or loaded from a `.env`
-
-Harbor only forwards environment variables that exist in the `harbor run` process environment. A shell variable is not enough.
-
-Before running Harbor, make sure your API key is exported:
+`RhoAgent` is a Harbor installed agent: Harbor installs rho-agent inside each
+task container and runs `rho_agent.eval.harbor.runner` there. Written against
+Harbor 0.25; Harbor needs Python 3.12 or newer.
 
 ```bash
-export OPENAI_API_KEY=sk-...
-export OPENAI_MODEL=gpt-5.2  # optional
-printenv OPENAI_API_KEY | wc -c
+uv pip install -e ".[harbor]"
 ```
 
-If you keep credentials in a `.env` file, export them before running Harbor:
+## Before a run
 
-```bash
-set -a
-source .env
-set +a
-printenv OPENAI_API_KEY | wc -c
-```
+1. **Push the code you want evaluated.** The container installs rho-agent from
+   git (`install_source: git`, `version: <branch, tag or commit>`) or from PyPI.
+   A local, unpushed branch cannot be installed.
+2. **Export the provider key** for the model, e.g. `OPENAI_API_KEY` or
+   `ANTHROPIC_API_KEY`. Harbor passes it into the container.
+3. **Validate without running anything:**
 
-If `printenv OPENAI_API_KEY` is empty, Harbor will start but the agent inside the task will fail authentication.
+   ```bash
+   harbor run --config terminal-bench-subset.yaml --dry-run
+   harbor agent schema rho_agent.eval.harbor.agent:RhoAgent
+   ```
 
-Install Harbor and install `rho-agent` from git in your local environment so Harbor can import `rho_agent.eval.harbor.agent:RhoAgent`:
+## Running
 
-```bash
-uv tool install harbor
-uv tool install 'git+https://github.com/smith-nathanh/rho-agent.git#egg=rho-agent[evals]'
-```
-
-Or in a project environment:
-
-```bash
-uv add harbor
-uv pip install 'git+https://github.com/smith-nathanh/rho-agent.git#egg=rho-agent[evals]'
-```
-
-### Sample configs
-
-The package ships Harbor config templates. List them with:
+With a bundled config:
 
 ```bash
 rho-eval harbor list-configs
+rho-eval harbor write-config terminal-bench-subset -o terminal-bench-subset.yaml
+harbor run --config terminal-bench-subset.yaml
 ```
 
-Write one to your current directory:
+| Config | Dataset | Tasks |
+|---|---|---|
+| `terminal-bench-subset.yaml` | `terminal-bench/terminal-bench@4.1.0` | 20 |
+| `terminal-bench.yaml` | `terminal-bench/terminal-bench@4.1.0` | 66 |
+
+Or directly:
 
 ```bash
-rho-eval harbor write-config terminal-bench-prelim-git
-rho-eval harbor write-config terminal-bench-sample
-rho-eval harbor write-config terminal-bench
+harbor run -d terminal-bench/terminal-bench@4.1.0 \
+  -a rho_agent.eval.harbor.agent:RhoAgent -m openai/gpt-6.1-sol \
+  --ak install_source=git --ak version=main \
+  --ak bash_only=true --ak cost_ceiling_usd=4 --ak max_wall_seconds=27000
 ```
 
-For a quick smoke test, use the git-backed hello-world config:
+## Options
 
-```bash
-rho-eval harbor write-config terminal-bench-prelim-git
-```
+Pass as `--ak key=value` or under `kwargs` in a job config.
 
-Edit `terminal-bench-prelim-git.yaml` and set:
+| Option | Default | Meaning |
+|---|---|---|
+| `install_source` | `pypi` | `pypi` or `git` |
+| `repo_url` | this repo | Repository for `install_source: git` |
+| `version` | latest | PyPI version, or git branch, tag or commit |
+| `bash_only` | `false` | Only the bash tool |
+| `reasoning_effort` | provider default | Also settable with Harbor's `--effort` |
+| `enable_confirm_done` | `true` | Completion gate: the agent must confirm it verified its work |
+| `confirm_done_max` | `3` | Maximum gate rounds |
+| `cost_ceiling_usd` | `0` (off) | Stop the agent at this cost per task |
+| `max_wall_seconds` | `0` (off) | Stop the agent cleanly after this long; set below the task timeout |
+| `max_call_seconds` | `1200` | Abandon and retry one model call after this long |
+| `enable_reviewer` | `false` | Separate review pass after the agent finishes |
+| `reviewer_max_iterations` | `1` | Review-and-revise loops |
+| `temperature` | provider default | Sampling temperature |
 
-- `version` to the branch, tag, or commit you want Harbor containers to install
-- `kwargs.repo_url` to the repository Harbor should clone inside the task container
+The cost and time caps are enforced inside the agent loop, between every step.
+A capped run exits normally, so the verifier still grades whatever exists.
 
-For a small real eval, use the 10-task sample dataset:
+## Cost
 
-```bash
-rho-eval harbor write-config terminal-bench-sample
-```
+The worst case for a job is `cost_ceiling_usd` x tasks x `n_attempts`.
+Terminal-Bench 4.x allows each task up to 8 hours, so always set a ceiling.
 
-This writes a config with:
+## Output
 
-```yaml
-datasets:
-  - name: terminal-bench-sample
-    version: "2.0"
-    registry: {}
-    exclude_task_names:
-      - "qemu-*"
-```
+Written to the trial's agent log directory as the run proceeds, so a killed
+trial still has them:
 
-The bundled sample config excludes `qemu-*` tasks because they are not reliable on ARM Macs.
+| File | Contents |
+|---|---|
+| `trace.jsonl` | Append-only event log (messages, model calls, tool calls) |
+| `trajectory.json` | ATIF trajectory, rewritten after every tool call |
+| `tokens.json` | Running token and cost totals |
+| `stdout.txt` | Console output |
 
-Then run Harbor:
+## Notes
 
-```bash
-harbor run --config ./terminal-bench-prelim-git.yaml
-harbor run --config ./terminal-bench-sample.yaml
-RHO_AGENT_SERVICE_TIER=flex harbor run --config ./terminal-bench.yaml
-```
-
-For the `terminal-bench-prelim-git.yaml` smoke test, a good preflight is:
-
-```bash
-docker info >/dev/null
-printenv OPENAI_API_KEY | wc -c
-harbor run --config ./terminal-bench-prelim-git.yaml
-```
-
-### How installation works inside task containers
-
-The Harbor host process imports the agent class from your local Python environment:
-
-```yaml
-agents:
-  - import_path: rho_agent.eval.harbor.agent:RhoAgent
-```
-
-Inside each task container, `RhoAgent` can install `rho-agent` either from PyPI or from git. At the moment, the supported workflow is git install via:
-
-```yaml
-agents:
-  - import_path: rho_agent.eval.harbor.agent:RhoAgent
-    version: main
-    kwargs:
-      install_source: git
-      repo_url: https://github.com/smith-nathanh/rho-agent.git
-```
-
-`version` is the git ref to check out inside the task container.
-
-### Important kwargs
-
-Bundled configs use `kwargs` such as:
-
-- `install_source`
-- `repo_url`
-- `bash_only`
-- `enable_reviewer`
-- `reviewer_max_iterations`
-- `enable_confirm_done`
-- `confirm_done_max`
-- `temperature`
-- `reasoning_effort`
-- `cost_ceiling_usd`
-
-## PyPI Workflow
-
-If `rho-agent` is published to PyPI later, Harbor containers can install from PyPI instead of git:
-
-```yaml
-agents:
-  - import_path: rho_agent.eval.harbor.agent:RhoAgent
-    kwargs:
-      install_source: pypi
-```
-
-For local iteration outside containers, editable installs are still fine:
-
-```bash
-cd ~/proj/harbor
-uv pip install -e ~/proj/rho-agent
-```
-
-## Environment Variables
-
-`RhoAgent` forwards provider configuration from the Harbor host process into the task container through `ExecInput(env=...)`. The main variables are:
-
-- `OPENAI_API_KEY`
-- `RHO_AGENT_MODEL` or `OPENAI_MODEL`
-- `RHO_AGENT_BASE_URL` or `OPENAI_BASE_URL`
-- `RHO_AGENT_SERVICE_TIER`
-
-These must be exported environment variables in the shell that launches `harbor run`.
-
-Model selection is strict:
-
-- If `RHO_AGENT_MODEL` or `OPENAI_MODEL` is set and `agents[].model_name` is also set, the run will fail fast if they disagree.
-- Minimal comparison normalization is applied for conflict detection, so `openai/gpt-5.4` and `gpt-5.4` are treated as equivalent.
-- The resolved model source and effective model are logged at agent startup.
-
-## Bundled Configs
-
-| File | Dataset | Tasks | Use case |
-|------|---------|-------|----------|
-| `terminal-bench-prelim-git.yaml` | `hello-world` | 1 | Git-backed smoke test |
-| `terminal-bench-prelim.yaml` | `hello-world` | 1 | PyPI-backed smoke test |
-| `terminal-bench-sample.yaml` | `terminal-bench-sample` | 10 | Short validation run |
-| `terminal-bench.yaml` | `terminal-bench` | 89 | Full benchmark |
+- `qemu-*` tasks were not reliable under Docker on ARM Macs in earlier runs.
+- The `delegate` tool is disabled in this runner: a run measures one agent.

@@ -1,153 +1,193 @@
+"""Tests for the Harbor adapter, run against the installed Harbor package."""
+
 from __future__ import annotations
 
-import importlib
-import logging
-import sys
-import types
+import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+pytest.importorskip("harbor", reason="harbor extra not installed")
 
-def _load_agent_module():
-    harbor = types.ModuleType("harbor")
-    harbor.__path__ = []
+from harbor.agents.installed.base import BaseInstalledAgent
+from harbor.models.agent.context import AgentContext
 
-    agents = types.ModuleType("harbor.agents")
-    agents.__path__ = []
-    installed = types.ModuleType("harbor.agents.installed")
-    installed.__path__ = []
-    base = types.ModuleType("harbor.agents.installed.base")
-
-    @dataclass
-    class ExecInput:
-        command: str
-        cwd: str | None = None
-        env: dict[str, str] | None = None
-        timeout_sec: int | None = None
-
-    class BaseInstalledAgent:
-        def __init__(
-            self,
-            logs_dir: Path,
-            *args,
-            model_name: str | None = None,
-            logger=None,
-            version: str | None = None,
-            **kwargs,
-        ) -> None:
-            self.logs_dir = logs_dir
-            self.model_name = model_name
-            self.logger = logger
-            self._version = version
-
-    base.BaseInstalledAgent = BaseInstalledAgent
-    base.ExecInput = ExecInput
-
-    models = types.ModuleType("harbor.models")
-    models.__path__ = []
-    agent_pkg = types.ModuleType("harbor.models.agent")
-    agent_pkg.__path__ = []
-    context_mod = types.ModuleType("harbor.models.agent.context")
-
-    class AgentContext:
-        pass
-
-    context_mod.AgentContext = AgentContext
-
-    sys.modules.update(
-        {
-            "harbor": harbor,
-            "harbor.agents": agents,
-            "harbor.agents.installed": installed,
-            "harbor.agents.installed.base": base,
-            "harbor.models": models,
-            "harbor.models.agent": agent_pkg,
-            "harbor.models.agent.context": context_mod,
-        }
-    )
-
-    sys.modules.pop("rho_agent.eval.harbor.agent", None)
-    return importlib.import_module("rho_agent.eval.harbor.agent")
+from rho_agent.eval.harbor.agent import RhoAgent
 
 
-@pytest.fixture
-def harbor_agent_module():
-    return _load_agent_module()
+@dataclass
+class _Result:
+    return_code: int = 0
+    stdout: str = ""
+    stderr: str = ""
 
 
-def test_default_template_variables_use_pypi_install(harbor_agent_module) -> None:
-    agent = harbor_agent_module.RhoAgent(logs_dir=Path("/tmp/logs"))
+class _FakeEnvironment:
+    """Records exec calls; every command succeeds."""
 
-    assert agent._template_variables == {
-        "install_source": "pypi",
-        "repo_url": "https://github.com/smith-nathanh/rho-agent.git",
-        "venv_path": "/opt/rho-agent-venv",
-    }
+    default_user = None
 
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
 
-def test_git_install_template_variables_include_version(harbor_agent_module) -> None:
-    agent = harbor_agent_module.RhoAgent(
-        logs_dir=Path("/tmp/logs"),
-        install_source="git",
-        repo_url="https://example.com/custom/rho-agent.git",
-        version="feature/harbor-fix",
-    )
-
-    assert agent._template_variables == {
-        "install_source": "git",
-        "repo_url": "https://example.com/custom/rho-agent.git",
-        "venv_path": "/opt/rho-agent-venv",
-        "version": "feature/harbor-fix",
-    }
+    async def exec(self, command: str, **kwargs: Any) -> _Result:
+        self.calls.append({"command": command, **kwargs})
+        return _Result()
 
 
-def test_invalid_install_source_raises(harbor_agent_module) -> None:
+@pytest.fixture(autouse=True)
+def _api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    for name in ("RHO_AGENT_API_KEY", "RHO_AGENT_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def _agent(tmp_path: Path, **kwargs: Any) -> RhoAgent:
+    kwargs.setdefault("model_name", "openai/gpt-6.1-sol")
+    return RhoAgent(tmp_path, **kwargs)
+
+
+def test_adapter_implements_the_current_harbor_interface(tmp_path: Path) -> None:
+    agent = _agent(tmp_path)
+    assert isinstance(agent, BaseInstalledAgent)
+    assert RhoAgent.name() == "rho-agent"
+    assert RhoAgent.capabilities.atif and RhoAgent.capabilities.reasoning_effort
+    assert RhoAgent.import_path() == "rho_agent.eval.harbor.agent:RhoAgent"
+    assert agent.to_agent_info().model_info.name == "gpt-6.1-sol"
+    assert "cost_ceiling_usd" in json.dumps(RhoAgent.options_schema())
+
+
+def test_options_are_validated_and_coerced_from_strings(tmp_path: Path) -> None:
+    agent = _agent(tmp_path, bash_only="true", cost_ceiling_usd="4", confirm_done_max="2")
+    assert agent.options.bash_only is True
+    assert agent.options.cost_ceiling_usd == 4.0
+    assert agent.options.confirm_done_max == 2
+
+    with pytest.raises(ValueError, match="Unknown option 'bogus'"):
+        _agent(tmp_path, bogus=1)
     with pytest.raises(ValueError, match="install_source"):
-        harbor_agent_module.RhoAgent(logs_dir=Path("/tmp/logs"), install_source="local")
+        _agent(tmp_path, install_source="tarball")
 
 
-def test_run_command_uses_stable_container_venv(harbor_agent_module, monkeypatch) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setenv("OPENAI_MODEL", "openai/gpt-5-mini")
-    agent = harbor_agent_module.RhoAgent(
-        logs_dir=Path("/tmp/logs"),
+def test_package_spec_for_pypi_and_git(tmp_path: Path) -> None:
+    assert _agent(tmp_path)._package_spec() == "rho-agent[evals]"
+    assert _agent(tmp_path, version="0.2.0")._package_spec() == "rho-agent[evals]==0.2.0"
+    git = _agent(tmp_path, install_source="git", version="abc123", repo_url="https://x/y.git")
+    assert git._package_spec() == "rho-agent[evals] @ git+https://x/y.git@abc123"
+
+
+async def test_install_builds_a_private_virtualenv(tmp_path: Path) -> None:
+    env = _FakeEnvironment()
+    await _agent(tmp_path, install_source="git", version="main").install(env)
+
+    install = env.calls[-1]["command"]
+    assert "uv python install 3.12" in install
+    assert 'uv venv --python 3.12 "$HOME/.rho-agent/venv"' in install
+    assert "rho-agent[evals] @ git+" in install and "@main" in install
+    assert "import rho_agent.eval.harbor.runner" in install
+    assert env.calls[-1].get("user") is None  # runs as the agent user, not root
+
+
+async def test_run_passes_instruction_settings_and_credentials(tmp_path: Path) -> None:
+    env = _FakeEnvironment()
+    agent = _agent(
+        tmp_path,
         bash_only=True,
-        logger=logging.getLogger("test"),
+        cost_ceiling_usd=4,
+        max_wall_seconds=600,
+        reasoning_effort="medium",
+        enable_confirm_done=True,
     )
 
-    [command] = agent.create_run_agent_commands("solve task")
+    await agent.run("fix the 'thing'", env, AgentContext())
 
-    assert command.env is not None
-    assert command.env["OPENAI_API_KEY"] == "sk-test"
-    assert command.env["RHO_AGENT_MODEL"] == "openai/gpt-5-mini"
-    assert "/opt/rho-agent-venv/bin/python -B -m rho_agent.eval.harbor.runner" in command.command
-    assert "/rho-agent/.venv/bin/python" not in command.command
-    assert "--bash-only" in command.command
+    call = env.calls[-1]
+    command, run_env = call["command"], call["env"]
+    assert "-m rho_agent.eval.harbor.runner" in command
+    assert "'fix the '\"'\"'thing'\"'\"''" in command  # shell-quoted instruction
+    assert command.rstrip().endswith("tee /logs/agent/stdout.txt")
+    assert " --bash-only " in command
+    assert run_env["RHO_AGENT_MODEL"] == "openai/gpt-6.1-sol"
+    assert run_env["OPENAI_API_KEY"] == "sk-test-not-real"
+    assert run_env["RHO_AGENT_LOGS_DIR"] == "/logs/agent"
+    assert run_env["RHO_AGENT_COST_CEILING_USD"] == "4.0"
+    assert run_env["RHO_AGENT_MAX_WALL_SECONDS"] == "600.0"
+    assert run_env["RHO_AGENT_REASONING_EFFORT"] == "medium"
+    assert run_env["RHO_AGENT_CONFIRM_DONE"] == "1"
+    # The key is not written into the command line, where it would be logged.
+    assert "sk-test-not-real" not in command
 
 
-def test_model_conflict_raises(harbor_agent_module, monkeypatch) -> None:
-    monkeypatch.setenv("OPENAI_MODEL", "openai/gpt-5.2")
-    agent = harbor_agent_module.RhoAgent(
-        logs_dir=Path("/tmp/logs"),
-        model_name="openai/gpt-5.4",
-        logger=logging.getLogger("test"),
+async def test_run_omits_optional_settings_by_default(tmp_path: Path) -> None:
+    env = _FakeEnvironment()
+    await _agent(tmp_path).run("task", env, AgentContext())
+
+    run_env = env.calls[-1]["env"]
+    assert "--bash-only" not in env.calls[-1]["command"]
+    for name in (
+        "RHO_AGENT_COST_CEILING_USD",
+        "RHO_AGENT_MAX_WALL_SECONDS",
+        "RHO_AGENT_TEMPERATURE",
+        "RHO_AGENT_REASONING_EFFORT",
+        "RHO_AGENT_ENABLE_REVIEWER",
+    ):
+        assert name not in run_env
+
+
+def test_non_openai_models_get_their_own_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
+    env = _agent(tmp_path, model_name="anthropic/claude-opus-5-5")._runner_env()
+    assert env["ANTHROPIC_API_KEY"] == "sk-ant-test-not-real"
+    assert env["RHO_AGENT_MODEL"] == "anthropic/claude-opus-5-5"
+
+
+def test_missing_model_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="model is required"):
+        RhoAgent(tmp_path)._runner_env()
+
+
+def test_usage_is_read_from_tokens_json(tmp_path: Path) -> None:
+    (tmp_path / "tokens.json").write_text(
+        json.dumps({"input": 1200, "output": 300, "cached": 900, "cost_usd": 0.42})
     )
-
-    with pytest.raises(ValueError, match="Model conflict"):
-        agent.create_run_agent_commands("solve task")
-
-
-def test_equivalent_model_names_do_not_conflict(harbor_agent_module, monkeypatch) -> None:
-    monkeypatch.setenv("OPENAI_MODEL", "gpt-5.4")
-    agent = harbor_agent_module.RhoAgent(
-        logs_dir=Path("/tmp/logs"),
-        model_name="openai/gpt-5.4",
-        logger=logging.getLogger("test"),
+    context = AgentContext()
+    _agent(tmp_path).populate_context_post_run(context)
+    assert (context.n_input_tokens, context.n_output_tokens, context.n_cache_tokens) == (
+        1200,
+        300,
+        900,
     )
+    assert context.cost_usd == 0.42
 
-    [command] = agent.create_run_agent_commands("solve task")
 
-    assert command.env is not None
-    assert command.env["RHO_AGENT_MODEL"] == "gpt-5.4"
+def test_usage_falls_back_to_the_trace_when_tokens_json_is_missing(tmp_path: Path) -> None:
+    events = [
+        {"type": "run_start", "prompt": "go"},
+        {
+            "type": "llm_end",
+            "input_tokens": 100,
+            "output_tokens": 10,
+            "cache_read_tokens": 80,
+            "cost_usd": 0.1,
+        },
+        {
+            "type": "llm_end",
+            "input_tokens": 200,
+            "output_tokens": 20,
+            "cache_read_tokens": 150,
+            "cost_usd": 0.2,
+        },
+    ]
+    (tmp_path / "trace.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    context = AgentContext()
+    _agent(tmp_path).populate_context_post_run(context)
+    assert (context.n_input_tokens, context.n_output_tokens, context.n_cache_tokens) == (
+        300,
+        30,
+        230,
+    )
+    assert abs(context.cost_usd - 0.3) < 1e-9

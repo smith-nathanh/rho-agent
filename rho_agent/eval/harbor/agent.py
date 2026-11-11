@@ -1,111 +1,139 @@
-"""Harbor BaseInstalledAgent wrapper for rho-agent."""
+"""Harbor installed-agent adapter for rho-agent.
+
+Harbor installs rho-agent inside the task container and runs
+``rho_agent.eval.harbor.runner`` there. Written against Harbor 0.25.
+
+Example::
+
+    harbor run -d terminal-bench/terminal-bench@4.1.0 \\
+        -a rho_agent.eval.harbor.agent:RhoAgent -m openai/gpt-6.1-sol \\
+        --ak install_source=git --ak version=<branch-or-sha> \\
+        --ak bash_only=true --ak cost_ceiling_usd=4
+"""
 
 from __future__ import annotations
 
 import json
-import logging
-import os
 import shlex
 from importlib import metadata
-from pathlib import Path
+from pathlib import PurePosixPath
+from typing import Literal, override
 
-from harbor.agents.installed.base import BaseInstalledAgent, ExecInput
+from harbor.agents.agent_auth_resolution import ModelConnectionSpec, ProviderAccess
+from harbor.agents.capabilities import AgentCapabilities
+from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_template
+from harbor.agents.options import InstalledAgentOptions
+from harbor.environments.base import BaseEnvironment
+from harbor.llms.litellm_config import (
+    LITELLM_BASE_URL_OVERRIDES,
+    litellm_model_name,
+    require_litellm_credentials,
+)
 from harbor.models.agent.context import AgentContext
+from harbor.models.model_api_format import ModelApiFormat
+from pydantic import Field
 
-_CONTAINER_VENV = "/opt/rho-agent-venv"
+DEFAULT_REPO_URL = "https://github.com/smith-nathanh/rho-agent.git"
+# Python for the agent's own virtualenv, independent of the task image's Python.
+AGENT_PYTHON_VERSION = "3.12"
+# Under the agent user's home so installation needs no root.
+VENV_DIR = "$HOME/.rho-agent/venv"
+
+_UV_ON_PATH = (
+    'if [ -f "$HOME/.local/bin/env" ]; then . "$HOME/.local/bin/env"; '
+    'else export PATH="$HOME/.local/bin:$PATH"; fi'
+)
 
 
-def _normalize_model_for_comparison(model: str | None) -> str | None:
-    """Return a minimal normalized form for conflict detection."""
-    if model is None:
-        return None
-    normalized = model.strip()
-    if not normalized:
-        return None
-    if normalized.count("/") == 1:
-        _, normalized = normalized.split("/", 1)
-    return normalized
+class RhoAgentOptions(InstalledAgentOptions):
+    """Options accepted as ``--ak key=value`` or ``kwargs`` in a job config.
+
+    ``version`` (inherited) is the PyPI version, or the git branch, tag or
+    commit when ``install_source`` is ``git``. ``reasoning_effort`` is also
+    inherited and is set with Harbor's ``--effort``.
+    """
+
+    install_source: Literal["pypi", "git"] = Field(
+        default="pypi", description="Install rho-agent from PyPI or from a git repository."
+    )
+    repo_url: str = Field(
+        default=DEFAULT_REPO_URL, description="Repository used when install_source is git."
+    )
+    bash_only: bool = Field(
+        default=False, description="Give the agent only the bash tool (no read, grep, edit)."
+    )
+    enable_confirm_done: bool = Field(
+        default=True,
+        description="Ask the agent to verify its work before it is allowed to finish.",
+    )
+    confirm_done_max: int = Field(
+        default=3, ge=0, description="Maximum verification rounds before finishing anyway."
+    )
+    enable_reviewer: bool = Field(
+        default=False, description="Run a separate review pass after the agent finishes."
+    )
+    reviewer_max_iterations: int = Field(
+        default=1, ge=0, description="Maximum review-and-revise loops."
+    )
+    temperature: float | None = Field(
+        default=None, description="Sampling temperature. Omit for the provider default."
+    )
+    cost_ceiling_usd: float = Field(
+        default=0.0, ge=0, description="Stop the agent at this cost per task. 0 disables."
+    )
+    max_wall_seconds: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Stop the agent after this many seconds so it exits cleanly and is graded. "
+            "Set it below the task's agent timeout. 0 disables."
+        ),
+    )
+    max_call_seconds: float = Field(
+        default=1200.0,
+        ge=0,
+        description="Abandon and retry a single model call after this long. 0 disables.",
+    )
 
 
 class RhoAgent(BaseInstalledAgent):
-    """Runs rho-agent inside Harbor's container environment.
+    """Runs rho-agent inside Harbor's task environment."""
 
-    This agent wrapper:
-    1. Installs rho-agent in the container during setup
-    2. Runs the rho_agent.eval.harbor.runner module with the task instruction
-    3. Returns results for Harbor's verification system
+    options_model = RhoAgentOptions
+    options: RhoAgentOptions
 
-    The container provides sandboxing, so rho-agent uses unrestricted
-    eval-mode tools depending on the config settings.
-    """
+    capabilities = AgentCapabilities(base_url=True, reasoning_effort=True, atif=True)
 
-    # Harbor agent interface
-    SUPPORTS_ATIF: bool = True
+    # The runner calls models through LiteLLM, so credentials and endpoints are
+    # resolved the way Harbor resolves them for its other LiteLLM-based agents.
+    MODEL_CONNECTION = ModelConnectionSpec(
+        base_url_overrides=LITELLM_BASE_URL_OVERRIDES,
+        supported_api_formats=[
+            ModelApiFormat.OPENAI_CHAT_COMPLETIONS,
+            ModelApiFormat.ANTHROPIC_MESSAGES,
+        ],
+        agent_provider_access=ProviderAccess(
+            api_key_candidate_names=["RHO_AGENT_API_KEY"],
+            base_url_candidate_names=["RHO_AGENT_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE"],
+        ),
+        base_url_destination_names={
+            "default": "OPENAI_BASE_URL",
+            ModelApiFormat.ANTHROPIC_MESSAGES: "ANTHROPIC_API_BASE",
+        },
+    )
 
-    DEFAULT_REPO_URL = "https://github.com/smith-nathanh/rho-agent.git"
-
-    def __init__(
-        self,
-        logs_dir: Path,
-        model_name: str | None = None,
-        logger: logging.Logger | None = None,
-        install_source: str = "pypi",
-        repo_url: str | None = None,
-        bash_only: bool = False,
-        enable_reviewer: bool = False,
-        reviewer_max_iterations: int = 1,
-        enable_confirm_done: bool = True,
-        confirm_done_max: int = 3,
-        temperature: float | None = None,
-        reasoning_effort: str | None = None,
-        cost_ceiling_usd: float = 0.0,
-        *args,
-        **kwargs,
-    ) -> None:
-        """Initialize the agent.
-
-        Args:
-            logs_dir: Directory to write agent logs to.
-            model_name: Model to use (e.g., "openai/gpt-5-mini").
-            logger: Logger instance.
-            install_source: How to install rho-agent in the task container: "pypi" or "git".
-            repo_url: Optional git repository URL used when install_source="git".
-            bash_only: If True, only provide bash tool (no Read, Grep, etc.).
-            enable_reviewer: If True, run post-execution review after actor completes.
-            reviewer_max_iterations: Max review-revise loops (0 = review only, no revision).
-            enable_confirm_done: If True, require explicit CONFIRM_DONE after actor completes.
-            confirm_done_max: Max confirm retries before proceeding (default: 3).
-            temperature: Model temperature (default: None, uses API default).
-            reasoning_effort: Reasoning effort level: "low", "medium", "high" (default: None).
-            cost_ceiling_usd: Max cost per task in USD, 0 = disabled (default: 0.0).
-        """
-        normalized_install_source = install_source.strip().lower()
-        if normalized_install_source not in {"pypi", "git"}:
-            raise ValueError(
-                "install_source must be 'pypi' or 'git', "
-                f"got {install_source!r}"
-            )
-
-        logger = logger or logging.getLogger(__name__)
-        super().__init__(logs_dir, *args, model_name=model_name, logger=logger, **kwargs)
-        self._install_source = normalized_install_source
-        self._repo_url = repo_url or self.DEFAULT_REPO_URL
-        self._bash_only = bash_only
-        self._enable_reviewer = enable_reviewer
-        self._reviewer_max_iterations = reviewer_max_iterations
-        self._enable_confirm_done = enable_confirm_done
-        self._confirm_done_max = confirm_done_max
-        self._temperature = temperature
-        self._reasoning_effort = reasoning_effort
-        self._cost_ceiling_usd = cost_ceiling_usd
+    @classmethod
+    @override
+    def check_model_credentials(cls, connection, *, kwargs, env, explicit_env=None):
+        require_litellm_credentials(connection, cls.name())
 
     @staticmethod
+    @override
     def name() -> str:
-        """Return the agent name for Harbor."""
         return "rho-agent"
 
+    @override
     def version(self) -> str | None:
-        """Return the agent version."""
         if self._version:
             return self._version
         try:
@@ -113,33 +141,120 @@ class RhoAgent(BaseInstalledAgent):
         except metadata.PackageNotFoundError:
             return None
 
+    @override
     def get_version_command(self) -> str:
-        """Return a command that prints the installed rho-agent version in the container."""
         return (
-            f"{_CONTAINER_VENV}/bin/python -c "
+            f"{VENV_DIR}/bin/python -c "
             "\"import importlib.metadata; print(importlib.metadata.version('rho-agent'))\""
         )
 
-    @property
-    def _install_agent_template_path(self) -> Path:
-        """Path to the Jinja2 install script template."""
-        return Path(__file__).parent / "install-rho-agent.sh.j2"
+    # --- install ---
 
-    @property
-    def _template_variables(self) -> dict[str, str]:
-        """Variables to pass to the install script template."""
-        variables = {
-            "install_source": self._install_source,
-            "repo_url": self._repo_url,
-            "venv_path": _CONTAINER_VENV,
+    def _package_spec(self) -> str:
+        """The requirement passed to ``uv pip install``."""
+        if self.options.install_source == "git":
+            ref = f"@{self._version}" if self._version else ""
+            return f"rho-agent[evals] @ git+{self.options.repo_url}{ref}"
+        pin = f"=={self._version}" if self._version else ""
+        return f"rho-agent[evals]{pin}"
+
+    @override
+    async def install(self, environment: BaseEnvironment) -> None:
+        await self.ensure_system_dependencies(environment, ("curl", "bash", "git"))
+        python_version = shlex.quote(AGENT_PYTHON_VERSION)
+        await self.exec_as_agent(
+            environment,
+            command=(
+                "set -euo pipefail; "
+                "if ! command -v uv >/dev/null 2>&1; then"
+                "  curl -LsSf https://astral.sh/uv/install.sh | sh;"
+                " fi && "
+                f"{_UV_ON_PATH} && "
+                # A private Python keeps the agent independent of the task
+                # image, which may ship an old interpreter or none at all.
+                f"uv python install {python_version} && "
+                f'rm -rf "{VENV_DIR}" && '
+                f'uv venv --python {python_version} "{VENV_DIR}" && '
+                f'uv pip install --python "{VENV_DIR}/bin/python" '
+                f"{shlex.quote(self._package_spec())} && "
+                f'"{VENV_DIR}/bin/python" -c "import rho_agent.eval.harbor.runner"'
+            ),
+        )
+
+    # --- run ---
+
+    def _runner_env(self) -> dict[str, str]:
+        """Environment for the runner process: credentials plus runner settings."""
+        if not self.model_name:
+            raise ValueError("A model is required, in the form provider/model_name")
+
+        access = self.model_connection
+        require_litellm_credentials(access, self.name())
+        opts = self.options
+        env: dict[str, str] = {
+            **access.env,
+            "RHO_AGENT_MODEL": litellm_model_name(
+                self.model_name,
+                model_api_format=self._model_api_format,
+                skip_model_parsing=self.skip_model_parsing,
+            ),
+            "RHO_AGENT_LOGS_DIR": str(self.environment_logs_dir),
+            "RHO_AGENT_CONFIRM_DONE": "1" if opts.enable_confirm_done else "0",
+            "RHO_AGENT_CONFIRM_DONE_MAX": str(opts.confirm_done_max),
+            "RHO_AGENT_MAX_CALL_SECONDS": str(opts.max_call_seconds),
         }
-        if self._version:
-            variables["version"] = self._version
-        return variables
+        if opts.enable_reviewer:
+            env["RHO_AGENT_ENABLE_REVIEWER"] = "1"
+            env["RHO_AGENT_REVIEWER_MAX_ITERATIONS"] = str(opts.reviewer_max_iterations)
+        if opts.temperature is not None:
+            env["RHO_AGENT_TEMPERATURE"] = str(opts.temperature)
+        if opts.reasoning_effort:
+            env["RHO_AGENT_REASONING_EFFORT"] = opts.reasoning_effort
+        if opts.cost_ceiling_usd > 0:
+            env["RHO_AGENT_COST_CEILING_USD"] = str(opts.cost_ceiling_usd)
+        if opts.max_wall_seconds > 0:
+            env["RHO_AGENT_MAX_WALL_SECONDS"] = str(opts.max_wall_seconds)
+        return env
 
+    def _run_command(self, instruction: str) -> str:
+        logs = PurePosixPath(self.environment_logs_dir)
+        flags = " --bash-only" if self.options.bash_only else ""
+        return (
+            f"mkdir -p {shlex.quote(str(logs))} && "
+            f'"{VENV_DIR}/bin/python" -B -m rho_agent.eval.harbor.runner '
+            f'{shlex.quote(instruction)} "$(pwd)"{flags} '
+            f"2>&1 </dev/null | tee {shlex.quote(str(logs / 'stdout.txt'))}"
+        )
+
+    @with_prompt_template
+    @override
+    async def run(
+        self, instruction: str, environment: BaseEnvironment, context: AgentContext
+    ) -> None:
+        env = self._runner_env()
+        self.logger.info(
+            "Running rho-agent: model=%s bash_only=%s confirm_done=%s reviewer=%s "
+            "effort=%s cost_ceiling_usd=%s max_wall_seconds=%s",
+            env["RHO_AGENT_MODEL"],
+            self.options.bash_only,
+            self.options.enable_confirm_done,
+            self.options.enable_reviewer,
+            self.options.reasoning_effort,
+            self.options.cost_ceiling_usd,
+            self.options.max_wall_seconds,
+        )
+        await self.exec_as_agent(environment, command=self._run_command(instruction), env=env)
+
+    # --- results ---
+
+    @override
     def populate_context_post_run(self, context: AgentContext) -> None:
-        """Parse token usage and cost from telemetry, populate Harbor's AgentContext."""
-        # Try incremental tokens file first (survives process kill)
+        """Fill token usage and cost from the logs the runner wrote.
+
+        ``tokens.json`` is rewritten after every tool call. If it is missing or
+        unreadable, usage is rebuilt from the append-only ``trace.jsonl``, which
+        survives a killed process.
+        """
         tokens_path = self.logs_dir / "tokens.json"
         if tokens_path.exists():
             try:
@@ -149,155 +264,23 @@ class RhoAgent(BaseInstalledAgent):
                 context.n_cache_tokens = data.get("cached", 0)
                 if "cost_usd" in data:
                     context.cost_usd = data["cost_usd"]
-                reasoning_tokens = data.get("reasoning", 0)
-                self.logger.info(
-                    f"Token usage: input={context.n_input_tokens}, "
-                    f"output={context.n_output_tokens}, reasoning={reasoning_tokens}, "
-                    f"cost=${context.cost_usd or 0:.4f}"
-                )
                 return
             except Exception as e:
                 self.logger.warning(f"Failed to parse tokens.json: {e}")
 
-        # Fall back to telemetry DB
-        telemetry_path = self.logs_dir / "telemetry.db"
-        if not telemetry_path.exists():
+        trace_path = self.logs_dir / "trace.jsonl"
+        if not trace_path.exists():
             return
-
         try:
-            import sqlite3
+            from rho_agent.core.state import State
 
-            conn = sqlite3.connect(telemetry_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT total_input_tokens, total_output_tokens FROM sessions LIMIT 1")
-            row = cursor.fetchone()
-            conn.close()
-
-            if row:
-                context.n_input_tokens = row[0] or 0
-                context.n_output_tokens = row[1] or 0
-                self.logger.info(
-                    f"Token usage (from DB): input={context.n_input_tokens}, "
-                    f"output={context.n_output_tokens}"
-                )
+            usage = State.from_jsonl(trace_path.read_bytes()).usage
+            context.n_input_tokens = int(usage["input_tokens"])
+            context.n_output_tokens = int(usage["output_tokens"])
+            context.n_cache_tokens = int(usage["cached_tokens"])
+            context.cost_usd = float(usage["cost_usd"])
         except Exception as e:
-            self.logger.warning(f"Failed to parse telemetry DB: {e}")
-
-    def create_run_agent_commands(self, instruction: str) -> list[ExecInput]:
-        """Create commands to run rho-agent on the task."""
-        raw_rho_agent_model = os.environ.get("RHO_AGENT_MODEL")
-        raw_openai_model = os.environ.get("OPENAI_MODEL")
-        raw_config_model = self.model_name
-
-        env_model = raw_rho_agent_model or raw_openai_model
-        env_source = "RHO_AGENT_MODEL" if raw_rho_agent_model else "OPENAI_MODEL"
-
-        normalized_env_model = _normalize_model_for_comparison(env_model)
-        normalized_config_model = _normalize_model_for_comparison(raw_config_model)
-
-        if (
-            normalized_env_model is not None
-            and normalized_config_model is not None
-            and normalized_env_model != normalized_config_model
-        ):
-            raise ValueError(
-                "Model conflict between Harbor config and environment: "
-                f"config model_name={raw_config_model!r}, "
-                f"{env_source}={env_model!r}. "
-                "Remove one source or make them match."
-            )
-
-        if env_model:
-            selected_model = env_model.strip()
-            selected_source = env_source
-        elif raw_config_model:
-            selected_model = raw_config_model.strip()
-            selected_source = "Harbor config"
-        else:
-            selected_model = "gpt-5-mini"
-            selected_source = "default"
-
-        effective_model = _normalize_model_for_comparison(selected_model)
-        if effective_model is None:
-            raise ValueError("Resolved model is empty after normalization")
-
-        env = {
-            "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", ""),
-            "RHO_AGENT_MODEL": selected_model,
-            "RHO_AGENT_TELEMETRY_DB": "/logs/agent/telemetry.db",
-        }
-
-        # Add base URL if configured
-        base_url = os.environ.get("RHO_AGENT_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
-        if base_url:
-            env["RHO_AGENT_BASE_URL"] = base_url
-
-        # Add service tier if configured (e.g., "flex" for lower cost)
-        service_tier = os.environ.get("RHO_AGENT_SERVICE_TIER")
-        if service_tier:
-            env["RHO_AGENT_SERVICE_TIER"] = service_tier
-
-        # Add reviewer config if enabled
-        if self._enable_reviewer:
-            env["RHO_AGENT_ENABLE_REVIEWER"] = "1"
-            env["RHO_AGENT_REVIEWER_MAX_ITERATIONS"] = str(self._reviewer_max_iterations)
-
-        # Add completion confirmation config
-        env["RHO_AGENT_CONFIRM_DONE"] = "1" if self._enable_confirm_done else "0"
-        env["RHO_AGENT_CONFIRM_DONE_MAX"] = str(self._confirm_done_max)
-
-        # Add temperature config (only if explicitly set)
-        if self._temperature is not None:
-            env["RHO_AGENT_TEMPERATURE"] = str(self._temperature)
-
-        # Add reasoning effort config (only if explicitly set)
-        if self._reasoning_effort:
-            env["RHO_AGENT_REASONING_EFFORT"] = self._reasoning_effort
-
-        # Add cost ceiling config (only if set > 0)
-        if self._cost_ceiling_usd > 0:
-            env["RHO_AGENT_COST_CEILING_USD"] = str(self._cost_ceiling_usd)
-
-        self.logger.info(
-            "Resolved Harbor model selection: "
-            f"source={selected_source}, "
-            f"selected={selected_model!r}, "
-            f"effective={effective_model!r}, "
-            f"config_model={raw_config_model!r}, "
-            f"RHO_AGENT_MODEL={raw_rho_agent_model!r}, "
-            f"OPENAI_MODEL={raw_openai_model!r}"
-        )
-        self.logger.info(
-            f"Running rho-agent with model: {selected_model}, "
-            f"effective_model: {effective_model}, "
-            f"bash_only: {self._bash_only}, "
-            f"reviewer: {self._enable_reviewer}, "
-            f"confirm_done: {self._enable_confirm_done}, "
-            f"temperature: {self._temperature}, "
-            f"reasoning_effort: {self._reasoning_effort}, "
-            f"cost_ceiling_usd: {self._cost_ceiling_usd}"
-        )
-
-        # Escape instruction for shell
-        escaped = shlex.quote(instruction)
-
-        # Build the run command
-        # Use tee to stream output to mounted logs (survives timeout).
-        bash_only_flag = " --bash-only" if self._bash_only else ""
-        cmd = (
-            f'export PATH="$HOME/.local/bin:$PATH"; '
-            f'{_CONTAINER_VENV}/bin/python -B -m rho_agent.eval.harbor.runner '
-            f'{escaped} "$(pwd)"{bash_only_flag} '
-            f"2>&1 | tee /logs/agent/stdout.txt"
-        )
-
-        return [
-            ExecInput(
-                command=f"bash -c {shlex.quote(cmd)}",
-                env=env,
-            )
-        ]
+            self.logger.warning(f"Failed to rebuild usage from trace.jsonl: {e}")
 
 
-# For Harbor's import_path to work
-__all__ = ["RhoAgent"]
+__all__ = ["RhoAgent", "RhoAgentOptions"]

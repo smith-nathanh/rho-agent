@@ -6,6 +6,8 @@ import asyncio
 import json
 import os
 import sys
+import time
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +17,7 @@ from rho_agent.client.litellm_client import LiteLLMClient
 from rho_agent.core import Agent, AgentConfig, Session
 from rho_agent.core.events import AgentEvent, CompletionGate
 from rho_agent.core.state import State
-from rho_agent.eval.harbor.trajectory import TrajectoryBuilder
+from rho_agent.export.atif import trace_to_atif
 from rho_agent.permissions import PermissionProfile
 from rho_agent.prompts import load_prompt, prepare_prompt
 
@@ -67,6 +69,17 @@ def format_event_trace(events: list[AgentEvent]) -> str:
         elif event.type == "error":
             lines.append(f"[Error]\n{event.content}")
     return "\n\n".join(lines)
+
+
+# Minimum seconds between rewrites of trajectory.json during a run.
+TRAJECTORY_WRITE_INTERVAL = 20.0
+
+
+def _agent_version() -> str:
+    try:
+        return metadata.version("rho-agent")
+    except metadata.PackageNotFoundError:
+        return "unknown"
 
 
 CONFIRM_TOKEN = "CONFIRM_DONE"
@@ -191,7 +204,9 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     # Create client from environment
     # LiteLLM uses model names like "openai/gpt-5-mini" or "anthropic/claude-3-5-sonnet"
     model = os.environ.get("RHO_AGENT_MODEL") or os.environ.get("OPENAI_MODEL", "openai/gpt-5-mini")
-    api_key = os.environ.get("OPENAI_API_KEY")
+    # Normally unset: LiteLLM then reads the provider's own variable
+    # (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...), which works for any provider.
+    api_key = os.environ.get("RHO_AGENT_API_KEY")
     temperature = (
         float(os.environ["RHO_AGENT_TEMPERATURE"])
         if "RHO_AGENT_TEMPERATURE" in os.environ
@@ -258,8 +273,32 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     if max_call_seconds > 0:
         session.max_call_seconds = max_call_seconds
 
-    # Create trajectory builder for ATIF output
-    trajectory_builder = TrajectoryBuilder(model=model)
+    # trajectory.json (ATIF) is derived from trace.jsonl. It is rewritten
+    # periodically during the run so a killed trial still has one.
+    last_trajectory_write = 0.0
+
+    def write_trajectory(force: bool = False) -> None:
+        nonlocal last_trajectory_write
+        trace_path = state.trace_path
+        if trace_path is None or not trace_path.exists():
+            return
+        now = time.monotonic()
+        if not force and now - last_trajectory_write < TRAJECTORY_WRITE_INTERVAL:
+            return
+        last_trajectory_write = now
+        try:
+            trajectory = trace_to_atif(
+                trace_path,
+                session_id=session.id,
+                agent_version=_agent_version(),
+                model_name=model,
+            )
+            target = logs_dir / "trajectory.json"
+            tmp = target.with_name("trajectory.json.tmp")
+            tmp.write_text(json.dumps(trajectory, indent=2))
+            os.replace(tmp, target)
+        except Exception as e:  # never let bookkeeping break the run
+            print(f"[trajectory write failed: {e}]", file=sys.stderr)
 
     try:
         # Set when a cap, error or cancel ended a turn; later phases are skipped
@@ -271,9 +310,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
 
         async def run_turn(prompt_text: str) -> str:
             nonlocal stopped
-            step_input: str | None = prompt_text
             text_content = ""
-            turn_events: list[AgentEvent] = []
 
             def _write_tokens() -> None:
                 """Write tokens/cost incrementally to mounted path (survives process kill)."""
@@ -290,9 +327,8 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                 )
 
             async def on_event(event: AgentEvent) -> None:
-                nonlocal text_content, step_input
+                nonlocal text_content
                 event_trace.append(event)
-                turn_events.append(event)
                 if event.type == "text" and event.content:
                     text_content += event.content
                     print(event.content, end="", flush=True)
@@ -309,10 +345,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                         )
                         print(f"[Result: {result_preview}]", file=sys.stderr)
                     _write_tokens()
-                    # Snapshot the trajectory so a killed trial still has one.
-                    trajectory_builder.save_snapshot(
-                        logs_dir / "trajectory.json", turn_events, user_input=step_input
-                    )
+                    write_trajectory()
                 elif event.type == "api_call_complete":
                     if os.environ.get("RHO_AGENT_DEBUG"):
                         usage = event.usage or {}
@@ -330,11 +363,6 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                 elif event.type == "error":
                     print(f"\nError: {event.content}", file=sys.stderr)
                 elif event.type == "completion_gate":
-                    # Close the agent step so far and record the gate prompt as a
-                    # user step, so the trajectory shows the exchange.
-                    trajectory_builder.build_from_events(turn_events[:-1], user_input=step_input)
-                    turn_events.clear()
-                    step_input = event.content
                     print("\n[completion gate]", file=sys.stderr)
                 elif event.type in ("retry", "max_turns", "budget_exceeded"):
                     print(f"\n[{event.type}: {event.content}]", file=sys.stderr)
@@ -353,9 +381,6 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
 
             result = await session.run(prompt_text, on_event=on_event)
             stopped = result.status in ("budget_exceeded", "error", "cancelled")
-
-            # Build trajectory from this turn's events
-            trajectory_builder.build_from_events(turn_events, user_input=step_input)
 
             return text_content
 
@@ -385,8 +410,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                 max_iterations=max_iterations,
             )
     finally:
-        # Save ATIF trajectory for Harbor analysis
-        trajectory_builder.save(logs_dir / "trajectory.json")
+        write_trajectory(force=True)
 
     print()  # Final newline
 

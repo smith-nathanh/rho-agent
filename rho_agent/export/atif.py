@@ -16,7 +16,15 @@ from typing import Any
 _SCHEMA_VERSION = "ATIF-v1.6"
 
 # Event types we skip — they don't map to ATIF steps.
-_SKIP_TYPES = {"run_start", "run_end", "tool_start", "tool_end", "tool_blocked", "compact", "llm_start"}
+_SKIP_TYPES = {
+    "run_start",
+    "run_end",
+    "tool_start",
+    "tool_end",
+    "tool_blocked",
+    "compact",
+    "llm_start",
+}
 
 
 def trace_to_atif(
@@ -57,7 +65,10 @@ def _read_events(trace_path: str | Path) -> list[dict[str, Any]]:
             line = line.strip()
             if not line:
                 continue
-            events.append(json.loads(line))
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue  # torn final line from a killed process
     return events
 
 
@@ -74,6 +85,10 @@ def _build_trajectory(
     final_metrics: dict[str, Any] | None = None
     # Collect llm_end events to pair with agent steps.
     pending_llm_end: dict[str, Any] | None = None
+    # Running totals over every model call, including compaction and child
+    # agents, used for final_metrics when the trace has no usage summary.
+    totals = {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0}
+    saw_llm_end = False
 
     i = 0
     while i < len(events):
@@ -86,7 +101,26 @@ def _build_trajectory(
             continue
 
         if etype == "llm_end":
-            pending_llm_end = event
+            saw_llm_end = True
+            totals["input_tokens"] += event.get("input_tokens", 0) or 0
+            totals["output_tokens"] += event.get("output_tokens", 0) or 0
+            totals["cached_tokens"] += event.get("cache_read_tokens", 0) or 0
+            totals["cost_usd"] += event.get("cost_usd", 0.0) or 0.0
+            # Compaction and child-agent usage has no assistant step of its own.
+            if not event.get("purpose"):
+                pending_llm_end = event
+            i += 1
+            continue
+
+        if etype == "history_replaced":
+            steps.append(
+                _make_simple_step(
+                    len(steps) + 1,
+                    source="system",
+                    message="[Context compacted: earlier history was replaced by a summary.]",
+                    timestamp=event.get("ts"),
+                )
+            )
             i += 1
             continue
 
@@ -101,12 +135,14 @@ def _build_trajectory(
         role = event.get("role")
 
         if role in ("user", "system"):
-            steps.append(_make_simple_step(
-                len(steps) + 1,
-                source=role,
-                message=event.get("content", ""),
-                timestamp=event.get("ts"),
-            ))
+            steps.append(
+                _make_simple_step(
+                    len(steps) + 1,
+                    source=role,
+                    message=event.get("content", ""),
+                    timestamp=event.get("ts"),
+                )
+            )
             i += 1
             continue
 
@@ -131,6 +167,8 @@ def _build_trajectory(
     }
     if model_name:
         trajectory["agent"]["model_name"] = model_name
+    if final_metrics is None and saw_llm_end:
+        final_metrics = _build_final_metrics(totals, len(steps))
     if final_metrics:
         trajectory["final_metrics"] = final_metrics
     return trajectory
@@ -203,10 +241,12 @@ def _build_agent_step(
             continue
 
         if next_type == "message" and next_event.get("role") == "tool":
-            observation_results.append({
-                "source_call_id": next_event.get("tool_call_id"),
-                "content": next_event.get("content", ""),
-            })
+            observation_results.append(
+                {
+                    "source_call_id": next_event.get("tool_call_id"),
+                    "content": next_event.get("content", ""),
+                }
+            )
             i += 1
             continue
 
