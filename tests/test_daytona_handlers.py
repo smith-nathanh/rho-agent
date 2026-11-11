@@ -264,11 +264,12 @@ class TestDaytonaBashHandler:
         sandbox.process.exec.return_value = _make_exec_response("ok", 0)
         h = DaytonaBashHandler(manager)
         await h.handle(_invocation("bash", command="ls", working_dir="/tmp"))
-        sandbox.process.exec.assert_called_once_with(
-            "ls",
-            cwd="/tmp",
-            timeout=300,
-        )
+        (script,), kwargs = sandbox.process.exec.call_args
+        assert "bash -c ls" in script
+        assert kwargs["cwd"] == "/tmp"
+        # The sandbox-side timeout fires first; the SDK timeout is a backstop.
+        assert "timeout -k 5 300 " in script
+        assert kwargs["timeout"] == 330
 
 
 # ---------------------------------------------------------------------------
