@@ -560,6 +560,8 @@ def main(
     # Register delegate handler if profile supports it
     if capability_profile.name not in ("birdbench",):
         _register_delegate(agent, session)
+    else:
+        agent.registry.unregister("delegate")
 
     if not agent.config.base_url and not os.getenv("OPENAI_API_KEY"):
         console.print(_markup(str(MissingApiKeyError()), THEME.error))
@@ -621,25 +623,22 @@ def main(
 
 
 def _register_delegate(agent: Agent, session: Session) -> None:
-    """Register the delegate handler if the profile supports it."""
-    from ..permissions.factory import load_profile
-    from ..tools.handlers.delegate import DelegateHandler
+    """Make sure the delegate tool is present for profiles that allow it.
 
+    The tool factory registers it already; this covers registries that were
+    replaced after the agent was built. The handler reads its context from the
+    calling session, so nothing session-specific is bound here.
+    """
+    from ..permissions.factory import ToolFactory, load_profile
+
+    if "delegate" in agent.registry:
+        return
     try:
         profile = load_profile(agent.config.profile)
     except (ValueError, FileNotFoundError):
         return
 
-    if not hasattr(profile, "requires_tool_approval"):
+    if not hasattr(profile, "requires_tool_approval") or profile.bash_only:
         return
 
-    agent.registry.register(
-        DelegateHandler(
-            parent_config=agent.config,
-            parent_system_prompt=agent.system_prompt,
-            parent_state=session.state,
-            parent_approval_callback=session.approval_callback,
-            parent_cancel_check=session.cancel_check,
-            requires_approval=profile.requires_tool_approval("delegate"),
-        )
-    )
+    ToolFactory(profile).register_delegate_tool(agent.registry)

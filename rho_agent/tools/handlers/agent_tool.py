@@ -11,7 +11,9 @@ from ...core.agent import Agent
 from ...core.config import AgentConfig
 from ...core.events import ApprovalCallback
 from ...core.session import Session
+from ...core.state import State
 from ..base import ToolHandler, ToolInvocation, ToolOutput
+from ._child import child_session_kwargs, link_child, settle_child
 
 
 class AgentToolHandler(ToolHandler):
@@ -91,6 +93,11 @@ class AgentToolHandler(ToolHandler):
     def requires_approval(self) -> bool:
         return self._requires_approval
 
+    @property
+    def parallel_safe(self) -> bool:
+        # Each invocation is an independent session.
+        return True
+
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
         """Spawn a child agent to execute the instruction."""
         instruction = self._input_formatter(invocation.arguments)
@@ -115,14 +122,29 @@ class AgentToolHandler(ToolHandler):
         if "delegate" in child_agent.registry:
             child_agent.registry.unregister("delegate")
 
-        child_session = Session(child_agent)
-        child_session.approval_callback = self._approval_callback
-        child_session.cancel_check = self._cancel_check
+        parent = invocation.session
+        # The agent tool may use a different model or endpoint from the caller,
+        # in which case it needs its own client.
+        same_model = parent is not None and (
+            parent.agent.config.model == child_config.model
+            and parent.agent.config.base_url == child_config.base_url
+        )
+        child_session = Session(
+            child_agent, **child_session_kwargs(parent, State(), share_client=same_model)
+        )
+        if parent is None:
+            child_session.approval_callback = self._approval_callback
+            child_session.cancel_check = self._cancel_check
+        link_child(parent, child_session, self._tool_name, instruction)
+        if parent is not None and self._approval_callback is not None:
+            child_session.approval_callback = self._approval_callback
 
         started = monotonic()
+        status = "error"
         try:
             async with child_session:
                 result = await child_session.run(instruction)
+                status = result.status
                 return ToolOutput(
                     content=result.text,
                     success=result.status == "completed",
@@ -142,6 +164,8 @@ class AgentToolHandler(ToolHandler):
                     "duration_seconds": round(monotonic() - started, 2),
                 },
             )
+        finally:
+            settle_child(parent, child_session, status)
 
 
 def _default_formatter(arguments: dict[str, Any]) -> str:

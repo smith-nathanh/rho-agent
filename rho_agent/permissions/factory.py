@@ -70,7 +70,24 @@ class ToolFactory:
         if not self.profile.bash_only:
             self._register_database_tools(registry, env, databases=databases)
 
+        if not self.profile.bash_only:
+            self.register_delegate_tool(registry)
+
         return registry
+
+    def register_delegate_tool(self, registry: ToolRegistry) -> None:
+        """Register the delegate tool (spawn a child agent) if the profile allows it.
+
+        The handler takes its context from the calling session, so it is safe
+        in a registry shared by several sessions.
+        """
+        if not self.profile.delegate:
+            return
+        from ..tools.handlers.delegate import DelegateHandler
+
+        registry.register(
+            DelegateHandler(requires_approval=self.profile.requires_tool_approval("delegate"))
+        )
 
     def _register_core_tools(self, registry: ToolRegistry) -> None:
         """Register tools that are always available."""

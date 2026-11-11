@@ -79,6 +79,9 @@ class Session:
         self._client = client or agent.create_client()
         self._cancelled = False
         self._session_dir = session_dir
+        # Set on a child session spawned by a tool (delegate); pause and
+        # cancel requests on the parent then apply to the child as well.
+        self.parent: Session | None = None
 
         # Execution-time settings (set by callers before run())
         self.approval_callback: ApprovalCallback | None = None
@@ -149,14 +152,18 @@ class Session:
             return True
         return False
 
+    def _pause_requested(self) -> bool:
+        """True while this session or any ancestor has a pause sentinel."""
+        session: Session | None = self
+        while session is not None:
+            if session._session_dir is not None and (session._session_dir / "pause").exists():
+                return True
+            session = session.parent
+        return False
+
     async def _check_pause(self) -> None:
-        """Sleep-poll while the pause sentinel exists. Returns when unpaused or cancelled."""
-        if self._session_dir is None:
-            return
-        pause_path = self._session_dir / "pause"
-        if not pause_path.exists():
-            return
-        while pause_path.exists():
+        """Sleep-poll while paused. Returns when unpaused or cancelled."""
+        while self._pause_requested():
             if self._is_cancelled():
                 return
             await asyncio.sleep(0.5)

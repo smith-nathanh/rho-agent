@@ -71,6 +71,7 @@ class Agent:
         factory._register_database_tools(
             registry, dict(os.environ), databases=self._config.databases
         )
+        factory.register_delegate_tool(registry)
 
         return registry
 
