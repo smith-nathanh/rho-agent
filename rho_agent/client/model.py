@@ -9,6 +9,56 @@ from typing import Any
 
 from openai import APIStatusError, AsyncOpenAI
 
+CONTEXT_OVERFLOW_MARKERS = (
+    "context_length_exceeded",
+    "maximum context length",
+    "context window",
+    "prompt is too long",
+    "too many tokens",
+    "input is too long",
+)
+
+# HTTP statuses where retrying the same request cannot help.
+_FATAL_STATUSES = frozenset({400, 401, 403, 404, 422})
+
+
+def classify_error(exc: BaseException) -> str:
+    """Classify a provider error as ``context_overflow``, ``fatal`` or ``transient``."""
+    text = str(exc).lower()
+    if any(marker in text for marker in CONTEXT_OVERFLOW_MARKERS):
+        return "context_overflow"
+    status = getattr(exc, "status_code", None)
+    if status in _FATAL_STATUSES:
+        return "fatal"
+    return "transient"
+
+
+def parse_tool_arguments(raw: str) -> tuple[dict[str, Any], str | None]:
+    """Parse tool-call arguments, returning ``(arguments, parse_error)``.
+
+    On failure the arguments are empty and ``parse_error`` describes the
+    problem, so the session can tell the model instead of running the tool
+    with no arguments.
+    """
+    if not raw:
+        return {}, None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        preview = raw if len(raw) <= 500 else raw[:500] + "..."
+        return {}, f"arguments were not valid JSON ({e.msg} at char {e.pos}): {preview}"
+    if not isinstance(parsed, dict):
+        return {}, f"arguments must be a JSON object, got {type(parsed).__name__}"
+    return parsed, None
+
+
+class ModelCallError(Exception):
+    """A non-streaming model call failed. ``kind`` is as in ``classify_error``."""
+
+    def __init__(self, message: str, kind: str = "transient") -> None:
+        super().__init__(message)
+        self.kind = kind
+
 
 @dataclass
 class ToolCall:
@@ -17,6 +67,8 @@ class ToolCall:
     id: str
     name: str
     arguments: dict[str, Any]
+    # Set when the model's arguments could not be parsed; the tool must not run.
+    parse_error: str | None = None
 
 
 @dataclass
@@ -35,6 +87,8 @@ class StreamEvent:
     tool_call: ToolCall | None = None
     stop_reason: str | None = None
     usage: dict[str, Any] | None = None
+    # For type="error": "context_overflow", "fatal" or "transient".
+    error_kind: str | None = None
 
 
 @dataclass
@@ -190,18 +244,14 @@ class ModelClient:
                     if choice.finish_reason:
                         # Emit any completed tool calls
                         for tc_data in tool_calls_in_progress.values():
-                            try:
-                                args = (
-                                    json.loads(tc_data["arguments"]) if tc_data["arguments"] else {}
-                                )
-                            except json.JSONDecodeError:
-                                args = {}
+                            args, parse_error = parse_tool_arguments(tc_data["arguments"])
                             yield StreamEvent(
                                 type="tool_call",
                                 tool_call=ToolCall(
                                     id=tc_data["id"],
                                     name=tc_data["name"],
                                     arguments=args,
+                                    parse_error=parse_error,
                                 ),
                             )
                         tool_calls_in_progress.clear()
@@ -210,9 +260,10 @@ class ModelClient:
             yield StreamEvent(
                 type="error",
                 content=f"API error {e.status_code} (after retries): {e.message}",
+                error_kind=classify_error(e),
             )
         except Exception as e:
-            yield StreamEvent(type="error", content=str(e))
+            yield StreamEvent(type="error", content=str(e), error_kind=classify_error(e))
 
     async def _stream_via_complete(self, prompt: Prompt) -> AsyncIterator[StreamEvent]:
         """Non-streaming fallback for providers that don't stream tool calls."""
@@ -251,16 +302,14 @@ class ModelClient:
             # Emit tool calls if present
             if msg.tool_calls:
                 for tc in msg.tool_calls:
-                    try:
-                        args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                    except json.JSONDecodeError:
-                        args = {}
+                    args, parse_error = parse_tool_arguments(tc.function.arguments or "")
                     yield StreamEvent(
                         type="tool_call",
                         tool_call=ToolCall(
                             id=tc.id,
                             name=tc.function.name,
                             arguments=args,
+                            parse_error=parse_error,
                         ),
                     )
 
@@ -281,9 +330,10 @@ class ModelClient:
             yield StreamEvent(
                 type="error",
                 content=f"API error {e.status_code} (after retries): {e.message}",
+                error_kind=classify_error(e),
             )
         except Exception as e:
-            yield StreamEvent(type="error", content=str(e))
+            yield StreamEvent(type="error", content=str(e), error_kind=classify_error(e))
 
     async def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         """Non-streaming completion returning (content, usage_dict)."""
@@ -336,6 +386,10 @@ class ModelClient:
         Like complete() but accepts a Prompt so the system prompt and tool
         definitions are included in the request — enabling prompt-cache reuse
         when the prefix matches a previous streaming call.
+
+        Raises:
+            ModelCallError: if the call fails. The error text is never returned
+                as content, because callers use the content as a summary.
         """
         messages = self._build_messages(prompt)
         try:
@@ -354,23 +408,23 @@ class ModelClient:
                 kwargs["service_tier"] = self._service_tier
 
             response = await self._client.chat.completions.create(**kwargs)
-            content = response.choices[0].message.content or ""
-            usage = {
-                "input_tokens": response.usage.prompt_tokens if response.usage else 0,
-                "output_tokens": response.usage.completion_tokens if response.usage else 0,
-                "cached_tokens": 0,
-                "cost_usd": 0.0,
-            }
-            return content, usage
         except APIStatusError as e:
-            return (
-                f"API error {e.status_code} (after retries): {e.message}",
-                {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0},
-            )
+            raise ModelCallError(
+                f"API error {e.status_code} (after retries): {e.message}", classify_error(e)
+            ) from e
         except Exception as e:
-            return f"Error: {e}", {
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "cached_tokens": 0,
-                "cost_usd": 0.0,
-            }
+            raise ModelCallError(str(e), classify_error(e)) from e
+
+        content = response.choices[0].message.content or ""
+        cached = 0
+        if response.usage:
+            details = getattr(response.usage, "prompt_tokens_details", None)
+            if details:
+                cached = getattr(details, "cached_tokens", 0) or 0
+        usage = {
+            "input_tokens": response.usage.prompt_tokens if response.usage else 0,
+            "output_tokens": response.usage.completion_tokens if response.usage else 0,
+            "cached_tokens": cached,
+            "cost_usd": 0.0,
+        }
+        return content, usage

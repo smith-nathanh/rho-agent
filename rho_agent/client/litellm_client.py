@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import AsyncIterator
 from typing import Any
 
-from .model import Prompt, StreamEvent, ToolCall
+from .model import (
+    ModelCallError,
+    Prompt,
+    StreamEvent,
+    ToolCall,
+    classify_error,
+    parse_tool_arguments,
+)
 
 
 class LiteLLMClient:
@@ -198,16 +204,14 @@ class LiteLLMClient:
 
             # Emit completed tool calls
             for tc in tool_calls_in_progress.values():
-                try:
-                    args = json.loads(tc["arguments"]) if tc["arguments"] else {}
-                except json.JSONDecodeError:
-                    args = {}
+                args, parse_error = parse_tool_arguments(tc["arguments"])
                 yield StreamEvent(
                     type="tool_call",
                     tool_call=ToolCall(
                         id=tc["id"],
                         name=tc["name"],
                         arguments=args,
+                        parse_error=parse_error,
                     ),
                 )
 
@@ -218,9 +222,10 @@ class LiteLLMClient:
             yield StreamEvent(
                 type="error",
                 content=f"Chunk timeout: no response received for {self._chunk_timeout}s",
+                error_kind="transient",
             )
         except Exception as e:
-            yield StreamEvent(type="error", content=str(e))
+            yield StreamEvent(type="error", content=str(e), error_kind=classify_error(e))
 
     async def _iter_with_timeout(self, response: Any) -> AsyncIterator[Any]:
         """Iterate over streaming response with chunk timeout."""
@@ -250,3 +255,20 @@ class LiteLLMClient:
 
         except Exception as e:
             return f"Error: {e}", {"input_tokens": 0, "output_tokens": 0}
+
+    async def complete_prompt(self, prompt: Prompt) -> tuple[str, dict[str, Any]]:
+        """Non-streaming completion from a Prompt (system + messages + tools).
+
+        Used for compaction. Raises ModelCallError on failure so the error text
+        is never mistaken for a summary.
+        """
+        kwargs = self._build_kwargs(prompt=prompt, stream=False)
+        kwargs.pop("response_format", None)
+        kwargs["timeout"] = 600.0
+        try:
+            response = await self._litellm.acompletion(**kwargs)
+        except Exception as e:
+            raise ModelCallError(str(e), classify_error(e)) from e
+        content = response.choices[0].message.content or ""
+        usage = self._extract_usage(response.usage, response=response)
+        return content, usage

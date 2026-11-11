@@ -98,9 +98,15 @@ class State:
         self.messages.append(msg)
         self._emit({"type": "message", **msg})
 
-    def add_assistant_tool_calls(self, tool_calls: list[dict[str, Any]]) -> None:
-        """Add assistant message with tool calls."""
-        msg: dict[str, Any] = {"role": "assistant", "content": None, "tool_calls": tool_calls}
+    def add_assistant_tool_calls(
+        self, tool_calls: list[dict[str, Any]], content: str | None = None
+    ) -> None:
+        """Add assistant message with tool calls (and any text that came with them)."""
+        msg: dict[str, Any] = {
+            "role": "assistant",
+            "content": content or None,
+            "tool_calls": tool_calls,
+        }
         self.messages.append(msg)
         self._emit({"type": "message", **msg})
 
@@ -143,11 +149,68 @@ class State:
         self, summary: str, recent_user_messages: list[str] | None = None
     ) -> None:
         """Replace history with a compacted summary."""
-        self.messages.clear()
+        new_messages: list[dict[str, Any]] = []
         if recent_user_messages:
             for msg in recent_user_messages:
-                self.messages.append({"role": "user", "content": msg})
-        self.messages.append({"role": "user", "content": summary})
+                new_messages.append({"role": "user", "content": msg})
+        new_messages.append({"role": "user", "content": summary})
+        self.replace_messages(new_messages)
+
+    def replace_messages(self, messages: list[dict[str, Any]]) -> None:
+        """Replace the whole history and record the replacement in the trace.
+
+        The ``history_replaced`` event carries the new messages so that
+        ``from_jsonl`` can rebuild post-compaction state on resume.
+        """
+        self.messages = [dict(m) for m in messages]
+        self._emit({"type": "history_replaced", "messages": [dict(m) for m in self.messages]})
+
+    def pending_tool_call_ids(self) -> list[str]:
+        """IDs of assistant tool calls that have no tool result yet."""
+        answered = {m.get("tool_call_id") for m in self.messages if m.get("role") == "tool"}
+        pending: list[str] = []
+        for m in self.messages:
+            for tc in m.get("tool_calls") or []:
+                tc_id = tc.get("id")
+                if tc_id and tc_id not in answered:
+                    pending.append(tc_id)
+        return pending
+
+    def close_pending_tool_calls(self, reason: str) -> int:
+        """Give every unanswered tool call a result so the history stays valid.
+
+        Chat APIs reject a history where an assistant tool call has no matching
+        tool message. Results are inserted directly after the calling assistant
+        message (and any results already there), not appended at the end.
+        """
+        pending = set(self.pending_tool_call_ids())
+        if not pending:
+            return 0
+        repaired: list[dict[str, Any]] = []
+        closed = 0
+        i = 0
+        while i < len(self.messages):
+            m = self.messages[i]
+            repaired.append(m)
+            i += 1
+            calls = m.get("tool_calls") or []
+            if not calls:
+                continue
+            while i < len(self.messages) and self.messages[i].get("role") == "tool":
+                repaired.append(self.messages[i])
+                i += 1
+            for tc in calls:
+                if tc.get("id") in pending:
+                    result = {"role": "tool", "tool_call_id": tc["id"], "content": reason}
+                    repaired.append(result)
+                    self._emit({"type": "message", **result})
+                    closed += 1
+        appended_only = repaired[: len(self.messages)] == self.messages
+        self.messages = repaired
+        if not appended_only:
+            # Results were inserted mid-history; record the exact order for replay.
+            self._emit({"type": "history_replaced", "messages": [dict(m) for m in self.messages]})
+        return closed
 
     def get_user_messages(self) -> list[str]:
         """Extract all user messages from history."""
@@ -189,16 +252,38 @@ class State:
 
     @classmethod
     def from_jsonl(cls, data: bytes) -> State:
-        """Deserialize state from JSONL bytes."""
+        """Deserialize state from JSONL bytes.
+
+        Accepts both a live ``trace.jsonl`` (message, llm_end, history_replaced,
+        run_start, run_end events) and the compact ``to_jsonl()`` form (message
+        events followed by one ``usage`` summary).
+        """
         state = cls()
+        saw_run_end = False
         for line in data.decode("utf-8").strip().splitlines():
             if not line.strip():
                 continue
-            event = json.loads(line)
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # torn final line from a killed process
             event_type = event.get("type")
             if event_type == "message":
                 msg = {k: v for k, v in event.items() if k != "type" and k != "ts"}
                 state.messages.append(msg)
+            elif event_type == "history_replaced":
+                state.messages = [dict(m) for m in event.get("messages", [])]
+            elif event_type == "llm_end":
+                state.usage["input_tokens"] += event.get("input_tokens", 0) or 0
+                state.usage["output_tokens"] += event.get("output_tokens", 0) or 0
+                state.usage["cached_tokens"] += event.get("cache_read_tokens", 0) or 0
+                state.usage["reasoning_tokens"] += event.get("reasoning_tokens", 0) or 0
+                state.usage["cost_usd"] += event.get("cost_usd", 0.0) or 0.0
+            elif event_type == "run_start":
+                state.run_count += 1
+            elif event_type == "run_end":
+                state.status = event.get("status", "completed")
+                saw_run_end = True
             elif event_type == "usage":
                 state.usage["input_tokens"] = event.get("input_tokens", 0)
                 state.usage["output_tokens"] = event.get("output_tokens", 0)
@@ -207,4 +292,9 @@ class State:
                 state.usage["cost_usd"] = event.get("cost_usd", 0.0)
                 state.status = event.get("status", "completed")
                 state.run_count = event.get("run_count", 0)
+                saw_run_end = True
+        if state.run_count and not saw_run_end:
+            state.status = "interrupted"  # process died mid-run
+        # A killed or cancelled run can leave tool calls without results.
+        state.close_pending_tool_calls("Interrupted before this tool call finished.")
         return state
