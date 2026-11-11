@@ -44,6 +44,7 @@ COMPACT_TAIL_TOKENS_AGGRESSIVE = 5_000
 COMPACT_CLIP_CHARS = 2_000
 
 INTERRUPTED_TOOL_RESULT = "Interrupted before this tool call finished."
+TIME_CAP_TOOL_RESULT = "Interrupted: the session time cap was reached."
 
 
 class Session:
@@ -92,6 +93,9 @@ class Session:
         # Hard caps for the whole session (all run() calls). None = no cap.
         self.max_cost_usd: float | None = getattr(config, "max_cost_usd", None)
         self.max_wall_seconds: float | None = getattr(config, "max_wall_seconds", None)
+
+        # Run a model turn's tool calls together when every call is parallel-safe.
+        self.parallel_tool_calls: bool = True
 
         # Session-level retry of transient model errors (on top of SDK retries).
         self.max_model_retries: int = 3
@@ -551,6 +555,20 @@ class Session:
 
             # Execute tool calls. If the loop exits early for any reason, run()
             # gives the remaining calls an "interrupted" result.
+            if self._can_run_in_parallel(pending_tool_calls):
+                stop = False
+                async for ev in self._run_tools_parallel(pending_tool_calls):
+                    if ev.type in ("cancelled", "budget_exceeded"):
+                        stop = True
+                    yield ev
+                if stop:
+                    return
+                if self.budget_gate is not None:
+                    gate_msg = self.budget_gate(self._last_input_tokens)
+                    if gate_msg is not None:
+                        self._state.add_user_message(gate_msg)
+                continue
+
             rejected = False
             for i, (tool_id, tool_name, tool_args, parse_error) in enumerate(pending_tool_calls):
                 if self._is_cancelled():
@@ -558,25 +576,12 @@ class Session:
                     return
 
                 if parse_error:
-                    content = (
-                        f"Error: the {tool_name} call was not executed because its "
-                        f"{parse_error}\nResend the call with valid JSON arguments."
-                    )
-                    self._state.add_tool_result(tool_id, content)
-                    self._state._emit(
-                        {
-                            "type": "tool_end",
-                            "tool_call_id": tool_id,
-                            "tool_name": tool_name,
-                            "success": False,
-                        }
-                    )
-                    yield AgentEvent(
-                        type="tool_end",
-                        tool_name=tool_name,
-                        tool_call_id=tool_id,
-                        tool_result=content,
-                        tool_metadata={"parse_error": True},
+                    yield self._record_tool_result(
+                        tool_id,
+                        tool_name,
+                        self._parse_error_result(tool_name, parse_error),
+                        success=False,
+                        metadata={"parse_error": True},
                     )
                     continue
 
@@ -623,19 +628,9 @@ class Session:
                         )
                     break
 
-                self._state._emit(
-                    {
-                        "type": "tool_start",
-                        "tool_call_id": tool_id,
-                        "tool_name": tool_name,
-                        "tool_args": tool_args,
-                    }
-                )
-
+                self._emit_tool_start(tool_id, tool_name, tool_args)
                 invocation = ToolInvocation(
-                    call_id=tool_id,
-                    tool_name=tool_name,
-                    arguments=tool_args,
+                    call_id=tool_id, tool_name=tool_name, arguments=tool_args, session=self
                 )
                 remaining = self._wall_remaining()
                 timed_out = False
@@ -652,45 +647,23 @@ class Session:
                     timed_out = True
 
                 if timed_out:
-                    content = "Interrupted: the session time cap was reached."
-                    self._state.add_tool_result(tool_id, content)
-                    self._state._emit(
-                        {
-                            "type": "tool_end",
-                            "tool_call_id": tool_id,
-                            "tool_name": tool_name,
-                            "success": False,
-                        }
-                    )
-                    yield AgentEvent(
-                        type="tool_end",
-                        tool_name=tool_name,
-                        tool_call_id=tool_id,
-                        tool_result=content,
-                        tool_metadata={"timed_out": True},
+                    yield self._record_tool_result(
+                        tool_id,
+                        tool_name,
+                        TIME_CAP_TOOL_RESULT,
+                        success=False,
+                        metadata={"timed_out": True},
                     )
                     yield self._turn_complete_event()
                     yield AgentEvent(type="budget_exceeded", content=self._budget_exceeded())
                     return
 
-                truncated_content = truncate_output(output.content)
-
-                self._state.add_tool_result(tool_id, truncated_content)
-                self._state._emit(
-                    {
-                        "type": "tool_end",
-                        "tool_call_id": tool_id,
-                        "tool_name": tool_name,
-                        "success": output.success,
-                    }
-                )
-
-                yield AgentEvent(
-                    type="tool_end",
-                    tool_name=tool_name,
-                    tool_call_id=tool_id,
-                    tool_result=truncated_content,
-                    tool_metadata=output.metadata,
+                yield self._record_tool_result(
+                    tool_id,
+                    tool_name,
+                    truncate_output(output.content),
+                    success=output.success,
+                    metadata=output.metadata,
                 )
 
             if rejected:
@@ -702,6 +675,144 @@ class Session:
                 gate_msg = self.budget_gate(self._last_input_tokens)
                 if gate_msg is not None:
                     self._state.add_user_message(gate_msg)
+
+    # --- Tool execution helpers ---
+
+    @staticmethod
+    def _parse_error_result(tool_name: str, parse_error: str) -> str:
+        return (
+            f"Error: the {tool_name} call was not executed because its "
+            f"{parse_error}\nResend the call with valid JSON arguments."
+        )
+
+    def _emit_tool_start(self, tool_id: str, tool_name: str, tool_args: dict[str, Any]) -> None:
+        self._state._emit(
+            {
+                "type": "tool_start",
+                "tool_call_id": tool_id,
+                "tool_name": tool_name,
+                "tool_args": tool_args,
+            }
+        )
+
+    def _record_tool_result(
+        self,
+        tool_id: str,
+        tool_name: str,
+        content: str,
+        *,
+        success: bool,
+        metadata: dict[str, Any] | None = None,
+    ) -> AgentEvent:
+        """Store a tool result, trace it, and return the event to yield."""
+        self._state.add_tool_result(tool_id, content)
+        self._state._emit(
+            {
+                "type": "tool_end",
+                "tool_call_id": tool_id,
+                "tool_name": tool_name,
+                "success": success,
+            }
+        )
+        return AgentEvent(
+            type="tool_end",
+            tool_name=tool_name,
+            tool_call_id=tool_id,
+            tool_result=content,
+            tool_metadata=metadata,
+        )
+
+    def _can_run_in_parallel(
+        self, pending: list[tuple[str, str, dict[str, Any], str | None]]
+    ) -> bool:
+        """True when a turn's calls can run together.
+
+        Requires at least two runnable calls, every one of them to a tool that
+        declares itself parallel-safe, and none needing approval (approval
+        prompts are shown one at a time).
+        """
+        if not self.parallel_tool_calls:
+            return False
+        runnable = [name for _, name, _, parse_error in pending if not parse_error]
+        if len(runnable) < 2:
+            return False
+        for name in runnable:
+            if not self._registry.is_parallel_safe(name):
+                return False
+            if self.approval_callback and self._registry.requires_approval(name):
+                return False
+        return True
+
+    async def _run_tools_parallel(
+        self, pending: list[tuple[str, str, dict[str, Any], str | None]]
+    ) -> AsyncIterator[AgentEvent]:
+        """Run a turn's tool calls concurrently; results are recorded in call order.
+
+        Yields one ``tool_end`` per call. If the run is cancelled or the time
+        cap is reached while calls are in flight, the unfinished calls are
+        stopped and a final ``cancelled`` or ``budget_exceeded`` event follows.
+        """
+        tasks: dict[str, asyncio.Task[Any]] = {}
+        for tool_id, tool_name, tool_args, parse_error in pending:
+            if parse_error:
+                continue
+            self._emit_tool_start(tool_id, tool_name, tool_args)
+            invocation = ToolInvocation(
+                call_id=tool_id, tool_name=tool_name, arguments=tool_args, session=self
+            )
+            tasks[tool_id] = asyncio.ensure_future(self._registry.dispatch(invocation))
+
+        cancelled = False
+        timed_out = False
+        try:
+            unfinished = set(tasks.values())
+            while unfinished:
+                if self._is_cancelled():
+                    cancelled = True
+                    break
+                remaining = self._wall_remaining()
+                if remaining is not None and remaining <= 0:
+                    timed_out = True
+                    break
+                wait = 0.25 if remaining is None else min(0.25, remaining)
+                _, unfinished = await asyncio.wait(unfinished, timeout=wait)
+        finally:
+            for task in tasks.values():
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks.values(), return_exceptions=True)
+
+        for tool_id, tool_name, _tool_args, parse_error in pending:
+            if parse_error:
+                yield self._record_tool_result(
+                    tool_id,
+                    tool_name,
+                    self._parse_error_result(tool_name, parse_error),
+                    success=False,
+                    metadata={"parse_error": True},
+                )
+                continue
+            task = tasks[tool_id]
+            if task.cancelled() or task.exception() is not None:
+                content = TIME_CAP_TOOL_RESULT if timed_out else INTERRUPTED_TOOL_RESULT
+                yield self._record_tool_result(
+                    tool_id, tool_name, content, success=False, metadata={"interrupted": True}
+                )
+                continue
+            output = task.result()
+            yield self._record_tool_result(
+                tool_id,
+                tool_name,
+                truncate_output(output.content),
+                success=output.success,
+                metadata=output.metadata,
+            )
+
+        if cancelled:
+            yield AgentEvent(type="cancelled", content="Cancelled during tool execution")
+        elif timed_out:
+            yield self._turn_complete_event()
+            yield AgentEvent(type="budget_exceeded", content=self._budget_exceeded())
 
     # --- Compaction ---
 

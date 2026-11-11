@@ -145,6 +145,11 @@ class DatabaseHandler(ToolHandler):
         ...
 
     @property
+    def parallel_safe(self) -> bool:
+        # Read-only queries do not affect each other; mutations stay serial.
+        return self._readonly
+
+    @property
     def name(self) -> str:
         return self.db_type
 

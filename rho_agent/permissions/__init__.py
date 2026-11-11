@@ -105,6 +105,11 @@ class PermissionProfile:
     shell_timeout: int = 120
     shell_working_dir: str | None = None
     bash_only: bool = False  # If True, only bash tool is registered (no Read, Grep, etc.)
+    # If True, several bash calls in one model turn may run concurrently.
+    # Off by default: shell commands can depend on each other's side effects.
+    parallel_bash: bool = False
+    # If True, register the delegate tool (spawn a child agent). Ignored in bash_only mode.
+    delegate: bool = True
 
     @classmethod
     def readonly(cls) -> PermissionProfile:
@@ -222,6 +227,8 @@ class PermissionProfile:
             shell_timeout=data.get("shell_timeout", 120),
             shell_working_dir=data.get("shell_working_dir"),
             bash_only=bool(data.get("bash_only", False)),
+            parallel_bash=bool(data.get("parallel_bash", False)),
+            delegate=bool(data.get("delegate", True)),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -240,6 +247,8 @@ class PermissionProfile:
             "shell_timeout": self.shell_timeout,
             "shell_working_dir": self.shell_working_dir,
             "bash_only": self.bash_only,
+            "parallel_bash": self.parallel_bash,
+            "delegate": self.delegate,
         }
 
     def requires_tool_approval(self, tool_name: str) -> bool:
