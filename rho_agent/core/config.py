@@ -53,6 +53,13 @@ class AgentConfig:
     response_format: dict[str, Any] | None = None
     databases: dict[str, dict[str, Any]] | None = None
     auto_approve: bool = True
+    # Context management. None means: look the model up in core/models.py.
+    context_window: int | None = None
+    compact_at_tokens: int | None = None
+    # Hard caps for one session. None means no cap. The cost cap only works
+    # with a client that reports cost (LiteLLMClient).
+    max_cost_usd: float | None = None
+    max_wall_seconds: float | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 
     # Known field names (for separating known from extras on YAML load)
@@ -70,6 +77,10 @@ class AgentConfig:
             "response_format",
             "databases",
             "auto_approve",
+            "context_window",
+            "compact_at_tokens",
+            "max_cost_usd",
+            "max_wall_seconds",
         }
     )
 
@@ -129,6 +140,10 @@ class AgentConfig:
         if self.databases:
             data["databases"] = self.databases
         data["auto_approve"] = self.auto_approve
+        for key in ("context_window", "compact_at_tokens", "max_cost_usd", "max_wall_seconds"):
+            value = getattr(self, key)
+            if value is not None:
+                data[key] = value
         # Merge extras at top level
         data.update(self.extras)
         return data

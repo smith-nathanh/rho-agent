@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from rho_agent.client.litellm_client import LiteLLMClient
 from rho_agent.core import Agent, AgentConfig, Session
 from rho_agent.core.events import AgentEvent
+from rho_agent.core.state import State
 from rho_agent.eval.harbor.trajectory import TrajectoryBuilder
 from rho_agent.permissions import PermissionProfile
 from rho_agent.prompts import load_prompt, prepare_prompt
@@ -187,6 +188,8 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     chunk_timeout = float(os.environ.get("RHO_AGENT_CHUNK_TIMEOUT", "180.0"))
     initial_timeout = float(os.environ.get("RHO_AGENT_INITIAL_TIMEOUT", "600.0"))
     cost_ceiling_usd = float(os.environ.get("RHO_AGENT_COST_CEILING_USD", "0.0"))
+    max_wall_seconds = float(os.environ.get("RHO_AGENT_MAX_WALL_SECONDS", "0.0"))
+    logs_dir = Path(os.environ.get("RHO_AGENT_LOGS_DIR", "/logs/agent"))
 
     client = LiteLLMClient(
         model=model,
@@ -196,18 +199,6 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
         chunk_timeout=chunk_timeout,
         initial_timeout=initial_timeout,
     )
-
-    # Determine context window for auto-compaction
-    # Strip provider prefix for model detection (e.g., "openai/gpt-5-mini" -> "gpt-5-mini")
-    model_name = model.split("/")[-1].lower()
-    if "gpt-5" in model_name:
-        context_window = 400_000  # GPT-5.x family
-    elif "gpt-oss" in model_name:
-        context_window = 128_000  # GPT-OSS-120B
-    elif "claude" in model_name:
-        context_window = 200_000  # Claude 3.x family
-    else:
-        context_window = 128_000  # conservative default
 
     # Build agent with unrestricted profile
     agent = Agent(
@@ -233,32 +224,40 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     print(f"[rho-agent] Tools: {tool_names}", file=sys.stderr)
 
     # Create session with LiteLLM client (multi-provider support in containers)
-    session = Session(agent, client=client)
+    # The trace is appended event by event, so a killed trial still has one.
+    try:
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        state = State(trace_path=logs_dir / "trace.jsonl")
+    except OSError:
+        state = State()
+    session = Session(agent, client=client, state=state)
+    # Compaction threshold comes from core/models.py for the configured model.
     session.auto_compact = True
-    session.context_window = context_window
+    # Hard caps are enforced inside the agent loop, between every step.
+    if cost_ceiling_usd > 0:
+        session.max_cost_usd = cost_ceiling_usd
+    if max_wall_seconds > 0:
+        session.max_wall_seconds = max_wall_seconds
 
     # Create trajectory builder for ATIF output
     trajectory_builder = TrajectoryBuilder(model=model)
 
     try:
+        # Set when a cap, error or cancel ended a turn; later phases are skipped
+        # so the trial ends promptly and the verifier grades what exists.
+        stopped = False
+
         # Track events for reviewer (full trace, not just text output)
         event_trace: list[AgentEvent] = []
 
         async def run_turn(prompt_text: str) -> str:
-            # Check cost ceiling before calling agent - end gracefully to allow grading
-            if cost_ceiling_usd > 0 and session.state.usage["cost_usd"] >= cost_ceiling_usd:
-                print(
-                    f"\n[Cost ceiling reached: ${session.state.usage['cost_usd']:.2f} >= ${cost_ceiling_usd:.2f}]",
-                    file=sys.stderr,
-                )
-                return ""
-
+            nonlocal stopped
             text_content = ""
             turn_events: list[AgentEvent] = []
 
             def _write_tokens() -> None:
                 """Write tokens/cost incrementally to mounted path (survives process kill)."""
-                Path("/logs/agent/tokens.json").write_text(
+                (logs_dir / "tokens.json").write_text(
                     json.dumps(
                         {
                             "input": session.state.usage["input_tokens"],
@@ -290,6 +289,10 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                         )
                         print(f"[Result: {result_preview}]", file=sys.stderr)
                     _write_tokens()
+                    # Snapshot the trajectory so a killed trial still has one.
+                    trajectory_builder.save_snapshot(
+                        logs_dir / "trajectory.json", turn_events, user_input=prompt_text
+                    )
                 elif event.type == "api_call_complete":
                     if os.environ.get("RHO_AGENT_DEBUG"):
                         usage = event.usage or {}
@@ -306,6 +309,8 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                     print(f"[{event.content}]", file=sys.stderr)
                 elif event.type == "error":
                     print(f"\nError: {event.content}", file=sys.stderr)
+                elif event.type in ("retry", "max_turns", "budget_exceeded"):
+                    print(f"\n[{event.type}: {event.content}]", file=sys.stderr)
                 elif event.type == "turn_complete":
                     if event.usage:
                         cost = event.usage.get("total_cost_usd", 0.0)
@@ -319,7 +324,8 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                         )
                     _write_tokens()
 
-            await session.run(prompt_text, on_event=on_event)
+            result = await session.run(prompt_text, on_event=on_event)
+            stopped = result.status in ("budget_exceeded", "error", "cancelled")
 
             # Build trajectory from this turn's events
             trajectory_builder.build_from_events(turn_events, user_input=prompt_text)
@@ -343,8 +349,10 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
             "Otherwise, fix issues first."
         )
 
-        if enable_confirm:
+        if enable_confirm and not stopped:
             for _ in range(max_confirm):
+                if stopped:
+                    break
                 confirm_text = await run_turn(confirm_prompt)
                 if confirm_text.strip() == confirm_token:
                     break
@@ -353,7 +361,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
         enable_reviewer = os.environ.get("RHO_AGENT_ENABLE_REVIEWER") == "1"
         max_iterations = int(os.environ.get("RHO_AGENT_REVIEWER_MAX_ITERATIONS", "1"))
 
-        if enable_reviewer:
+        if enable_reviewer and not stopped:
             await run_reviewer_phase(
                 instruction=instruction,
                 event_trace=event_trace,
@@ -363,7 +371,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
             )
     finally:
         # Save ATIF trajectory for Harbor analysis
-        trajectory_builder.save("/logs/agent/trajectory.json")
+        trajectory_builder.save(logs_dir / "trajectory.json")
 
     print()  # Final newline
 

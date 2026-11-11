@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import copy
 import json
+import os
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -244,4 +246,28 @@ class TrajectoryBuilder:
         path.parent.mkdir(parents=True, exist_ok=True)
 
         trajectory = self.to_trajectory()
-        path.write_text(json.dumps(trajectory, indent=2))
+        # Write then rename, so a process killed mid-write leaves the old file.
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(trajectory, indent=2))
+        os.replace(tmp, path)
+
+    def save_snapshot(
+        self,
+        path: Path | str,
+        pending_events: list[AgentEvent],
+        user_input: str | None = None,
+    ) -> None:
+        """Save the trajectory so far, including a turn that is still running.
+
+        ``pending_events`` are the events of the in-progress turn. They are
+        rendered into a copy, so the builder itself is unchanged and the turn
+        can still be added normally with ``build_from_events`` when it ends.
+        Failures are swallowed: a snapshot must never break the run.
+        """
+        try:
+            snapshot = copy.copy(self)
+            snapshot._steps = list(self._steps)
+            snapshot.build_from_events(pending_events, user_input=user_input)
+            snapshot.save(path)
+        except Exception:
+            pass

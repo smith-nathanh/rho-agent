@@ -52,6 +52,10 @@ class AgentEvent:
     - ``turn_complete``: Full agentic turn finished (``usage`` with cumulative session metrics).
     - ``compact_start``/``compact_end``: Context window compaction lifecycle.
     - ``error``: An error occurred (``content`` has the message).
+    - ``retry``: A model call failed and is being retried (``content`` says why).
+      Text streamed by the failed attempt should be discarded.
+    - ``max_turns``: The run stopped at its ``max_turns`` limit.
+    - ``budget_exceeded``: A cost or time cap ended the run (``content`` says which).
     - ``cancelled``: Run was cancelled cooperatively.
     - ``interruption``: Run paused for out-of-band tool approval.
     """
@@ -73,7 +77,8 @@ class CompactResult:
     summary: str
     tokens_before: int
     tokens_after: int
-    trigger: str  # "manual" or "auto"
+    trigger: str  # "manual", "auto" or "overflow"
+    error: str | None = None  # set when the summarisation call failed
 
 
 @dataclass
@@ -87,7 +92,7 @@ class RunResult:
 
     text: str
     events: list[AgentEvent]
-    status: str  # "completed", "error", "cancelled"
+    status: str  # "completed", "error", "cancelled", "max_turns", "budget_exceeded"
     usage: dict[str, int | float]
 
 
