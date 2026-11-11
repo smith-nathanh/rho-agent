@@ -63,11 +63,14 @@ excel = ["openpyxl>=3.1.0"]
 # Eval dependencies (LiteLLM for multi-provider support and cost tracking)
 evals = ["litellm>=1.50.0"]
 
+# Harbor (Terminal-Bench harness). Harbor requires Python >=3.12.
+harbor = ["rho-agent[evals]", "harbor>=0.25.0; python_version >= '3.12'"]
+
 # Optional: Daytona cloud sandbox integration
-daytona = ["daytona>=0.1.0"]
+daytona = ["daytona>=0.200.0"]
 
 # Everything
-all = ["rho-agent[db,excel,daytona,evals]"]
+all = ["rho-agent[db,excel,daytona,evals,harbor]"]
 
 [dependency-groups]
 dev = [
