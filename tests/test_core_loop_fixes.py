@@ -499,3 +499,90 @@ def test_trajectory_snapshot_does_not_change_builder(tmp_path: Path) -> None:
     assert saved["steps"][1]["observations"][0]["content"] == "out"
     assert builder.to_trajectory()["steps"] == []
     assert not path.with_name("trajectory.json.tmp").exists()
+
+
+# ---------------------------------------------------------------------------
+# Completion gate and per-call limit
+# ---------------------------------------------------------------------------
+
+
+async def test_completion_gate_asks_for_verification_before_ending() -> None:
+    from rho_agent.core.events import CompletionGate
+
+    client = _ScriptedClient(
+        [_text("I think I'm done."), _done()],
+        [_call("a", text="ran the tests"), _done()],
+        [_text("Fixed one thing."), _done()],
+        [_text("OK"), _done()],
+    )
+    session = _session(client, _EchoHandler())
+    session.completion_gate = CompletionGate(prompt="Verify. Reply {token}.", token="OK")
+
+    result = await session.run("task")
+
+    assert result.status == "completed"
+    assert len(client.prompts) == 4
+    users = [m["content"] for m in session.state.messages if m["role"] == "user"]
+    assert users == ["task", "Verify. Reply OK.", "Verify. Reply OK."]
+    assert [e.type for e in result.events].count("completion_gate") == 2
+
+
+async def test_completion_gate_stops_after_max_rounds() -> None:
+    from rho_agent.core.events import CompletionGate
+
+    client = _ScriptedClient(*[[_text("still not saying it"), _done()] for _ in range(10)])
+    session = _session(client)
+    session.completion_gate = CompletionGate(token="OK", max_rounds=2)
+
+    result = await session.run("task")
+
+    assert result.status == "completed"
+    assert len(client.prompts) == 3  # first answer + two gate rounds
+
+
+async def test_gate_is_off_by_default_and_on_from_config() -> None:
+    assert _session(_ScriptedClient()).completion_gate is None
+    agent = MagicMock(spec=Agent)
+    agent.config = AgentConfig(system_prompt="s", model="m", completion_gate=True)
+    agent.system_prompt = "s"
+    agent.registry = ToolRegistry()
+    assert Session(agent, client=_ScriptedClient()).completion_gate is not None
+
+
+class _StallingClient(_ScriptedClient):
+    """First call never produces an event; later calls behave normally."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.n = 0
+
+    async def stream(self, prompt: Any):
+        self.n += 1
+        if self.n == 1:
+            await asyncio.sleep(30)
+        yield _text("answer")
+        yield _done()
+
+
+async def test_stalled_model_call_is_abandoned_and_retried() -> None:
+    client = _StallingClient()
+    session = _session(client)
+    session.max_call_seconds = 0.2
+
+    result = await asyncio.wait_for(session.run("go"), timeout=5)
+
+    assert result.status == "completed"
+    assert result.text == "answer"
+    assert client.n == 2
+    assert any(e.type == "retry" and "exceeded" in e.content for e in result.events)
+
+
+async def test_time_cap_interrupts_a_stalled_model_call() -> None:
+    client = _StallingClient()
+    session = _session(client)
+    session.max_wall_seconds = 0.2
+
+    result = await asyncio.wait_for(session.run("go"), timeout=5)
+
+    assert result.status == "budget_exceeded"
+    assert client.n == 1

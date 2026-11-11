@@ -60,6 +60,10 @@ class AgentConfig:
     # with a client that reports cost (LiteLLMClient).
     max_cost_usd: float | None = None
     max_wall_seconds: float | None = None
+    # Longest a single model call may take before it is abandoned and retried.
+    max_call_seconds: float | None = None
+    # Ask the model to verify its work before a run is allowed to end.
+    completion_gate: bool = False
     extras: dict[str, Any] = field(default_factory=dict)
 
     # Known field names (for separating known from extras on YAML load)
@@ -81,6 +85,8 @@ class AgentConfig:
             "compact_at_tokens",
             "max_cost_usd",
             "max_wall_seconds",
+            "max_call_seconds",
+            "completion_gate",
         }
     )
 
@@ -140,10 +146,18 @@ class AgentConfig:
         if self.databases:
             data["databases"] = self.databases
         data["auto_approve"] = self.auto_approve
-        for key in ("context_window", "compact_at_tokens", "max_cost_usd", "max_wall_seconds"):
+        for key in (
+            "context_window",
+            "compact_at_tokens",
+            "max_cost_usd",
+            "max_wall_seconds",
+            "max_call_seconds",
+        ):
             value = getattr(self, key)
             if value is not None:
                 data[key] = value
+        if self.completion_gate:
+            data["completion_gate"] = True
         # Merge extras at top level
         data.update(self.extras)
         return data

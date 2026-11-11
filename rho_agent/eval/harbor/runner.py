@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 from rho_agent.client.litellm_client import LiteLLMClient
 from rho_agent.core import Agent, AgentConfig, Session
-from rho_agent.core.events import AgentEvent
+from rho_agent.core.events import AgentEvent, CompletionGate
 from rho_agent.core.state import State
 from rho_agent.eval.harbor.trajectory import TrajectoryBuilder
 from rho_agent.permissions import PermissionProfile
@@ -67,6 +67,19 @@ def format_event_trace(events: list[AgentEvent]) -> str:
         elif event.type == "error":
             lines.append(f"[Error]\n{event.content}")
     return "\n\n".join(lines)
+
+
+CONFIRM_TOKEN = "CONFIRM_DONE"
+CONFIRM_PROMPT = (
+    "Before finalizing, verify your solution:\n"
+    "1. If test files exist, run them with the appropriate test runner\n"
+    "2. Check actual test output - exit code 0 alone doesn't mean tests passed\n"
+    "3. Confirm ALL requirements are met, including any performance/accuracy thresholds\n"
+    "4. Re-read the task instructions and verify each requirement\n"
+    "5. Confirm every file or output the task asks for exists at the required path\n\n"
+    "If everything passes verification, reply with exactly {token}. "
+    "Otherwise, fix issues first."
+)
 
 
 async def run_reviewer_phase(
@@ -189,6 +202,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     initial_timeout = float(os.environ.get("RHO_AGENT_INITIAL_TIMEOUT", "600.0"))
     cost_ceiling_usd = float(os.environ.get("RHO_AGENT_COST_CEILING_USD", "0.0"))
     max_wall_seconds = float(os.environ.get("RHO_AGENT_MAX_WALL_SECONDS", "0.0"))
+    max_call_seconds = float(os.environ.get("RHO_AGENT_MAX_CALL_SECONDS", "1200.0"))
     logs_dir = Path(os.environ.get("RHO_AGENT_LOGS_DIR", "/logs/agent"))
 
     client = LiteLLMClient(
@@ -240,6 +254,9 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
         session.max_cost_usd = cost_ceiling_usd
     if max_wall_seconds > 0:
         session.max_wall_seconds = max_wall_seconds
+    # A single model call that runs this long is abandoned and retried.
+    if max_call_seconds > 0:
+        session.max_call_seconds = max_call_seconds
 
     # Create trajectory builder for ATIF output
     trajectory_builder = TrajectoryBuilder(model=model)
@@ -254,6 +271,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
 
         async def run_turn(prompt_text: str) -> str:
             nonlocal stopped
+            step_input: str | None = prompt_text
             text_content = ""
             turn_events: list[AgentEvent] = []
 
@@ -272,7 +290,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                 )
 
             async def on_event(event: AgentEvent) -> None:
-                nonlocal text_content
+                nonlocal text_content, step_input
                 event_trace.append(event)
                 turn_events.append(event)
                 if event.type == "text" and event.content:
@@ -293,7 +311,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                     _write_tokens()
                     # Snapshot the trajectory so a killed trial still has one.
                     trajectory_builder.save_snapshot(
-                        logs_dir / "trajectory.json", turn_events, user_input=prompt_text
+                        logs_dir / "trajectory.json", turn_events, user_input=step_input
                     )
                 elif event.type == "api_call_complete":
                     if os.environ.get("RHO_AGENT_DEBUG"):
@@ -311,6 +329,13 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                     print(f"[{event.content}]", file=sys.stderr)
                 elif event.type == "error":
                     print(f"\nError: {event.content}", file=sys.stderr)
+                elif event.type == "completion_gate":
+                    # Close the agent step so far and record the gate prompt as a
+                    # user step, so the trajectory shows the exchange.
+                    trajectory_builder.build_from_events(turn_events[:-1], user_input=step_input)
+                    turn_events.clear()
+                    step_input = event.content
+                    print("\n[completion gate]", file=sys.stderr)
                 elif event.type in ("retry", "max_turns", "budget_exceeded"):
                     print(f"\n[{event.type}: {event.content}]", file=sys.stderr)
                 elif event.type == "turn_complete":
@@ -330,34 +355,22 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
             stopped = result.status in ("budget_exceeded", "error", "cancelled")
 
             # Build trajectory from this turn's events
-            trajectory_builder.build_from_events(turn_events, user_input=prompt_text)
+            trajectory_builder.build_from_events(turn_events, user_input=step_input)
 
             return text_content
 
-        # Run initial actor turn
-        await run_turn(instruction)
-
-        # Completion confirmation gate (Terminus-style)
+        # Completion gate: when the agent tries to finish, it is asked to verify
+        # its work and must reply with the token (or use up the rounds).
         enable_confirm = os.environ.get("RHO_AGENT_CONFIRM_DONE", "1") == "1"
         max_confirm = int(os.environ.get("RHO_AGENT_CONFIRM_DONE_MAX", "3"))
-        confirm_token = "CONFIRM_DONE"
-        confirm_prompt = (
-            "Before finalizing, verify your solution:\n"
-            "1. If test files exist, run them with the appropriate test runner\n"
-            "2. Check actual test output - exit code 0 alone doesn't mean tests passed\n"
-            "3. Confirm ALL requirements are met, including any performance/accuracy thresholds\n"
-            "4. Re-read the task instructions and verify each requirement\n\n"
-            f"If everything passes verification, reply with exactly {confirm_token}. "
-            "Otherwise, fix issues first."
-        )
+        if enable_confirm and max_confirm > 0:
+            session.completion_gate = CompletionGate(
+                prompt=CONFIRM_PROMPT, token=CONFIRM_TOKEN, max_rounds=max_confirm
+            )
 
-        if enable_confirm and not stopped:
-            for _ in range(max_confirm):
-                if stopped:
-                    break
-                confirm_text = await run_turn(confirm_prompt)
-                if confirm_text.strip() == confirm_token:
-                    break
+        # Run initial actor turn
+        await run_turn(instruction)
+        session.completion_gate = None  # reviewer revisions are not gated
 
         # Reviewer phase (optional)
         enable_reviewer = os.environ.get("RHO_AGENT_ENABLE_REVIEWER") == "1"
