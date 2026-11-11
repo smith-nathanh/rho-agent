@@ -43,10 +43,10 @@ async def test_every_remote_tool_round_trips() -> None:
         out = await call("bash", command=f"mkdir -p {work} && echo ready")
         assert json.loads(out.content)["output"].strip() == "ready"
 
-        await call("write", file_path=f"{work}/a.txt", content="alpha\nbeta\n")
-        assert "beta" in (await call("read", file_path=f"{work}/a.txt")).content
-        await call("edit", file_path=f"{work}/a.txt", old_string="beta", new_string="gamma")
-        assert "gamma" in (await call("read", file_path=f"{work}/a.txt")).content
+        await call("write", path=f"{work}/a.txt", content="alpha\nbeta\n")
+        assert "beta" in (await call("read", path=f"{work}/a.txt")).content
+        await call("edit", path=f"{work}/a.txt", old_string="beta", new_string="gamma")
+        assert "gamma" in (await call("read", path=f"{work}/a.txt")).content
         assert "a.txt" in (await call("list", path=work)).content
         assert "a.txt" in (await call("glob", pattern="*.txt", path=work)).content
         assert "gamma" in (await call("grep", pattern="gamma", path=work)).content
