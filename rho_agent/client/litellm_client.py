@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import warnings
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -14,6 +15,10 @@ from .model import (
     classify_error,
     parse_tool_arguments,
 )
+
+# LiteLLM serializes its own usage objects in a way Pydantic complains about on
+# every call. The values are read correctly; the warning is only noise.
+warnings.filterwarnings("ignore", message="Pydantic serializer warnings", category=UserWarning)
 
 
 class LiteLLMClient:
