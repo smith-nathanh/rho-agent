@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
+from dataclasses import replace
 from time import monotonic
 from typing import Any
 
@@ -13,20 +14,32 @@ from ...core.events import ApprovalCallback
 from ...core.session import Session
 from ...core.state import State
 from ..base import ToolHandler, ToolInvocation, ToolOutput
+from ._child import child_session_kwargs, link_child, settle_child, share_sandbox
 
 
 class DelegateHandler(ToolHandler):
-    """Spawn one child agent to execute a focused instruction."""
+    """Spawn one child agent to execute a focused instruction.
+
+    The child takes its identity (model, profile, system prompt, working
+    directory) from the session that calls the tool, so one handler instance
+    can sit in a registry shared by many sessions. The ``parent_*`` arguments
+    are only a fallback for calls made outside a session.
+
+    The child is linked to its parent: it shares the model client, writes its
+    trace under the parent's session directory, is capped by the parent's
+    remaining cost and time budget, and its usage is added to the parent's.
+    Several delegate calls in one model turn run concurrently.
+    """
 
     def __init__(
         self,
         *,
-        parent_config: AgentConfig,
-        parent_system_prompt: str,
-        parent_state: State,
-        parent_approval_callback: ApprovalCallback | None,
-        parent_cancel_check: Callable[[], bool] | None,
-        requires_approval: bool,
+        parent_config: AgentConfig | None = None,
+        parent_system_prompt: str | None = None,
+        parent_state: State | None = None,
+        parent_approval_callback: ApprovalCallback | None = None,
+        parent_cancel_check: Callable[[], bool] | None = None,
+        requires_approval: bool = False,
     ) -> None:
         self._parent_config = parent_config
         self._parent_system_prompt = parent_system_prompt
@@ -43,7 +56,9 @@ class DelegateHandler(ToolHandler):
     def description(self) -> str:
         return (
             "Spawn a one-time child agent to execute a focused instruction and return "
-            "its final text output."
+            "its final text output. The child has the same tools as you but none of your "
+            "conversation unless full_context is set, so give it a self-contained "
+            "instruction. Several delegate calls in one turn run in parallel."
         )
 
     @property
@@ -71,6 +86,10 @@ class DelegateHandler(ToolHandler):
     def requires_approval(self) -> bool:
         return self._requires_approval
 
+    @property
+    def parallel_safe(self) -> bool:
+        return True
+
     async def handle(self, invocation: ToolInvocation) -> ToolOutput:
         """Spawn a child agent and return its final output."""
         instruction = str(invocation.arguments.get("instruction", "")).strip()
@@ -79,36 +98,60 @@ class DelegateHandler(ToolHandler):
         if not instruction:
             return ToolOutput(content="Delegate requires a non-empty instruction.", success=False)
 
+        parent = invocation.session
+        if parent is not None:
+            parent_config = parent.agent.config
+            parent_system_prompt = parent.agent.system_prompt
+            parent_state = parent.state
+        else:
+            parent_config = self._parent_config
+            parent_system_prompt = self._parent_system_prompt
+            parent_state = self._parent_state
+        if parent_config is None:
+            return ToolOutput(
+                content="Delegate is not available: no parent session or configuration.",
+                success=False,
+            )
+
         # Build child state, optionally with parent history
         child_state = State()
-        if full_context:
-            child_state.messages = deepcopy(self._parent_state.messages)
+        if full_context and parent_state is not None:
+            messages = deepcopy(parent_state.messages)
+            # The parent's history ends with the assistant message that issued
+            # this very call, whose tool calls have no results yet.
+            child_state.messages = messages
+            child_state.close_pending_tool_calls("(this call is the one you are executing)")
 
-        # Build child agent (no delegate to prevent recursion)
-        child_config = AgentConfig(
-            system_prompt=self._parent_system_prompt,
-            model=self._parent_config.model,
-            base_url=self._parent_config.base_url,
-            service_tier=self._parent_config.service_tier,
-            reasoning_effort=self._parent_config.reasoning_effort,
-            profile=self._parent_config.profile,
-            working_dir=self._parent_config.working_dir,
-            auto_approve=self._parent_config.auto_approve,
+        # The child inherits everything except the caps (it gets the parent's
+        # remaining budget instead) and the already-resolved system prompt.
+        child_config = replace(
+            parent_config,
+            system_prompt=parent_system_prompt or "",
+            max_cost_usd=None,
+            max_wall_seconds=None,
         )
         child_agent = Agent(child_config)
+        if parent_system_prompt is not None:
+            child_agent._system_prompt = parent_system_prompt
         # Remove delegate tool from child to prevent recursion
         if "delegate" in child_agent.registry:
             child_agent.registry.unregister("delegate")
+        share_sandbox(parent, child_agent)
 
-        child_session = Session(child_agent, state=child_state)
-        child_session.approval_callback = self._parent_approval_callback
-        child_session.cancel_check = self._parent_cancel_check
+        child_session = Session(
+            child_agent, **child_session_kwargs(parent, child_state, share_client=True)
+        )
+        if parent is None:
+            child_session.approval_callback = self._parent_approval_callback
+            child_session.cancel_check = self._parent_cancel_check
+        link_child(parent, child_session, self.name, instruction)
 
         started = monotonic()
+        status = "error"
         try:
-            print(f"[delegate] Sub-agent {child_session.id[:8]} started", flush=True)
             async with child_session:
                 result = await child_session.run(instruction)
+                status = result.status
                 return ToolOutput(
                     content=result.text,
                     success=result.status == "completed",
@@ -129,3 +172,5 @@ class DelegateHandler(ToolHandler):
                     "duration_seconds": round(monotonic() - started, 2),
                 },
             )
+        finally:
+            settle_child(parent, child_session, status)

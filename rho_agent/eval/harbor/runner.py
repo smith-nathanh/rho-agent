@@ -214,6 +214,8 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     # Replace registry with unrestricted tools
     profile = PermissionProfile.unrestricted(working_dir=working_dir)
     profile.bash_only = bash_only
+    # Benchmark runs measure a single agent; no child agents.
+    profile.delegate = False
     from rho_agent.permissions.factory import ToolFactory
 
     factory = ToolFactory(profile)
