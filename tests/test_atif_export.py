@@ -349,3 +349,30 @@ def test_tool_calls_without_results(tmp_path: Path) -> None:
     # Second agent step is the follow-up text
     step2 = result["steps"][2]
     assert step2["message"] == "That was blocked."
+
+
+def test_edge_cases_validate_against_harbor(tmp_path: Path) -> None:
+    """Null content and non-object tool arguments must still be valid ATIF."""
+    import pytest
+
+    harbor_models = pytest.importorskip("harbor.models.trajectories")
+    events = [
+        {"type": "message", "role": "user", "content": None},
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "a", "type": "function", "function": {"name": "bash", "arguments": "[1, 2]"}}
+            ],
+        },
+        {"type": "message", "role": "tool", "tool_call_id": "a", "content": "x"},
+    ]
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text("".join(json.dumps(e) + "\n" for e in events))
+
+    result = trace_to_atif(trace, session_id="edge")
+
+    assert result["steps"][0]["message"] == ""
+    assert result["steps"][1]["tool_calls"][0]["arguments"] == {"_raw": "[1, 2]"}
+    harbor_models.Trajectory.model_validate(result)

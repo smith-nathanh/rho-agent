@@ -184,7 +184,7 @@ def _make_simple_step(
     step: dict[str, Any] = {
         "step_id": step_id,
         "source": source,
-        "message": message,
+        "message": message if message is not None else "",
     }
     if timestamp:
         step["timestamp"] = timestamp
@@ -277,9 +277,11 @@ def _parse_arguments(raw: Any) -> dict[str, Any]:
         return raw
     if isinstance(raw, str):
         try:
-            return json.loads(raw)
+            parsed = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
             return {"_raw": raw}
+        # ATIF requires an object; keep anything else (list, number, null) raw.
+        return parsed if isinstance(parsed, dict) else {"_raw": raw}
     return {}
 
 
