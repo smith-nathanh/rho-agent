@@ -24,6 +24,10 @@ class GlobHandler(ToolHandler):
         self._rg_path = shutil.which("rg")
 
     @property
+    def parallel_safe(self) -> bool:
+        return True
+
+    @property
     def name(self) -> str:
         return "glob"
 

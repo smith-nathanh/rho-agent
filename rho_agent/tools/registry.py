@@ -81,6 +81,13 @@ class ToolRegistry:
             return True
         return handler.requires_approval
 
+    def is_parallel_safe(self, tool_name: str) -> bool:
+        """Check if calls to a tool may run concurrently with other safe calls."""
+        handler = self._handlers.get(tool_name)
+        if handler is None or not handler.is_enabled:
+            return False
+        return bool(handler.parallel_safe)
+
     async def dispatch(self, invocation: ToolInvocation) -> ToolOutput:
         """Dispatch a tool invocation to the appropriate handler."""
         handler = self._handlers.get(invocation.tool_name)
@@ -102,6 +109,7 @@ class ToolRegistry:
             call_id=invocation.call_id,
             tool_name=invocation.tool_name,
             arguments=coerced_args,
+            session=invocation.session,
         )
 
         try:

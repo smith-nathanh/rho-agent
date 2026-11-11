@@ -65,6 +65,10 @@ class ReadExcelHandler(ToolHandler):
         return OPENPYXL_AVAILABLE
 
     @property
+    def parallel_safe(self) -> bool:
+        return True
+
+    @property
     def name(self) -> str:
         return "read_excel"
 

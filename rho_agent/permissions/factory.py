@@ -103,6 +103,7 @@ class ToolFactory:
             working_dir=working_dir,
             timeout=self.profile.shell_timeout,
             requires_approval=requires_approval,
+            allow_parallel=self.profile.parallel_bash,
         )
         registry.register(handler)
 

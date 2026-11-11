@@ -21,6 +21,10 @@ class ListHandler(ToolHandler):
     """
 
     @property
+    def parallel_safe(self) -> bool:
+        return True
+
+    @property
     def name(self) -> str:
         return "list"
 

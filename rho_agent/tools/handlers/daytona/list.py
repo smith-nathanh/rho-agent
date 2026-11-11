@@ -19,6 +19,10 @@ class DaytonaListHandler(ToolHandler):
         self._manager = manager
 
     @property
+    def parallel_safe(self) -> bool:
+        return True
+
+    @property
     def name(self) -> str:
         return "list"
 

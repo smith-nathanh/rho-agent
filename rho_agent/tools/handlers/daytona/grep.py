@@ -23,6 +23,10 @@ class DaytonaGrepHandler(ToolHandler):
         self._has_rg: bool | None = None  # Cached after first check
 
     @property
+    def parallel_safe(self) -> bool:
+        return True
+
+    @property
     def name(self) -> str:
         return "grep"
 
