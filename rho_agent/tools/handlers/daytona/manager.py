@@ -86,7 +86,8 @@ class SandboxManager:
                     auto_stop_interval=self._auto_stop_interval,
                 )
 
-            if self._resources:
+            # Resources only apply to image-based sandboxes; a snapshot fixes them.
+            if self._resources and not self._snapshot:
                 params.resources = Resources(
                     cpu=self._resources.get("cpu"),
                     memory=self._resources.get("memory"),

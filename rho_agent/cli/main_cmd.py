@@ -106,9 +106,9 @@ def _resolve_daytona_config(
                 raise typer.Exit(1)
             from daytona import Image
 
-            image = Image.from_dockerfile(
-                str(df_path), context_dir=str(df_path.parent)
-            )
+            # The build context is the Dockerfile's directory (the SDK's
+            # `context_dir` argument no longer exists).
+            image = Image.from_dockerfile(str(df_path))
         else:
             toml_image = sandbox_cfg.get("image")
             if toml_image:
