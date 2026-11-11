@@ -293,6 +293,8 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
                 agent_version=_agent_version(),
                 model_name=model,
             )
+            if not trajectory["steps"]:
+                return  # ATIF needs at least one step; nothing to record yet
             target = logs_dir / "trajectory.json"
             tmp = target.with_name("trajectory.json.tmp")
             tmp.write_text(json.dumps(trajectory, indent=2))
