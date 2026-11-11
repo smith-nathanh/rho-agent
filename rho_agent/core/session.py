@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .agent import Agent
 
-from ..client.model import Message, ModelCallError, Prompt
+from ..client.model import Message, ModelCallError, Prompt, StreamEvent
 from ..tools.base import ToolInvocation
 from ..tools.registry import ToolRegistry
 from .events import (
@@ -28,6 +28,7 @@ from .events import (
     ApprovalCallback,
     ApprovalInterrupt,
     CompactResult,
+    CompletionGate,
     EventHandler,
     RunResult,
 )
@@ -96,6 +97,13 @@ class Session:
         # Hard caps for the whole session (all run() calls). None = no cap.
         self.max_cost_usd: float | None = getattr(config, "max_cost_usd", None)
         self.max_wall_seconds: float | None = getattr(config, "max_wall_seconds", None)
+
+        self.max_call_seconds: float | None = getattr(config, "max_call_seconds", None)
+
+        # When set, the model must confirm it verified its work before a run ends.
+        self.completion_gate: CompletionGate | None = (
+            CompletionGate() if getattr(config, "completion_gate", False) is True else None
+        )
 
         # Run a model turn's tool calls together when every call is parallel-safe.
         self.parallel_tool_calls: bool = True
@@ -359,6 +367,57 @@ class Session:
             },
         )
 
+    async def _stream_with_deadline(self, prompt: Prompt) -> AsyncIterator[StreamEvent]:
+        """Stream one model call, bounded by the per-call limit and the time cap.
+
+        A stalled or very long call cannot be interrupted by checks made
+        between events, so each wait for the next event carries a timeout.
+        On expiry a synthetic error event is yielded: ``transient`` for the
+        per-call limit (the call is retried) or ``wall_cap`` for the session cap.
+        """
+        stream = self._client.stream(prompt).__aiter__()
+        started = time.monotonic()
+        try:
+            while True:
+                call_left = (
+                    None
+                    if self.max_call_seconds is None
+                    else self.max_call_seconds - (time.monotonic() - started)
+                )
+                wall_left = self._wall_remaining()
+                limits = [x for x in (call_left, wall_left) if x is not None]
+                try:
+                    if not limits:
+                        event = await stream.__anext__()
+                    else:
+                        timeout = min(limits)
+                        if timeout <= 0:
+                            raise TimeoutError
+                        event = await asyncio.wait_for(stream.__anext__(), timeout)
+                except StopAsyncIteration:
+                    return
+                except TimeoutError:
+                    wall_left = self._wall_remaining()
+                    if wall_left is not None and wall_left <= 0:
+                        yield StreamEvent(
+                            type="error", content="Time cap reached", error_kind="wall_cap"
+                        )
+                    else:
+                        yield StreamEvent(
+                            type="error",
+                            content=f"Model call exceeded {self.max_call_seconds:.0f}s",
+                            error_kind="transient",
+                        )
+                    return
+                yield event
+        finally:
+            aclose = getattr(stream, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:
+                    pass
+
     @staticmethod
     def _to_messages(messages: list[dict[str, Any]]) -> list[Message]:
         return [
@@ -384,6 +443,7 @@ class Session:
 
         turn = 0
         overflow_recoveries = 0
+        gate_rounds = 0
         while True:
             if max_turns is not None and turn >= max_turns:
                 yield self._turn_complete_event()
@@ -438,7 +498,7 @@ class Session:
                     }
                 )
 
-                async for event in self._client.stream(llm_prompt):
+                async for event in self._stream_with_deadline(llm_prompt):
                     if self._is_cancelled():
                         yield AgentEvent(
                             type="cancelled", content="Cancelled during model response"
@@ -517,6 +577,10 @@ class Session:
 
                 # Clients that do not classify their errors get no retry.
                 kind = getattr(error_event, "error_kind", None) or "fatal"
+                if kind == "wall_cap":
+                    yield self._turn_complete_event()
+                    yield AgentEvent(type="budget_exceeded", content=self._budget_exceeded())
+                    return
                 self._state._emit({"type": "llm_error", "kind": kind, "error": error_event.content})
 
                 if kind == "context_overflow" and overflow_recoveries < 2:
@@ -555,8 +619,17 @@ class Session:
             elif text_content:
                 self._state.add_assistant_message(text_content)
 
-            # No tool calls — turn is done
+            # No tool calls — the model considers itself done
             if not pending_tool_calls:
+                gate = self.completion_gate
+                confirmed = gate_rounds > 0 and gate and text_content.strip() == gate.token
+                if gate is not None and not confirmed and gate_rounds < gate.max_rounds:
+                    gate_rounds += 1
+                    gate_prompt = gate.render()
+                    self._state._emit({"type": "completion_gate", "round": gate_rounds})
+                    self._state.add_user_message(gate_prompt)
+                    yield AgentEvent(type="completion_gate", content=gate_prompt)
+                    continue
                 yield self._turn_complete_event()
                 return
 

@@ -25,6 +25,33 @@ Another language model worked on this task and produced a summary of its progres
 
 """
 
+DEFAULT_GATE_PROMPT = """\
+Before finishing, verify your work against the original request:
+1. Re-read the request and check each requirement against what you actually produced.
+2. If there are tests or checks you can run, run them and read their output. \
+An exit code of 0 alone does not mean they passed.
+3. Confirm that every file or output the request asks for exists where it should.
+
+If everything is verified, reply with exactly {token}. Otherwise fix the problems first."""
+
+
+@dataclass
+class CompletionGate:
+    """A check the model must pass before a run is allowed to end.
+
+    When the model stops calling tools, the session sends ``prompt`` instead of
+    ending the run. The run ends once the model replies with exactly ``token``,
+    or after ``max_rounds`` prompts. ``{token}`` in the prompt is substituted.
+    """
+
+    prompt: str = DEFAULT_GATE_PROMPT
+    token: str = "TASK_VERIFIED"
+    max_rounds: int = 3
+
+    def render(self) -> str:
+        return self.prompt.replace("{token}", self.token)
+
+
 # Type for approval callback: (tool_name, tool_args) -> approved
 ApprovalCallback = Callable[[str, dict[str, Any]], Awaitable[bool]]
 
@@ -54,6 +81,8 @@ class AgentEvent:
     - ``error``: An error occurred (``content`` has the message).
     - ``retry``: A model call failed and is being retried (``content`` says why).
       Text streamed by the failed attempt should be discarded.
+    - ``completion_gate``: The model tried to finish and was asked to verify first
+      (``content`` is the prompt that was sent).
     - ``max_turns``: The run stopped at its ``max_turns`` limit.
     - ``budget_exceeded``: A cost or time cap ended the run (``content`` says which).
     - ``cancelled``: Run was cancelled cooperatively.
