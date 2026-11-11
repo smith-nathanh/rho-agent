@@ -38,7 +38,7 @@ def list_configs() -> None:
 def write_config(
     name: Annotated[
         str,
-        typer.Argument(help="Config name or filename, e.g. terminal-bench-prelim"),
+        typer.Argument(help="Config name or filename, e.g. terminal-bench-subset"),
     ],
     output: Annotated[
         Path | None,

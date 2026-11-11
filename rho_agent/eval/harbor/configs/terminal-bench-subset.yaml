@@ -1,0 +1,42 @@
+# rho-agent on a 20-task subset of Terminal-Bench 4.1, one attempt per task.
+#
+# A cheap first read of cost per task before a full run. With 20 tasks the
+# score is only good to about +/-10 points.
+#
+#   rho-eval harbor write-config terminal-bench-subset -o terminal-bench-subset.yaml
+#   harbor run --config terminal-bench-subset.yaml --dry-run    # validate, runs nothing
+#   harbor run --config terminal-bench-subset.yaml
+#
+# Before running:
+#   - push the branch or commit named in `version` (the container installs from git)
+#   - export the provider key for the model (e.g. OPENAI_API_KEY)
+#
+# Cost: `cost_ceiling_usd` caps each task; the worst case for the job is
+# cap x tasks x n_attempts. Terminal-Bench 4.x allows each task up to 8 hours.
+
+jobs_dir: ./jobs/rho-agent-terminal-bench
+n_attempts: 1
+n_concurrent_trials: 4
+
+environment:
+  type: docker
+  delete: true
+
+agents:
+  - import_path: rho_agent.eval.harbor.agent:RhoAgent
+    model_name: openai/gpt-6.1-sol
+    kwargs:
+      install_source: git
+      version: main                # branch, tag or commit to install
+      bash_only: true
+      reasoning_effort: medium
+      enable_confirm_done: true    # completion gate
+      confirm_done_max: 3
+      cost_ceiling_usd: 4.0        # per task
+      max_wall_seconds: 27000      # 7.5h: exit cleanly before the 8h task timeout
+      max_call_seconds: 1200
+
+datasets:
+  - name: terminal-bench/terminal-bench
+    version: "4.1.0"
+    n_tasks: 20
