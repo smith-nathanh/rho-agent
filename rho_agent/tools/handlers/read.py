@@ -83,6 +83,10 @@ class ReadHandler(ToolHandler):
     Standard agentic tool name: 'read'
     """
 
+    def __init__(self, attach_images: bool = True) -> None:
+        # False when the profile turns image viewing off (a model without vision).
+        self._attach_images = attach_images
+
     @property
     def parallel_safe(self) -> bool:
         return True
@@ -95,8 +99,12 @@ class ReadHandler(ToolHandler):
     def description(self) -> str:
         return (
             "Read the contents of a file. Use this to inspect source code, logs, "
-            "config files, etc. Supports reading specific line ranges for large files. "
-            "An image file (PNG, JPEG, GIF, WebP) is attached so you can see it."
+            "config files, etc. Supports reading specific line ranges for large files."
+            + (
+                " An image file (PNG, JPEG, GIF, WebP) is attached so you can see it."
+                if self._attach_images
+                else ""
+            )
         )
 
     @property
@@ -140,7 +148,7 @@ class ReadHandler(ToolHandler):
         # Images are shown to the model rather than read as text.
         from .view_image import encode_image, is_image_path
 
-        if is_image_path(str(path)):
+        if self._attach_images and is_image_path(str(path)):
             try:
                 return encode_image(str(path), path.read_bytes())
             except OSError as e:

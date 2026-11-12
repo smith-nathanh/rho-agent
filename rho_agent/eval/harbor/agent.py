@@ -62,6 +62,13 @@ class RhoAgentOptions(InstalledAgentOptions):
     bash_only: bool = Field(
         default=False, description="Give the agent only the bash tool (no read, grep, edit)."
     )
+    view_image: bool | None = Field(
+        default=None,
+        description=(
+            "Give the agent the view_image tool. Omit for the default: on, except with "
+            "bash_only. Set true with bash_only for bash plus images."
+        ),
+    )
     enable_confirm_done: bool = Field(
         default=True,
         description="Ask the agent to verify its work before it is allowed to finish.",
@@ -232,6 +239,8 @@ class RhoAgent(BaseInstalledAgent):
             env["RHO_AGENT_COST_CEILING_USD"] = str(opts.cost_ceiling_usd)
         if opts.max_wall_seconds > 0:
             env["RHO_AGENT_MAX_WALL_SECONDS"] = str(opts.max_wall_seconds)
+        if opts.view_image is not None:
+            env["RHO_AGENT_VIEW_IMAGE"] = "1" if opts.view_image else "0"
         if not opts.auto_compact:
             env["RHO_AGENT_AUTO_COMPACT"] = "0"
         if opts.compact_threshold is not None:

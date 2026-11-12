@@ -37,6 +37,7 @@ def register_daytona_tools(
     registry: ToolRegistry,
     working_dir: str,
     backend: DaytonaBackend | None = None,
+    view_image: bool = True,
 ) -> SandboxManager:
     """Register Daytona remote handlers into a registry and return the SandboxManager.
 
@@ -50,7 +51,8 @@ def register_daytona_tools(
 
     registry.register(DaytonaBashHandler(manager))
     registry.register(DaytonaReadHandler(manager))
-    registry.register(DaytonaViewImageHandler(manager))
+    if view_image:
+        registry.register(DaytonaViewImageHandler(manager))
     registry.register(DaytonaWriteHandler(manager))
     registry.register(DaytonaEditHandler(manager))
     registry.register(DaytonaGlobHandler(manager))

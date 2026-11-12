@@ -30,7 +30,9 @@ Attach an image file (PNG, JPEG, GIF or WebP) so the model can see it: a screens
 |---|---|---|
 | `path` | string | Image path (required) |
 
-The image is added to the conversation right after the step's tool results. Files over 4 MB are scaled down when Pillow is installed and refused otherwise. The model must accept image input. Not available in bash-only mode.
+The image is added to the conversation right after the step's tool results. Files over 4 MB are scaled down when Pillow is installed and refused otherwise. The model must accept image input.
+
+`view_image` has its own profile switch. Left unset it is on, except in bash-only mode. Set `view_image: true` alongside `bash_only: true` in a profile for exactly two tools, bash and images, or `view_image: false` for a model without image input.
 
 ### `grep`
 

@@ -63,6 +63,7 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "RHO_AGENT_REASONING_EFFORT",
         "RHO_AGENT_API_KEY",
         "RHO_AGENT_AUTO_COMPACT",
+        "RHO_AGENT_VIEW_IMAGE",
         "RHO_AGENT_COMPACT_THRESHOLD",
         "RHO_AGENT_COMPACT_AT_TOKENS",
     ):
