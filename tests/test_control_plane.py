@@ -108,7 +108,8 @@ async def test_request_cancel_skips_finished_sessions(tmp_path: Path) -> None:
     assert (store.base_dir / live.id / "cancel").exists()
 
 
-def test_resume_clears_a_stale_cancel_file(tmp_path: Path) -> None:
+def test_resume_clears_a_stale_cancel_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")  # resume builds a real client
     store, session = _session(tmp_path)
     cancel_file = store.base_dir / session.id / "cancel"
     cancel_file.touch()
