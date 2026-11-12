@@ -34,6 +34,9 @@ Without a prompt argument, the agent starts in interactive mode. With a prompt, 
 | `--resume <id> / -r <id>` | Resume a saved conversation (`-r latest` for most recent) |
 | `--list / -l` | List saved conversations |
 | `--reasoning-effort <level>` | Reasoning effort for o1/o3 models |
+| `--compact-threshold <fraction>` | Compact history at this fraction of the context window (default `0.7`) |
+| `--compact-at-tokens <n>` | Compact history at this exact input token count; wins over the fraction |
+| `--no-auto-compact` | Turn automatic history compaction off |
 
 ### Examples
 

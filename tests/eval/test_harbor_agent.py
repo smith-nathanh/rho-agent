@@ -132,8 +132,29 @@ async def test_run_omits_optional_settings_by_default(tmp_path: Path) -> None:
         "RHO_AGENT_TEMPERATURE",
         "RHO_AGENT_REASONING_EFFORT",
         "RHO_AGENT_ENABLE_REVIEWER",
+        "RHO_AGENT_AUTO_COMPACT",
+        "RHO_AGENT_COMPACT_THRESHOLD",
+        "RHO_AGENT_COMPACT_AT_TOKENS",
     ):
         assert name not in run_env
+
+
+async def test_run_passes_compaction_settings(tmp_path: Path) -> None:
+    env = _FakeEnvironment()
+    agent = _agent(tmp_path, auto_compact=False, compact_threshold="0.25", compact_at_tokens=40000)
+
+    await agent.run("task", env, AgentContext())
+
+    run_env = env.calls[-1]["env"]
+    assert run_env["RHO_AGENT_AUTO_COMPACT"] == "0"
+    assert run_env["RHO_AGENT_COMPACT_THRESHOLD"] == "0.25"
+    assert run_env["RHO_AGENT_COMPACT_AT_TOKENS"] == "40000"
+
+
+@pytest.mark.parametrize("kwargs", [{"compact_threshold": 1.5}, {"compact_at_tokens": 0}])
+def test_bad_compaction_settings_are_rejected(tmp_path: Path, kwargs: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        _agent(tmp_path, **kwargs)
 
 
 def test_non_openai_models_get_their_own_credentials(

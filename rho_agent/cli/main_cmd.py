@@ -7,7 +7,7 @@ import os
 import platform
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 import yaml
@@ -154,6 +154,21 @@ def _resolve_daytona_config(
     return backend, upload_mappings, working_dir, setup_commands
 
 
+def _apply_compaction_flags(
+    target: Any,
+    compact_threshold: float | None,
+    compact_at_tokens: int | None,
+    auto_compact: bool | None,
+) -> None:
+    """Copy compaction flags the user actually passed onto a config or session."""
+    if compact_threshold is not None:
+        target.compact_threshold = compact_threshold
+    if compact_at_tokens is not None:
+        target.compact_at_tokens = compact_at_tokens
+    if auto_compact is not None:
+        target.auto_compact = auto_compact
+
+
 @app.command()
 def main(
     prompt_arg: Annotated[
@@ -273,6 +288,30 @@ def main(
             help="Override shell mode: 'restricted' or 'unrestricted'",
         ),
     ] = None,
+    compact_threshold: Annotated[
+        float | None,
+        typer.Option(
+            "--compact-threshold",
+            min=0.01,
+            max=1.0,
+            help="Compact history at this fraction of the context window (default 0.7)",
+        ),
+    ] = None,
+    compact_at_tokens: Annotated[
+        int | None,
+        typer.Option(
+            "--compact-at-tokens",
+            min=1,
+            help="Compact history at this exact input token count (wins over the fraction)",
+        ),
+    ] = None,
+    auto_compact: Annotated[
+        bool | None,
+        typer.Option(
+            "--auto-compact/--no-auto-compact",
+            help="Turn automatic history compaction on or off (default on)",
+        ),
+    ] = None,
 ) -> None:
     """rho-agent: An agent harness and CLI with readonly and developer modes."""
     from ..prompts import load_prompt, parse_vars, prepare_prompt
@@ -377,6 +416,9 @@ def main(
         session = resumed_session
         capability_profile = load_profile(agent.config.profile)
         mode_name = capability_profile.name
+        # Flags apply to the resumed session and to any child agents it starts.
+        for target in (agent.config, session):
+            _apply_compaction_flags(target, compact_threshold, compact_at_tokens, auto_compact)
         console.print(_markup(f"Resuming session: {session.id}", THEME.success))
     elif config_file:
         # Load from config file with CLI overrides
@@ -394,6 +436,7 @@ def main(
         if working_dir:
             agent_config.working_dir = resolved_working_dir
         agent_config.auto_approve = auto_approve
+        _apply_compaction_flags(agent_config, compact_threshold, compact_at_tokens, auto_compact)
 
         try:
             agent = Agent(agent_config)
@@ -543,6 +586,7 @@ def main(
             databases=cli_databases,
             auto_approve=auto_approve,
         )
+        _apply_compaction_flags(agent_config, compact_threshold, compact_at_tokens, auto_compact)
         agent = Agent(agent_config)
 
         # Apply shell_mode override to the profile used by the registry

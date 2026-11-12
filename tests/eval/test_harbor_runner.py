@@ -62,6 +62,9 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "RHO_AGENT_TEMPERATURE",
         "RHO_AGENT_REASONING_EFFORT",
         "RHO_AGENT_API_KEY",
+        "RHO_AGENT_AUTO_COMPACT",
+        "RHO_AGENT_COMPACT_THRESHOLD",
+        "RHO_AGENT_COMPACT_AT_TOKENS",
     ):
         monkeypatch.delenv(name, raising=False)
     _FakeLiteLLMClient.instances = []

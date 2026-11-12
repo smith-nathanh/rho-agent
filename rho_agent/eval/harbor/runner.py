@@ -262,8 +262,9 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     except OSError:
         state = State()
     session = Session(agent, client=client, state=state)
-    # Compaction threshold comes from core/models.py for the configured model.
-    session.auto_compact = True
+    # Compaction settings come from AgentConfig, which reads
+    # RHO_AGENT_AUTO_COMPACT, RHO_AGENT_COMPACT_THRESHOLD and
+    # RHO_AGENT_COMPACT_AT_TOKENS; the default is the model's own threshold.
     # Hard caps are enforced inside the agent loop, between every step.
     if cost_ceiling_usd > 0:
         session.max_cost_usd = cost_ceiling_usd

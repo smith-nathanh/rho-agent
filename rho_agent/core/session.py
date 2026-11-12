@@ -87,11 +87,14 @@ class Session:
         # Execution-time settings (set by callers before run())
         self.approval_callback: ApprovalCallback | None = None
         self.cancel_check: Callable[[], bool] | None = None
-        self.auto_compact: bool = True
         config = agent.config
+        # Compaction settings start from the agent config and can be changed
+        # per session. See AgentConfig for what each one means.
+        self.auto_compact: bool = getattr(config, "auto_compact", True)
+        self.compact_threshold: float | None = getattr(config, "compact_threshold", None)
+        self.compact_at_tokens: int | None = getattr(config, "compact_at_tokens", None)
         # None means: look the model up in core/models.py.
         self.context_window: int | None = getattr(config, "context_window", None)
-        self.compact_at_tokens: int | None = getattr(config, "compact_at_tokens", None)
         self.budget_gate: Callable[[int], str | None] | None = None
 
         # Hard caps for the whole session (all run() calls). None = no cap.
@@ -901,6 +904,7 @@ class Session:
             self._agent.config.model,
             context_window=self.context_window,
             compact_at_tokens=self.compact_at_tokens,
+            threshold=self.compact_threshold,
         )
 
     def _should_auto_compact(self) -> bool:

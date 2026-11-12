@@ -94,6 +94,24 @@ class RhoAgentOptions(InstalledAgentOptions):
         ge=0,
         description="Abandon and retry a single model call after this long. 0 disables.",
     )
+    auto_compact: bool = Field(
+        default=True,
+        description="Summarize older history automatically when the context grows large.",
+    )
+    compact_threshold: float | None = Field(
+        default=None,
+        gt=0,
+        le=1,
+        description=(
+            "Compact when input reaches this fraction of the context window. "
+            "Omit for the default (0.7, kept below any higher price tier)."
+        ),
+    )
+    compact_at_tokens: int | None = Field(
+        default=None,
+        gt=0,
+        description="Compact at this exact input token count. Wins over compact_threshold.",
+    )
 
 
 class RhoAgent(BaseInstalledAgent):
@@ -214,6 +232,12 @@ class RhoAgent(BaseInstalledAgent):
             env["RHO_AGENT_COST_CEILING_USD"] = str(opts.cost_ceiling_usd)
         if opts.max_wall_seconds > 0:
             env["RHO_AGENT_MAX_WALL_SECONDS"] = str(opts.max_wall_seconds)
+        if not opts.auto_compact:
+            env["RHO_AGENT_AUTO_COMPACT"] = "0"
+        if opts.compact_threshold is not None:
+            env["RHO_AGENT_COMPACT_THRESHOLD"] = str(opts.compact_threshold)
+        if opts.compact_at_tokens is not None:
+            env["RHO_AGENT_COMPACT_AT_TOKENS"] = str(opts.compact_at_tokens)
         return env
 
     def _run_command(self, instruction: str) -> str:
