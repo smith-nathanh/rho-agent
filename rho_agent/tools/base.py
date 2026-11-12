@@ -14,6 +14,9 @@ class ToolOutput:
     content: str
     success: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Images for the model to look at: dicts with ``path``, ``media_type`` and
+    # base64 ``data``. The session attaches them after the turn's tool results.
+    images: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass

@@ -23,6 +23,7 @@ from ..tools.base import ToolInvocation
 from ..tools.registry import ToolRegistry
 from .events import (
     COMPACTION_SYSTEM_PROMPT,
+    IMAGE_ATTACHMENT_PREFIX,
     SUMMARY_PREFIX,
     AgentEvent,
     ApprovalCallback,
@@ -33,7 +34,7 @@ from .events import (
     RunResult,
 )
 from .models import compact_threshold
-from .state import State
+from .state import State, content_chars
 from .truncate import truncate_output
 
 # Recent history kept verbatim through a compaction, in estimated tokens.
@@ -134,6 +135,8 @@ class Session:
         self._wall_start: float | None = None
         # After a failed compaction, do not try again until context grows past this.
         self._compact_retry_above: int = 0
+        # Images returned by this turn's tool calls, attached once they are all in.
+        self._pending_images: list[dict[str, str]] = []
 
     @property
     def agent(self) -> Agent:
@@ -648,6 +651,7 @@ class Session:
 
             # Execute tool calls. If the loop exits early for any reason, run()
             # gives the remaining calls an "interrupted" result.
+            self._pending_images = []
             if self._can_run_in_parallel(pending_tool_calls):
                 stop = False
                 async for ev in self._run_tools_parallel(pending_tool_calls):
@@ -656,6 +660,7 @@ class Session:
                     yield ev
                 if stop:
                     return
+                self._flush_images()
                 if self.budget_gate is not None:
                     gate_msg = self.budget_gate(self._last_input_tokens)
                     if gate_msg is not None:
@@ -757,11 +762,14 @@ class Session:
                     truncate_output(output.content),
                     success=output.success,
                     metadata=output.metadata,
+                    images=output.images,
                 )
 
             if rejected:
                 yield self._turn_complete_event()
                 return
+
+            self._flush_images()
 
             # Budget gate — inject a wrap-up message if context is getting full
             if self.budget_gate is not None:
@@ -770,6 +778,35 @@ class Session:
                     self._state.add_user_message(gate_msg)
 
     # --- Tool execution helpers ---
+
+    def _flush_images(self) -> None:
+        """Attach the images this turn's tool calls returned.
+
+        Tool results can only hold text, so the images go in one user message
+        placed after all of the turn's tool results.
+        """
+        images, self._pending_images = self._pending_images, []
+        if not images:
+            return
+        listing = ", ".join(img.get("path", "image") for img in images)
+        parts: list[dict[str, Any]] = [
+            {"type": "text", "text": f"{IMAGE_ATTACHMENT_PREFIX}, in order: {listing}"}
+        ]
+        for img in images:
+            url = f"data:{img['media_type']};base64,{img['data']}"
+            parts.append({"type": "image_url", "image_url": {"url": url}})
+        self._state.add_user_message(parts)
+
+    @staticmethod
+    def _is_image_message(message: dict[str, Any]) -> bool:
+        content = message.get("content")
+        return (
+            message.get("role") == "user"
+            and isinstance(content, list)
+            and bool(content)
+            and isinstance(content[0], dict)
+            and str(content[0].get("text") or "").startswith(IMAGE_ATTACHMENT_PREFIX)
+        )
 
     @staticmethod
     def _parse_error_result(tool_name: str, parse_error: str) -> str:
@@ -796,9 +833,12 @@ class Session:
         *,
         success: bool,
         metadata: dict[str, Any] | None = None,
+        images: list[dict[str, str]] | None = None,
     ) -> AgentEvent:
         """Store a tool result, trace it, and return the event to yield."""
         self._state.add_tool_result(tool_id, content)
+        if images:
+            self._pending_images.extend(images)
         self._state._emit(
             {
                 "type": "tool_end",
@@ -899,6 +939,7 @@ class Session:
                 truncate_output(output.content),
                 success=output.success,
                 metadata=output.metadata,
+                images=output.images,
             )
 
         if cancelled:
@@ -943,7 +984,7 @@ class Session:
 
     @staticmethod
     def _message_tokens(message: dict[str, Any]) -> int:
-        chars = len(str(message.get("content") or ""))
+        chars = content_chars(message.get("content"))
         if message.get("tool_calls"):
             chars += len(str(message["tool_calls"]))
         return chars // 4
@@ -982,6 +1023,15 @@ class Session:
         keep = COMPACT_PRUNE_KEEP_CHARS
         for m in messages:
             content = m.get("content")
+            if Session._is_image_message(m):
+                # Old images are dropped; the text part still says which files they were.
+                images = [p for p in content if p.get("type") == "image_url"]
+                if images:
+                    removed += content_chars(images)
+                    note = f"{content[0]['text']} [removed to save context; view again if needed]"
+                    m = {**m, "content": note}
+                pruned.append(m)
+                continue
             if (
                 m.get("role") == "tool"
                 and isinstance(content, str)
@@ -1012,6 +1062,12 @@ class Session:
             for m in head
             if m.get("role") == "user"
             and not (isinstance(m.get("content"), str) and m["content"].startswith(SUMMARY_PREFIX))
+            # Images a tool attached are not something the user said.
+            and not self._is_image_message(m)
+            and not (
+                isinstance(m.get("content"), str)
+                and m["content"].startswith(IMAGE_ATTACHMENT_PREFIX)
+            )
         ]
         if not users:
             return []

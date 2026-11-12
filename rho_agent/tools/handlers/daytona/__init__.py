@@ -15,6 +15,7 @@ from .grep import DaytonaGrepHandler
 from .list import DaytonaListHandler
 from .manager import SandboxManager
 from .read import DaytonaReadHandler
+from .view_image import DaytonaViewImageHandler
 from .write import DaytonaWriteHandler
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "DaytonaGrepHandler",
     "DaytonaListHandler",
     "DaytonaReadHandler",
+    "DaytonaViewImageHandler",
     "DaytonaWriteHandler",
     "SandboxManager",
     "register_daytona_tools",
@@ -48,6 +50,7 @@ def register_daytona_tools(
 
     registry.register(DaytonaBashHandler(manager))
     registry.register(DaytonaReadHandler(manager))
+    registry.register(DaytonaViewImageHandler(manager))
     registry.register(DaytonaWriteHandler(manager))
     registry.register(DaytonaEditHandler(manager))
     registry.register(DaytonaGlobHandler(manager))

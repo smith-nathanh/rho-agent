@@ -51,6 +51,12 @@ Another language model worked on this task and produced a summary of its progres
 
 """
 
+# First text part of the user message that carries images a tool attached.
+IMAGE_ATTACHMENT_PREFIX = "Images attached by tool calls in the previous step"
+# Rough token cost of one attached image, used wherever history size is
+# estimated. The base64 text itself must never be counted as characters.
+IMAGE_TOKEN_ESTIMATE = 1_000
+
 DEFAULT_GATE_PROMPT = """\
 Before finishing, verify your work against the original request:
 1. Re-read the request and check each requirement against what you actually produced.

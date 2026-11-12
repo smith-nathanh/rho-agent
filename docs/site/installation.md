@@ -90,6 +90,8 @@ rho-agent --help
 | `RHO_AGENT_COMPACT_THRESHOLD` | `0.7` | Compact history at this fraction of the context window |
 | `RHO_AGENT_COMPACT_AT_TOKENS` | — | Compact history at this exact input token count; wins over the fraction |
 | `RHO_AGENT_AUTO_COMPACT` | `1` | Set to `0` to turn automatic compaction off |
+| `RHO_AGENT_PROJECT_INSTRUCTIONS` | `1` | Set to `0` to stop reading `AGENTS.md` / `CLAUDE.md` |
+| `RHO_AGENT_SKILLS` | `1` | Set to `0` to stop listing `SKILL.md` skills |
 
 ### Database connections
 
