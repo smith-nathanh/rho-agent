@@ -95,7 +95,8 @@ class ReadHandler(ToolHandler):
     def description(self) -> str:
         return (
             "Read the contents of a file. Use this to inspect source code, logs, "
-            "config files, etc. Supports reading specific line ranges for large files."
+            "config files, etc. Supports reading specific line ranges for large files. "
+            "An image file (PNG, JPEG, GIF, WebP) is attached so you can see it."
         )
 
     @property
@@ -135,6 +136,15 @@ class ReadHandler(ToolHandler):
 
         if not path.is_file():
             return ToolOutput(content=f"Not a file: {path}", success=False)
+
+        # Images are shown to the model rather than read as text.
+        from .view_image import encode_image, is_image_path
+
+        if is_image_path(str(path)):
+            try:
+                return encode_image(str(path), path.read_bytes())
+            except OSError as e:
+                return ToolOutput(content=f"Error reading image: {e}", success=False)
 
         # Check for binary files
         suffix = path.suffix.lower()

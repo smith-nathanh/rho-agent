@@ -85,6 +85,49 @@ The system prompt is resolved in this order:
 2. `~/.config/rho-agent/default.md` — custom default (if the file exists)
 3. Built-in default system prompt
 
+## Project instructions: `AGENTS.md`
+
+On top of the system prompt, rho-agent reads the same instruction files other
+coding agents use, so a project set up for one of them works here unchanged.
+
+- `AGENTS.md` in the working directory and in each parent up to the repository
+  root (the nearest directory containing `.git`). Without a repository, only the
+  working directory is read.
+- `CLAUDE.md` is read in any directory that has no `AGENTS.md`.
+- `~/.config/rho-agent/AGENTS.md` holds personal instructions for every project.
+
+The files are appended to the system prompt from most general to most specific,
+up to 32 KB in total; when they exceed that, the most specific files are kept.
+Turn this off with `project_instructions: false` in an agent config or
+`RHO_AGENT_PROJECT_INSTRUCTIONS=0`. It applies to the local backend only.
+
+## Skills: `SKILL.md`
+
+A skill is a folder holding a `SKILL.md` file, and optionally scripts and
+reference files, for one kind of task. The file starts with YAML front matter:
+
+```markdown
+---
+name: release-notes
+description: Write release notes from the commits since the last tag
+---
+
+Steps the agent should follow...
+```
+
+rho-agent looks for `<name>/SKILL.md` in these folders:
+
+| Scope | Folders |
+|---|---|
+| Project (working directory and parents up to the repository root) | `.agents/skills/`, `.claude/skills/`, `.rho-agent/skills/` |
+| Personal | `~/.config/rho-agent/skills/`, `~/.agents/skills/`, `~/.claude/skills/` |
+
+Only each skill's name, description and path go into the system prompt. The
+agent reads the `SKILL.md` file itself when a task matches, so unused skills
+cost almost nothing. A project skill hides a personal one with the same name.
+Turn this off with `skills: false` or `RHO_AGENT_SKILLS=0`. rho-agent only
+reads skills; it does not create or change them.
+
 ## Initial message precedence
 
 The first user message sent to the agent is resolved in this order:

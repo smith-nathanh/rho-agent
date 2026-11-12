@@ -85,6 +85,12 @@ class AgentConfig:
         default_factory=lambda: _env_number("RHO_AGENT_COMPACT_AT_TOKENS", int)
     )
     context_window: int | None = None
+    # Read AGENTS.md / CLAUDE.md from the working directory and its parents,
+    # and list SKILL.md skills, in the system prompt. Local backend only.
+    project_instructions: bool = field(
+        default_factory=lambda: _env_bool("RHO_AGENT_PROJECT_INSTRUCTIONS", True)
+    )
+    skills: bool = field(default_factory=lambda: _env_bool("RHO_AGENT_SKILLS", True))
     # Hard caps for one session. None means no cap. The cost cap only works
     # with a client that reports cost (LiteLLMClient).
     max_cost_usd: float | None = None
@@ -114,6 +120,8 @@ class AgentConfig:
             "compact_threshold",
             "compact_at_tokens",
             "context_window",
+            "project_instructions",
+            "skills",
             "max_cost_usd",
             "max_wall_seconds",
             "max_call_seconds",
@@ -184,6 +192,10 @@ class AgentConfig:
         data["auto_approve"] = self.auto_approve
         if not self.auto_compact:
             data["auto_compact"] = False
+        if not self.project_instructions:
+            data["project_instructions"] = False
+        if not self.skills:
+            data["skills"] = False
         for key in (
             "compact_threshold",
             "compact_at_tokens",

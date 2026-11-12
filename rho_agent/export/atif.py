@@ -139,7 +139,7 @@ def _build_trajectory(
                 _make_simple_step(
                     len(steps) + 1,
                     source=role,
-                    message=event.get("content", ""),
+                    message=_flatten_content(event.get("content", "")),
                     timestamp=event.get("ts"),
                 )
             )
@@ -269,6 +269,28 @@ def _build_agent_step(
         step["metrics"] = metrics
 
     return step, i
+
+
+def _flatten_content(content: Any) -> Any:
+    """Replace attached images with a short text marker.
+
+    The trace keeps the image data; the trajectory only needs to say an image
+    was shown.
+    """
+    if not isinstance(content, list):
+        return content
+    texts: list[str] = []
+    images = 0
+    for part in content:
+        if isinstance(part, dict) and part.get("type") == "image_url":
+            images += 1
+        elif isinstance(part, dict) and part.get("type") == "text":
+            texts.append(str(part.get("text") or ""))
+        else:
+            texts.append(str(part))
+    if images:
+        texts.append(f"[{images} image{'s' if images != 1 else ''} attached]")
+    return "\n".join(texts)
 
 
 def _parse_arguments(raw: Any) -> dict[str, Any]:

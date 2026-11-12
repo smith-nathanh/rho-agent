@@ -95,8 +95,10 @@ class ToolFactory:
         from ..tools.handlers.grep import GrepHandler
         from ..tools.handlers.list import ListHandler
         from ..tools.handlers.read import ReadHandler
+        from ..tools.handlers.view_image import ViewImageHandler
 
         registry.register(ReadHandler())
+        registry.register(ViewImageHandler())
         registry.register(GlobHandler())
         registry.register(GrepHandler())
         registry.register(ListHandler())

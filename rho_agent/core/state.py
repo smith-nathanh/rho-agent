@@ -13,6 +13,28 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 
+def content_chars(content: Any) -> int:
+    """Size of message content in characters, for token estimates.
+
+    An image part counts as a fixed number of tokens, not as its base64 text.
+    """
+    from .events import IMAGE_TOKEN_ESTIMATE
+
+    if isinstance(content, str):
+        return len(content)
+    if not isinstance(content, list):
+        return len(str(content)) if content else 0
+    total = 0
+    for part in content:
+        if isinstance(part, dict) and part.get("type") == "image_url":
+            total += IMAGE_TOKEN_ESTIMATE * 4
+        elif isinstance(part, dict) and part.get("type") == "text":
+            total += len(str(part.get("text") or ""))
+        else:
+            total += len(str(part))
+    return total
+
+
 @runtime_checkable
 class StateObserver(Protocol):
     """Observer notified on every state mutation."""
@@ -86,8 +108,8 @@ class State:
 
     # --- Message manipulation ---
 
-    def add_user_message(self, content: str) -> None:
-        """Add a user message."""
+    def add_user_message(self, content: str | list[dict[str, Any]]) -> None:
+        """Add a user message: text, or a list of content parts (text and images)."""
         msg = {"role": "user", "content": content}
         self.messages.append(msg)
         self._emit({"type": "message", **msg})
@@ -224,7 +246,7 @@ class State:
             if isinstance(content, str):
                 total_chars += len(content)
             elif isinstance(content, list):
-                total_chars += sum(len(str(c)) for c in content)
+                total_chars += content_chars(content)
             if m.get("tool_calls"):
                 total_chars += len(str(m["tool_calls"]))
         return total_chars // 4

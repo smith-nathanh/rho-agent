@@ -92,7 +92,25 @@ class Agent:
         """Resolved system prompt text (lazily computed)."""
         if self._system_prompt is None:
             self._system_prompt = self._config.resolve_system_prompt()
+            context = self._project_context()
+            if context:
+                self._system_prompt = f"{self._system_prompt}\n\n{context}"
         return self._system_prompt
+
+    def _project_context(self) -> str:
+        """AGENTS.md instructions and the skill list, for the local backend."""
+        config = self._config
+        if config.backend != "local":
+            return ""  # the files would be read from this machine, not the sandbox
+        if not (config.project_instructions or config.skills):
+            return ""
+        from .project_context import build_context
+
+        return build_context(
+            config.working_dir,
+            instructions=config.project_instructions,
+            skills=config.skills,
+        )
 
     def create_client(self) -> ModelClient:
         """Create a ModelClient from this agent's config."""

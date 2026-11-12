@@ -20,7 +20,17 @@ Read file contents with optional line ranges.
 | `start_line` | integer | First line to read |
 | `end_line` | integer | Last line to read |
 
-Returns line-numbered content. Blocks binary files. Defaults to 500 lines max, truncating lines longer than 500 characters.
+Returns line-numbered content. Blocks binary files. Defaults to 500 lines max, truncating lines longer than 500 characters. An image file is attached for the model to look at, the same as `view_image`.
+
+### `view_image`
+
+Attach an image file (PNG, JPEG, GIF or WebP) so the model can see it: a screenshot, a plot, a camera frame.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `path` | string | Image path (required) |
+
+The image is added to the conversation right after the step's tool results. Files over 4 MB are scaled down when Pillow is installed and refused otherwise. The model must accept image input. Not available in bash-only mode.
 
 ### `grep`
 

@@ -88,6 +88,8 @@ class AgentConfig:
 | `compact_threshold` | `float \| None` | `None` | Compact when input reaches this fraction of the context window. `None` uses `0.7`, kept below a model's higher price tier if it has one |
 | `compact_at_tokens` | `int \| None` | `None` | Compact at this exact input token count. Wins over `compact_threshold` |
 | `context_window` | `int \| None` | `None` | Context window size in tokens. `None` looks the model up in a built-in table |
+| `project_instructions` | `bool` | `True` | Append `AGENTS.md` / `CLAUDE.md` from the working directory and its parents to the system prompt |
+| `skills` | `bool` | `True` | List `SKILL.md` skills in the system prompt |
 | `extras` | `dict[str, Any]` | `{}` | Arbitrary metadata passed through to session |
 
 ### Loading and saving
