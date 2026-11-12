@@ -31,6 +31,7 @@ Without a prompt argument, the agent starts in interactive mode. With a prompt, 
 | `--config / -c <path>` | Agent config YAML file |
 | `--output <path>` | Write the agent's final response to a file |
 | `--auto-approve / -y` | Skip tool approval prompts |
+| `--queue-approvals` | Send approval requests to `rho-agent monitor` instead of prompting here (the default when there is no terminal) |
 | `--resume <id> / -r <id>` | Resume a saved conversation (`-r latest` for most recent) |
 | `--list / -l` | List saved conversations |
 | `--reasoning-effort <level>` | Reasoning effort for o1/o3 models |
@@ -76,7 +77,10 @@ Once inside the monitor, these commands are available:
 | Command | Description |
 |---|---|
 | `ps` | List sessions by project, with status, cost and child sessions |
-| `watch <prefix>` | Live-follow a session's trace output |
+| `watch <prefix> [n\|all]` | Live-follow a session's trace output, starting from the last `n` events (default 20) |
+| `approvals` | List pending tool approval requests |
+| `approve <request\|all>` | Approve a pending tool call |
+| `deny <request>` | Deny a pending tool call |
 | `cancel <prefix\|all>` | Cancel the current run of a live session |
 | `pause <prefix\|all>` | Pause a live session |
 | `resume <prefix\|all>` | Resume a paused session |

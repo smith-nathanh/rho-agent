@@ -21,6 +21,7 @@ Every significant event during a session is appended as a JSON line to `trace.js
 | `llm_end` | LLM API call completed (includes token counts and cost) |
 | `tool_start` | Tool execution begins (includes tool name and args) |
 | `tool_end` | Tool execution completes (includes `success`) |
+| `approval_requested` / `approval_resolved` | A queued tool approval was filed / answered (`outcome`: `approved`, `denied` or `cancelled`) |
 | `child_start` / `child_end` | A child session was spawned / finished (includes `child_session_id`) |
 | `tool_blocked` | Tool call denied by permissions or approval |
 | `compact` | Context compaction occurred (includes tokens before/after and `method`: `summary` or `prune`) |
@@ -53,6 +54,7 @@ Each session directory at `~/.config/rho-agent/sessions/<session_id>/` contains:
 | `cancel` | Sentinel file — presence cancels the current run, then it is removed |
 | `pause` | Sentinel file — presence signals pause request |
 | `directives.jsonl` | Operator directives queued for the agent (JSON lines) |
+| `approvals/` | Queued tool approval requests and their answers |
 | `children/<id>/` | Sessions spawned by this one, each with the same layout |
 
 ### meta.json

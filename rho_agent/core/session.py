@@ -314,7 +314,8 @@ class Session:
 
         Returns:
             RunResult with text, events, status, and usage for this run. Status
-            is one of ``completed``, ``error``, ``cancelled``, ``max_turns`` or
+            is one of ``completed``, ``error``, ``cancelled``, ``interrupted``
+            (stopped for an out-of-band approval), ``max_turns`` or
             ``budget_exceeded``.
         """
         if self._wall_start is None:
@@ -359,6 +360,8 @@ class Session:
                     status = "cancelled"
                 elif event.type == "error":
                     status = "error"
+                elif event.type == "interruption":
+                    status = "interrupted"
                 elif event.type in ("max_turns", "budget_exceeded"):
                     status = event.type
 

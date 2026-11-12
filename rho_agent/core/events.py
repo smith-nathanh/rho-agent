@@ -156,7 +156,7 @@ class RunResult:
 
     text: str
     events: list[AgentEvent]
-    status: str  # "completed", "error", "cancelled", "max_turns", "budget_exceeded"
+    status: str  # completed, error, cancelled, interrupted, max_turns, budget_exceeded
     usage: dict[str, int | float]
 
 
