@@ -478,6 +478,7 @@ class Session:
                 content=m.get("content"),
                 tool_calls=m.get("tool_calls"),
                 tool_call_id=m.get("tool_call_id"),
+                response_items=m.get("response_items"),
             )
             for m in messages
         ]
@@ -542,6 +543,8 @@ class Session:
                 text_content = ""
                 tool_calls: list[dict[str, Any]] = []
                 pending_tool_calls: list[tuple[str, str, dict[str, Any], str | None]] = []
+                # Reasoning items to send back on later requests (Responses API).
+                response_items: list[dict[str, Any]] | None = None
                 error_event: Any | None = None
 
                 self._state._emit(
@@ -593,6 +596,7 @@ class Session:
                             )
 
                     elif event.type == "done":
+                        response_items = getattr(event, "response_items", None)
                         if event.usage:
                             usage = {
                                 "input_tokens": event.usage.get("input_tokens", 0),
@@ -669,9 +673,11 @@ class Session:
 
             # Record what the assistant said/did
             if tool_calls:
-                self._state.add_assistant_tool_calls(tool_calls, content=text_content or None)
+                self._state.add_assistant_tool_calls(
+                    tool_calls, content=text_content or None, response_items=response_items
+                )
             elif text_content:
-                self._state.add_assistant_message(text_content)
+                self._state.add_assistant_message(text_content, response_items=response_items)
 
             # No tool calls — the model considers itself done
             if not pending_tool_calls:

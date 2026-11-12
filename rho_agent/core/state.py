@@ -48,7 +48,8 @@ class StateObserver(Protocol):
 class State:
     """Pure conversation trajectory in the Agent/State/Session decomposition.
 
-    The single source of truth for a conversation: messages (OpenAI chat format),
+    The single source of truth for a conversation: messages (OpenAI chat format,
+    plus ``response_items`` on assistant messages from a reasoning model),
     cumulative token usage/cost, and run status. State is the trace — there is no
     separate observability data store.
 
@@ -114,14 +115,25 @@ class State:
         self.messages.append(msg)
         self._emit({"type": "message", **msg})
 
-    def add_assistant_message(self, content: str) -> None:
-        """Add an assistant text message."""
-        msg = {"role": "assistant", "content": content}
+    def add_assistant_message(
+        self, content: str, response_items: list[dict[str, Any]] | None = None
+    ) -> None:
+        """Add an assistant text message.
+
+        ``response_items`` are the model's output items (encrypted reasoning
+        included) that the Responses API needs back on later requests.
+        """
+        msg: dict[str, Any] = {"role": "assistant", "content": content}
+        if response_items:
+            msg["response_items"] = response_items
         self.messages.append(msg)
         self._emit({"type": "message", **msg})
 
     def add_assistant_tool_calls(
-        self, tool_calls: list[dict[str, Any]], content: str | None = None
+        self,
+        tool_calls: list[dict[str, Any]],
+        content: str | None = None,
+        response_items: list[dict[str, Any]] | None = None,
     ) -> None:
         """Add assistant message with tool calls (and any text that came with them)."""
         msg: dict[str, Any] = {
@@ -129,6 +141,8 @@ class State:
             "content": content or None,
             "tool_calls": tool_calls,
         }
+        if response_items:
+            msg["response_items"] = response_items
         self.messages.append(msg)
         self._emit({"type": "message", **msg})
 
@@ -201,8 +215,8 @@ class State:
     def close_pending_tool_calls(self, reason: str) -> int:
         """Give every unanswered tool call a result so the history stays valid.
 
-        Chat APIs reject a history where an assistant tool call has no matching
-        tool message. Results are inserted directly after the calling assistant
+        Model APIs reject a history where an assistant tool call has no matching
+        tool result. Results are inserted directly after the calling assistant
         message (and any results already there), not appended at the end.
         """
         pending = set(self.pending_tool_call_ids())

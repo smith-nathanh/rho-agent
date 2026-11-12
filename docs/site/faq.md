@@ -8,18 +8,19 @@ order: 13
 
 ### What models are supported?
 
-Any OpenAI-compatible API. Set `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL` to point to your provider. The default model is `gpt-6.1-terra` (override with `OPENAI_MODEL` or `--model`).
+OpenAI's models, and any OpenAI-compatible API. Set `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL` to point to your provider. The default model is `gpt-6.1-terra` (override with `OPENAI_MODEL` or `--model`).
 
 ### Does the agent use reasoning with OpenAI's GPT-5.6 and GPT-6 models?
 
-Not at the moment. rho-agent calls the chat-completions endpoint, and on that endpoint these models refuse tool calls unless reasoning is off. When a model refuses, the client retries with `reasoning_effort` set to `none` and keeps it off for later tool requests, so the agent works but does not reason between tool calls.
+Yes. rho-agent calls OpenAI through the Responses API (`/v1/responses`), where these models reason and call tools in the same request. Set the effort with `--reasoning-effort` (or `RHO_AGENT_REASONING_EFFORT` for Harbor runs, or `AgentConfig.reasoning_effort`); leave it unset to use the model's default. Reasoning tokens are counted in the session's usage. A model may still spend none on a simple step, whatever the setting.
 
-Two consequences:
+Requests are stateless (`store=false`): nothing is kept on OpenAI's side. The model's reasoning comes back encrypted, is saved with the assistant message in `trace.jsonl`, and is sent back on later requests, so a resumed session continues with its reasoning intact.
 
-- Setting `--reasoning-effort` (or `RHO_AGENT_REASONING_EFFORT`) to anything but `none` with these models fails with the API's error, because your setting is not overridden.
-- A model that does not accept `none`, such as `gpt-6.1-sol`, cannot be used with tools at all. `gpt-6.1-terra`, `gpt-6-sol` and `gpt-6-luna` work.
+### Which endpoint is called when I set `OPENAI_BASE_URL`?
 
-Reasoning with tools on these models needs OpenAI's Responses API, which rho-agent does not use yet.
+Chat Completions (`/v1/chat/completions`), because most OpenAI-compatible servers (vLLM, Ollama, Cerebras and others) implement nothing else. Without a base URL, or with one on an OpenAI or Azure OpenAI host, the Responses API is used.
+
+To override the choice, set `RHO_AGENT_API` to `responses` or `chat`, for example `RHO_AGENT_API=responses` for a gateway in front of OpenAI. On the Chat Completions path, OpenAI's GPT-5.6 and GPT-6 models refuse tool calls unless reasoning is off, so use the Responses path for them.
 
 ### Do I need Docker?
 

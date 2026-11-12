@@ -1,11 +1,23 @@
-"""Model client for streaming API calls via OpenAI-compatible API."""
+"""Model client for OpenAI, built on the Responses API.
+
+Conversation history is kept in chat format (``Prompt.messages``) and converted
+to Responses input items for each request. Requests are stateless
+(``store=False``): the reasoning items a model returns are stored, encrypted,
+on the assistant message and sent back on the next request, so the trace file
+alone is enough to continue a session.
+
+Servers other than OpenAI are served by ``ChatCompletionsClient``; see
+``ModelClient`` for how the endpoint is chosen.
+"""
 
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 from openai import APIStatusError, AsyncOpenAI
 
@@ -89,6 +101,10 @@ class StreamEvent:
     usage: dict[str, Any] | None = None
     # For type="error": "context_overflow", "fatal" or "transient".
     error_kind: str | None = None
+    # For type="done": the response's output items in order, to be stored on
+    # the assistant message (see ``Message.response_items``). None when the
+    # response had no reasoning, in which case the chat fields are enough.
+    response_items: list[dict[str, Any]] | None = None
 
 
 @dataclass
@@ -99,6 +115,13 @@ class Message:
     content: str | list[dict[str, Any]] | None = None
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
+    # Assistant messages only: the Responses output items this message was
+    # built from, in the order the model produced them. Reasoning items are
+    # stored whole (with their encrypted content), message items as
+    # ``{"type": "message", "role": "assistant", "content": text}`` and function
+    # calls as ``{"type": "function_call", "call_id": id}``, which refers to the
+    # entry in ``tool_calls``.
+    response_items: list[dict[str, Any]] | None = None
 
 
 @dataclass
@@ -113,8 +136,277 @@ class Prompt:
     tool_choice: str | None = None
 
 
+# --- Chat format -> Responses format ---------------------------------------
+
+
+def _content_parts(content: list[Any]) -> list[dict[str, Any]]:
+    """Convert chat content parts (text, image_url) to Responses input parts."""
+    parts: list[dict[str, Any]] = []
+    for part in content:
+        if not isinstance(part, dict):
+            parts.append({"type": "input_text", "text": str(part)})
+        elif part.get("type") == "text":
+            parts.append({"type": "input_text", "text": str(part.get("text") or "")})
+        elif part.get("type") == "image_url":
+            image = part.get("image_url")
+            if isinstance(image, dict):
+                url, detail = image.get("url"), image.get("detail")
+            else:
+                url, detail = image, None
+            parts.append({"type": "input_image", "image_url": url, "detail": detail or "auto"})
+        else:
+            parts.append(part)  # already in Responses format
+    return parts
+
+
+def _text_of(content: Any) -> str:
+    """Plain text of chat content that may be a string or a list of parts."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            str(p.get("text") or "") for p in content if isinstance(p, dict) and "text" in p
+        )
+    return "" if content is None else str(content)
+
+
+def _function_call_item(tool_call: dict[str, Any]) -> dict[str, Any]:
+    function = tool_call.get("function") or {}
+    return {
+        "type": "function_call",
+        "call_id": tool_call.get("id") or "",
+        "name": function.get("name") or "",
+        "arguments": function.get("arguments") or "{}",
+    }
+
+
+def _assistant_items(msg: Message) -> list[dict[str, Any]]:
+    """Input items for one assistant message.
+
+    With ``response_items`` the model's own item order is replayed, reasoning
+    included. Function calls are always taken from ``tool_calls``, so a call
+    that is no longer in the history is not sent, and one that is not referenced
+    is still sent.
+    """
+    calls = {tc.get("id"): tc for tc in msg.tool_calls or []}
+    items: list[dict[str, Any]] = []
+    if msg.response_items:
+        for item in msg.response_items:
+            if item.get("type") == "function_call":
+                tool_call = calls.pop(item.get("call_id"), None)
+                if tool_call is not None:
+                    items.append(_function_call_item(tool_call))
+            else:
+                items.append(item)
+    else:
+        text = _text_of(msg.content)
+        if text:
+            items.append({"role": "assistant", "content": text})
+    items.extend(_function_call_item(tc) for tc in calls.values())
+    return items
+
+
+def to_response_input(messages: list[Message]) -> list[dict[str, Any]]:
+    """Convert chat-format history into Responses input items."""
+    items: list[dict[str, Any]] = []
+    for msg in messages:
+        if msg.role == "assistant":
+            items.extend(_assistant_items(msg))
+        elif msg.role == "tool":
+            output: Any = msg.content
+            if isinstance(output, list):
+                output = _content_parts(output)
+            elif output is None:
+                output = ""
+            items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": msg.tool_call_id or "",
+                    "output": output,
+                }
+            )
+        else:
+            content: Any = msg.content
+            if isinstance(content, list):
+                content = _content_parts(content)
+            elif content is None:
+                content = ""
+            items.append({"role": msg.role, "content": content})
+    return items
+
+
+def to_response_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert chat-format function tools to Responses function tools.
+
+    ``strict`` is sent as false unless the tool asks for it: the Responses API
+    otherwise treats it as true and rejects schemas with optional parameters.
+    """
+    converted: list[dict[str, Any]] = []
+    for tool in tools:
+        function = tool.get("function")
+        if tool.get("type") != "function" or not isinstance(function, dict):
+            converted.append(tool)  # already in Responses format
+            continue
+        converted.append(
+            {
+                "type": "function",
+                "name": function.get("name"),
+                "description": function.get("description"),
+                "parameters": function.get("parameters") or {"type": "object", "properties": {}},
+                "strict": bool(function.get("strict", False)),
+            }
+        )
+    return converted
+
+
+def to_response_tool_choice(tool_choice: Any) -> Any:
+    """Convert a chat-format ``tool_choice`` to the Responses form."""
+    if isinstance(tool_choice, dict) and isinstance(tool_choice.get("function"), dict):
+        return {"type": "function", "name": tool_choice["function"].get("name")}
+    return tool_choice
+
+
+def to_response_text_format(response_format: dict[str, Any]) -> dict[str, Any]:
+    """Convert a chat-format ``response_format`` to a Responses ``text.format``."""
+    schema = response_format.get("json_schema")
+    if response_format.get("type") == "json_schema" and isinstance(schema, dict):
+        return {"type": "json_schema", **schema}
+    return response_format
+
+
+# --- Responses output -> events ---------------------------------------------
+
+
+def _message_text(item: Any) -> str:
+    """Text of an output message item, refusals included."""
+    text = ""
+    for part in getattr(item, "content", None) or []:
+        text += getattr(part, "text", None) or getattr(part, "refusal", None) or ""
+    return text
+
+
+def _reasoning_item(item: Any) -> dict[str, Any] | None:
+    """Input form of a reasoning output item, or None if it cannot be replayed.
+
+    Without ``encrypted_content`` the item only exists on OpenAI's side, and a
+    stateless request that refers to it is rejected.
+    """
+    encrypted = getattr(item, "encrypted_content", None)
+    if not encrypted:
+        return None
+    return {
+        "type": "reasoning",
+        "id": item.id,
+        "summary": [
+            {"type": "summary_text", "text": s.text} for s in getattr(item, "summary", None) or []
+        ],
+        "encrypted_content": encrypted,
+    }
+
+
+def _record_item(item: Any, items: list[dict[str, Any]]) -> ToolCall | None:
+    """Add a finished output item to ``items``; return its tool call if it is one."""
+    kind = getattr(item, "type", None)
+    if kind == "reasoning":
+        reasoning = _reasoning_item(item)
+        if reasoning is not None:
+            items.append(reasoning)
+    elif kind == "message":
+        message: dict[str, Any] = {
+            "type": "message",
+            "role": "assistant",
+            "content": _message_text(item),
+        }
+        if getattr(item, "phase", None):
+            message["phase"] = item.phase
+        if message["content"]:
+            items.append(message)
+    elif kind == "function_call":
+        items.append({"type": "function_call", "call_id": item.call_id})
+        args, parse_error = parse_tool_arguments(item.arguments or "")
+        return ToolCall(id=item.call_id, name=item.name, arguments=args, parse_error=parse_error)
+    return None
+
+
+def _items_to_store(items: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """The items worth storing: only when they hold more than the chat fields do."""
+    if any(i.get("type") == "reasoning" or i.get("phase") for i in items):
+        return items
+    return None
+
+
+def _usage(response: Any) -> dict[str, Any]:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "reasoning_tokens": 0}
+    input_details = getattr(usage, "input_tokens_details", None)
+    output_details = getattr(usage, "output_tokens_details", None)
+    return {
+        "input_tokens": usage.input_tokens or 0,
+        "output_tokens": usage.output_tokens or 0,
+        "cached_tokens": getattr(input_details, "cached_tokens", 0) or 0,
+        # Already counted in output_tokens.
+        "reasoning_tokens": getattr(output_details, "reasoning_tokens", 0) or 0,
+    }
+
+
+def _stop_reason(response: Any) -> str | None:
+    details = getattr(response, "incomplete_details", None)
+    return getattr(details, "reason", None) or getattr(response, "status", None)
+
+
+_TRANSIENT_RESPONSE_ERRORS = frozenset(
+    {"server_error", "rate_limit_exceeded", "vector_store_timeout"}
+)
+
+
+def _response_error(code: str | None, message: str | None) -> StreamEvent:
+    """Error event for a failure reported inside a response, not as an HTTP status."""
+    text = f"{code}: {message}" if code else (message or "response failed")
+    if any(marker in text.lower() for marker in CONTEXT_OVERFLOW_MARKERS):
+        kind = "context_overflow"
+    elif code is None or code in _TRANSIENT_RESPONSE_ERRORS:
+        kind = "transient"
+    else:
+        kind = "fatal"
+    return StreamEvent(type="error", content=text, error_kind=kind)
+
+
+_ZERO_USAGE = {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0}
+
+
+def _uses_chat_completions(base_url: str | None, api: str | None) -> bool:
+    """Whether to call chat completions instead of Responses."""
+    api = api or os.getenv("RHO_AGENT_API")
+    if api:
+        if api not in ("responses", "chat"):
+            raise ValueError(f"api must be 'responses' or 'chat', got {api!r}")
+        return api == "chat"
+    base_url = base_url or os.getenv("OPENAI_BASE_URL")
+    if not base_url:
+        return False
+    host = (urlparse(base_url).hostname or "").lower()
+    return not (host == "openai.com" or host.endswith((".openai.com", ".openai.azure.com")))
+
+
 class ModelClient:
-    """Streaming model client for OpenAI-compatible APIs."""
+    """Streaming model client for OpenAI, using the Responses API.
+
+    Which endpoint is called:
+
+    - No ``base_url`` (and no ``OPENAI_BASE_URL``), or one on an OpenAI host:
+      ``/v1/responses``.
+    - Any other ``base_url``: ``/v1/chat/completions``, because most
+      OpenAI-compatible servers implement nothing else.
+    - ``api="responses"`` or ``api="chat"`` (or the ``RHO_AGENT_API``
+      environment variable) overrides the choice, for example for a gateway
+      in front of OpenAI.
+
+    Responses requests are stateless (``store=False``). The reasoning items a
+    model returns come back on the ``done`` event as ``response_items``; the
+    caller stores them on the assistant message and they are sent back, with
+    their encrypted content, on later requests.
+    """
 
     def __init__(
         self,
@@ -126,6 +418,8 @@ class ModelClient:
         temperature: float | None = None,
         reasoning_effort: str | None = None,
         response_format: dict[str, Any] | None = None,
+        api: str | None = None,
+        streaming: bool = True,
     ) -> None:
         self._temperature = temperature
         self._reasoning_effort = reasoning_effort
@@ -142,148 +436,126 @@ class ModelClient:
         self._model = model
         self._service_tier = service_tier
         self._base_url = base_url or ""
+        self._streaming = streaming
 
-        # Cerebras doesn't support streaming with tool calling
-        self._use_nonstreaming_tools = "cerebras" in self._base_url.lower()
-        # Set once the endpoint has refused tools together with reasoning.
-        self._tools_need_reasoning_off = False
+        self._chat: Any | None = None
+        if _uses_chat_completions(base_url, api):
+            from .chat_completions import ChatCompletionsClient
 
-    async def _create(self, kwargs: dict[str, Any]) -> Any:
-        """Call chat.completions.create, turning reasoning off for tools if required.
+            self._chat = ChatCompletionsClient(
+                self._client,
+                model,
+                base_url=self._base_url or os.getenv("OPENAI_BASE_URL", ""),
+                service_tier=service_tier,
+                temperature=temperature,
+                reasoning_effort=reasoning_effort,
+                response_format=response_format,
+            )
 
-        Some models (the GPT-5.6 and GPT-6 families) reject function tools on
-        this endpoint unless ``reasoning_effort`` is ``"none"``. When no effort
-        was configured, the request is retried once with reasoning off and
-        later tool requests are sent that way. An explicitly configured effort
-        is never overridden: that error is raised to the caller.
-        """
-        effort_unset = "reasoning_effort" not in kwargs
-        if self._tools_need_reasoning_off and kwargs.get("tools") and effort_unset:
-            kwargs["reasoning_effort"] = "none"
-        try:
-            return await self._client.chat.completions.create(**kwargs)
-        except APIStatusError as e:
-            message = str(e.message).lower()
-            refused = e.status_code == 400 and "reasoning_effort" in message and "tools" in message
-            if not (refused and kwargs.get("tools") and effort_unset):
-                raise
-            self._tools_need_reasoning_off = True
-            kwargs["reasoning_effort"] = "none"
-            return await self._client.chat.completions.create(**kwargs)
+    @property
+    def api(self) -> str:
+        """The endpoint in use: ``"responses"`` or ``"chat"``."""
+        return "chat" if self._chat is not None else "responses"
 
-    def _build_messages(self, prompt: Prompt) -> list[dict[str, Any]]:
-        """Build messages list from prompt."""
-        messages: list[dict[str, Any]] = [{"role": "system", "content": prompt.system}]
-        for msg in prompt.messages:
-            m: dict[str, Any] = {"role": msg.role}
-            if msg.content is not None:
-                m["content"] = msg.content
-            if msg.tool_calls:
-                m["tool_calls"] = msg.tool_calls
-            if msg.tool_call_id:
-                m["tool_call_id"] = msg.tool_call_id
-            messages.append(m)
-        return messages
+    def _request(
+        self,
+        input_items: list[dict[str, Any]],
+        *,
+        instructions: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = None,
+        structured: bool = True,
+    ) -> dict[str, Any]:
+        """Keyword arguments for ``responses.create``."""
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "input": input_items,
+            # Stateless: nothing is kept on OpenAI's side, and reasoning comes
+            # back encrypted so it can be replayed from the local history.
+            "store": False,
+            "include": ["reasoning.encrypted_content"],
+        }
+        if instructions:
+            kwargs["instructions"] = instructions
+        # Reasoning models reject temperature, so an effort takes precedence.
+        if self._reasoning_effort:
+            kwargs["reasoning"] = {"effort": self._reasoning_effort}
+        elif self._temperature is not None:
+            kwargs["temperature"] = self._temperature
+        if tools:
+            kwargs["tools"] = to_response_tools(tools)
+            if tool_choice:
+                kwargs["tool_choice"] = to_response_tool_choice(tool_choice)
+        if self._service_tier:
+            kwargs["service_tier"] = self._service_tier
+        if structured and self._response_format:
+            kwargs["text"] = {"format": to_response_text_format(self._response_format)}
+        return kwargs
+
+    def _prompt_request(self, prompt: Prompt, *, structured: bool = True) -> dict[str, Any]:
+        return self._request(
+            to_response_input(prompt.messages),
+            instructions=prompt.system,
+            tools=prompt.tools,
+            tool_choice=prompt.tool_choice,
+            structured=structured,
+        )
 
     async def stream(self, prompt: Prompt) -> AsyncIterator[StreamEvent]:
         """Stream a response from the model."""
-        # Use non-streaming for tool calls on providers that don't support it
-        if prompt.tools and self._use_nonstreaming_tools:
+        if self._chat is not None:
+            async for event in self._chat.stream(prompt):
+                yield event
+            return
+        if not self._streaming:
             async for event in self._stream_via_complete(prompt):
                 yield event
             return
 
-        messages = self._build_messages(prompt)
-
-        kwargs: dict[str, Any] = {
-            "model": self._model,
-            "messages": messages,
-            "stream": True,
-            "stream_options": {"include_usage": True},
-        }
-
-        # reasoning_effort and temperature are mutually exclusive
-        # GPT-5/o-series models don't support temperature with reasoning
-        if self._reasoning_effort:
-            kwargs["reasoning_effort"] = self._reasoning_effort
-        elif self._temperature is not None:
-            kwargs["temperature"] = self._temperature
-
-        if prompt.tools:
-            kwargs["tools"] = prompt.tools
-
-        if self._service_tier:
-            kwargs["service_tier"] = self._service_tier
-
-        if self._response_format:
-            kwargs["response_format"] = self._response_format
+        kwargs = self._prompt_request(prompt)
+        kwargs["stream"] = True
+        items: list[dict[str, Any]] = []
+        text_item_id: str | None = None
 
         try:
-            # Track tool calls being built
-            tool_calls_in_progress: dict[int, dict[str, str]] = {}
-
-            async with await self._create(kwargs) as stream:
-                async for chunk in stream:
-                    if not chunk.choices:
-                        # Usage info comes in final chunk with no choices
-                        if chunk.usage:
-                            cached = 0
-                            details = getattr(chunk.usage, "prompt_tokens_details", None)
-                            if details:
-                                cached = getattr(details, "cached_tokens", 0) or 0
-                            yield StreamEvent(
-                                type="done",
-                                usage={
-                                    "input_tokens": chunk.usage.prompt_tokens,
-                                    "output_tokens": chunk.usage.completion_tokens,
-                                    "cached_tokens": cached,
-                                },
-                            )
-                        continue
-
-                    choice = chunk.choices[0]
-                    delta = choice.delta
-
-                    # Text content
-                    if delta.content:
-                        yield StreamEvent(type="text", content=delta.content)
-
-                    # Tool calls
-                    if delta.tool_calls:
-                        for tc in delta.tool_calls:
-                            idx = tc.index
-                            if idx not in tool_calls_in_progress:
-                                tool_calls_in_progress[idx] = {
-                                    "id": tc.id or "",
-                                    "name": tc.function.name if tc.function else "",
-                                    "arguments": "",
-                                }
-                            if tc.id:
-                                tool_calls_in_progress[idx]["id"] = tc.id
-                            if tc.function:
-                                if tc.function.name:
-                                    tool_calls_in_progress[idx]["name"] = tc.function.name
-                                if tc.function.arguments:
-                                    tool_calls_in_progress[idx]["arguments"] += (
-                                        tc.function.arguments
-                                    )
-
-                    # Check for finish
-                    if choice.finish_reason:
-                        # Emit any completed tool calls
-                        for tc_data in tool_calls_in_progress.values():
-                            args, parse_error = parse_tool_arguments(tc_data["arguments"])
-                            yield StreamEvent(
-                                type="tool_call",
-                                tool_call=ToolCall(
-                                    id=tc_data["id"],
-                                    name=tc_data["name"],
-                                    arguments=args,
-                                    parse_error=parse_error,
-                                ),
-                            )
-                        tool_calls_in_progress.clear()
-
+            stream = await self._client.responses.create(**kwargs)
+            try:
+                async for event in stream:
+                    kind = event.type
+                    if kind in ("response.output_text.delta", "response.refusal.delta"):
+                        if not event.delta:
+                            continue
+                        item_id = getattr(event, "item_id", None)
+                        if text_item_id is not None and item_id != text_item_id:
+                            # A second message in one response (commentary,
+                            # then the answer): keep them apart.
+                            yield StreamEvent(type="text", content="\n\n")
+                        text_item_id = item_id
+                        yield StreamEvent(type="text", content=event.delta)
+                    elif kind == "response.output_item.done":
+                        # Only the finished item is used: its arguments and
+                        # encrypted reasoning are complete here and nowhere earlier.
+                        tool_call = _record_item(event.item, items)
+                        if tool_call is not None:
+                            yield StreamEvent(type="tool_call", tool_call=tool_call)
+                    elif kind in ("response.completed", "response.incomplete"):
+                        yield StreamEvent(
+                            type="done",
+                            usage=_usage(event.response),
+                            stop_reason=_stop_reason(event.response),
+                            response_items=_items_to_store(items),
+                        )
+                    elif kind == "response.failed":
+                        error = getattr(event.response, "error", None)
+                        yield _response_error(
+                            getattr(error, "code", None), getattr(error, "message", None)
+                        )
+                    elif kind == "error":
+                        yield _response_error(event.code, event.message)
+            finally:
+                close = getattr(stream, "close", None)
+                if close is not None:
+                    await close()
         except APIStatusError as e:
             yield StreamEvent(
                 type="error",
@@ -294,167 +566,110 @@ class ModelClient:
             yield StreamEvent(type="error", content=str(e), error_kind=classify_error(e))
 
     async def _stream_via_complete(self, prompt: Prompt) -> AsyncIterator[StreamEvent]:
-        """Non-streaming fallback for providers that don't stream tool calls."""
-        messages = self._build_messages(prompt)
+        """One non-streaming request, reported as the same events as ``stream``.
 
-        kwargs: dict[str, Any] = {
-            "model": self._model,
-            "messages": messages,
-            "stream": False,
-        }
-
-        # reasoning_effort and temperature are mutually exclusive
-        if self._reasoning_effort:
-            kwargs["reasoning_effort"] = self._reasoning_effort
-        elif self._temperature is not None:
-            kwargs["temperature"] = self._temperature
-
-        if prompt.tools:
-            kwargs["tools"] = prompt.tools
-
-        if self._service_tier:
-            kwargs["service_tier"] = self._service_tier
-
-        if self._response_format:
-            kwargs["response_format"] = self._response_format
-
+        Used with ``streaming=False``, for accounts or gateways that cannot
+        stream a model.
+        """
         try:
-            response = await self._create(kwargs)
-            choice = response.choices[0]
-            msg = choice.message
-
-            # Emit text content if present
-            if msg.content:
-                yield StreamEvent(type="text", content=msg.content)
-
-            # Emit tool calls if present
-            if msg.tool_calls:
-                for tc in msg.tool_calls:
-                    args, parse_error = parse_tool_arguments(tc.function.arguments or "")
-                    yield StreamEvent(
-                        type="tool_call",
-                        tool_call=ToolCall(
-                            id=tc.id,
-                            name=tc.function.name,
-                            arguments=args,
-                            parse_error=parse_error,
-                        ),
-                    )
-
-            # Emit done with usage
-            cached = 0
-            if response.usage:
-                details = getattr(response.usage, "prompt_tokens_details", None)
-                if details:
-                    cached = getattr(details, "cached_tokens", 0) or 0
-            usage = {
-                "input_tokens": response.usage.prompt_tokens if response.usage else 0,
-                "output_tokens": response.usage.completion_tokens if response.usage else 0,
-                "cached_tokens": cached,
-            }
-            yield StreamEvent(type="done", usage=usage)
-
+            response = await self._client.responses.create(**self._prompt_request(prompt))
         except APIStatusError as e:
             yield StreamEvent(
                 type="error",
                 content=f"API error {e.status_code} (after retries): {e.message}",
                 error_kind=classify_error(e),
             )
+            return
         except Exception as e:
             yield StreamEvent(type="error", content=str(e), error_kind=classify_error(e))
+            return
+
+        error = getattr(response, "error", None)
+        if error is not None:
+            yield _response_error(getattr(error, "code", None), getattr(error, "message", None))
+            return
+
+        items: list[dict[str, Any]] = []
+        texts: list[str] = []
+        tool_calls: list[ToolCall] = []
+        for item in response.output:
+            tool_call = _record_item(item, items)
+            if tool_call is not None:
+                tool_calls.append(tool_call)
+            elif getattr(item, "type", None) == "message" and _message_text(item):
+                texts.append(_message_text(item))
+        if texts:
+            yield StreamEvent(type="text", content="\n\n".join(texts))
+        for tool_call in tool_calls:
+            yield StreamEvent(type="tool_call", tool_call=tool_call)
+        yield StreamEvent(
+            type="done",
+            usage=_usage(response),
+            stop_reason=_stop_reason(response),
+            response_items=_items_to_store(items),
+        )
+
+    async def _create_text(self, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Run one non-streaming request and return ``(text, usage)``."""
+        response = await self._client.responses.create(**kwargs)
+        error = getattr(response, "error", None)
+        if error is not None:
+            failure = _response_error(getattr(error, "code", None), getattr(error, "message", None))
+            raise ModelCallError(
+                failure.content or "response failed", failure.error_kind or "fatal"
+            )
+        text = "\n\n".join(
+            _message_text(item)
+            for item in response.output
+            if getattr(item, "type", None) == "message" and _message_text(item)
+        )
+        return text, {**_usage(response), "cost_usd": 0.0}
 
     async def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
-        """Non-streaming completion returning (content, usage_dict)."""
-        try:
-            kwargs: dict[str, Any] = {
-                "model": self._model,
-                "messages": messages,
-                "stream": False,
-            }
-            # reasoning_effort and temperature are mutually exclusive
-            if self._reasoning_effort:
-                kwargs["reasoning_effort"] = self._reasoning_effort
-            elif self._temperature is not None:
-                kwargs["temperature"] = self._temperature
-            if self._service_tier:
-                kwargs["service_tier"] = self._service_tier
-            if self._response_format:
-                kwargs["response_format"] = self._response_format
+        """Non-streaming completion of chat-format messages: ``(content, usage_dict)``.
 
-            response = await self._create(kwargs)
-            content = response.choices[0].message.content or ""
-            cached = 0
-            if response.usage:
-                details = getattr(response.usage, "prompt_tokens_details", None)
-                if details:
-                    cached = getattr(details, "cached_tokens", 0) or 0
-            usage = {
-                "input_tokens": response.usage.prompt_tokens if response.usage else 0,
-                "output_tokens": response.usage.completion_tokens if response.usage else 0,
-                "cached_tokens": cached,
-                "cost_usd": 0.0,
-            }
-            return content, usage
-        except APIStatusError as e:
-            return (
-                f"API error {e.status_code} (after retries): {e.message}",
-                {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0},
+        A failure is returned as the content, not raised.
+        """
+        if self._chat is not None:
+            return await self._chat.complete(messages)
+        history = [
+            Message(
+                role=m["role"],
+                content=m.get("content"),
+                tool_calls=m.get("tool_calls"),
+                tool_call_id=m.get("tool_call_id"),
+                response_items=m.get("response_items"),
             )
+            for m in messages
+        ]
+        try:
+            return await self._create_text(self._request(to_response_input(history)))
+        except APIStatusError as e:
+            return f"API error {e.status_code} (after retries): {e.message}", dict(_ZERO_USAGE)
         except Exception as e:
-            return f"Error: {e}", {
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "cached_tokens": 0,
-                "cost_usd": 0.0,
-            }
+            return f"Error: {e}", dict(_ZERO_USAGE)
 
     async def complete_prompt(self, prompt: Prompt) -> tuple[str, dict[str, Any]]:
         """Non-streaming completion from a Prompt, preserving system/tools prefix.
 
         Like complete() but accepts a Prompt so the system prompt and tool
         definitions are included in the request — enabling prompt-cache reuse
-        when the prefix matches a previous streaming call.
+        when the prefix matches a previous streaming call. The configured
+        ``response_format`` is not applied: callers want plain text.
 
         Raises:
             ModelCallError: if the call fails. The error text is never returned
                 as content, because callers use the content as a summary.
         """
-        messages = self._build_messages(prompt)
+        if self._chat is not None:
+            return await self._chat.complete_prompt(prompt)
         try:
-            kwargs: dict[str, Any] = {
-                "model": self._model,
-                "messages": messages,
-                "stream": False,
-            }
-            if self._reasoning_effort:
-                kwargs["reasoning_effort"] = self._reasoning_effort
-            elif self._temperature is not None:
-                kwargs["temperature"] = self._temperature
-            if prompt.tools:
-                kwargs["tools"] = prompt.tools
-                if prompt.tool_choice:
-                    kwargs["tool_choice"] = prompt.tool_choice
-            if self._service_tier:
-                kwargs["service_tier"] = self._service_tier
-
-            response = await self._create(kwargs)
+            return await self._create_text(self._prompt_request(prompt, structured=False))
+        except ModelCallError:
+            raise
         except APIStatusError as e:
             raise ModelCallError(
                 f"API error {e.status_code} (after retries): {e.message}", classify_error(e)
             ) from e
         except Exception as e:
             raise ModelCallError(str(e), classify_error(e)) from e
-
-        content = response.choices[0].message.content or ""
-        cached = 0
-        if response.usage:
-            details = getattr(response.usage, "prompt_tokens_details", None)
-            if details:
-                cached = getattr(details, "cached_tokens", 0) or 0
-        usage = {
-            "input_tokens": response.usage.prompt_tokens if response.usage else 0,
-            "output_tokens": response.usage.completion_tokens if response.usage else 0,
-            "cached_tokens": cached,
-            "cost_usd": 0.0,
-        }
-        return content, usage
