@@ -400,12 +400,10 @@ def main(
             resume = latest_id
 
         try:
-            # Build override config if CLI flags differ from defaults
-            override_config = None
-            if model != os.getenv("OPENAI_MODEL", "gpt-6.1-terra"):
-                # User explicitly set --model, use it as override
-                override_config = AgentConfig(model=model)
-            resumed_session = session_store.resume(resume, agent_config=override_config)
+            # An explicit --model replaces the saved model; the rest of the
+            # saved config (system prompt, profile, working dir) is kept.
+            model_override = model if model != os.getenv("OPENAI_MODEL", "gpt-6.1-terra") else None
+            resumed_session = session_store.resume(resume, model=model_override)
         except FileNotFoundError as err:
             console.print(_markup(f"Session not found: {resume}", THEME.error))
             console.print(_markup("Use --list to see saved sessions.", THEME.muted))
