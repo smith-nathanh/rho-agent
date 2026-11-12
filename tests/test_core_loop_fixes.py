@@ -755,6 +755,7 @@ async def test_summary_request_keeps_tools_but_forbids_calling_them() -> None:
 
 
 def test_litellm_client_sends_tool_choice() -> None:
+    pytest.importorskip("litellm")  # optional dependency (the evals extra)
     from rho_agent.client.litellm_client import LiteLLMClient
     from rho_agent.client.model import Message, Prompt
 
