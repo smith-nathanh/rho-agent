@@ -32,12 +32,12 @@ Every significant event during a session is appended as a JSON line to `trace.js
 ```jsonl
 {"type": "run_start", "run_id": 1, "prompt": "List all tables.", "ts": "2026-02-21T10:00:00Z"}
 {"type": "message", "role": "user", "content": "List all tables.", "ts": "2026-02-21T10:00:00Z"}
-{"type": "llm_start", "model": "gpt-5-mini", "context_size": 150, "ts": "2026-02-21T10:00:00Z"}
-{"type": "llm_end", "model": "gpt-5-mini", "input_tokens": 150, "output_tokens": 45, "cache_read_tokens": 0, "cost_usd": 0.0003, "ts": "2026-02-21T10:00:01Z"}
+{"type": "llm_start", "model": "gpt-6.1-terra", "context_size": 150, "ts": "2026-02-21T10:00:00Z"}
+{"type": "llm_end", "model": "gpt-6.1-terra", "input_tokens": 150, "output_tokens": 45, "cache_read_tokens": 0, "cost_usd": 0.0003, "ts": "2026-02-21T10:00:01Z"}
 {"type": "tool_start", "tool_name": "bash", "tool_call_id": "call_abc", "tool_args": {"command": "psql -c '\\dt'"}, "ts": "2026-02-21T10:00:01Z"}
 {"type": "tool_end", "tool_name": "bash", "tool_call_id": "call_abc", "success": true, "ts": "2026-02-21T10:00:01Z"}
-{"type": "llm_start", "model": "gpt-5-mini", "context_size": 280, "ts": "2026-02-21T10:00:02Z"}
-{"type": "llm_end", "model": "gpt-5-mini", "input_tokens": 280, "output_tokens": 90, "cache_read_tokens": 0, "cost_usd": 0.0006, "ts": "2026-02-21T10:00:03Z"}
+{"type": "llm_start", "model": "gpt-6.1-terra", "context_size": 280, "ts": "2026-02-21T10:00:02Z"}
+{"type": "llm_end", "model": "gpt-6.1-terra", "input_tokens": 280, "output_tokens": 90, "cache_read_tokens": 0, "cost_usd": 0.0006, "ts": "2026-02-21T10:00:03Z"}
 {"type": "message", "role": "assistant", "content": "The database has 12 tables...", "ts": "2026-02-21T10:00:03Z"}
 {"type": "run_end", "run_id": 1, "status": "completed", "ts": "2026-02-21T10:00:03Z"}
 ```
@@ -156,7 +156,7 @@ from rho_agent.export.atif import trace_to_atif
 trajectory = trace_to_atif(
     "path/to/trace.jsonl",
     session_id="abc123",
-    model_name="gpt-5-mini",
+    model_name="gpt-6.1-terra",
 )
 ```
 

@@ -57,7 +57,7 @@ class AgentConfig:
 
     system_prompt: str = ""
     vars: dict[str, str] = field(default_factory=dict)
-    model: str = field(default_factory=lambda: os.getenv("OPENAI_MODEL", "gpt-5-mini"))
+    model: str = field(default_factory=lambda: os.getenv("OPENAI_MODEL", "gpt-6.1-terra"))
     profile: str = field(default_factory=lambda: os.getenv("RHO_AGENT_PROFILE", "readonly"))
     backend: str | Any = field(
         default_factory=lambda: os.getenv("RHO_AGENT_BACKEND", "local")

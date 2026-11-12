@@ -261,7 +261,7 @@ sql_agent = AgentToolHandler(
     tool_name="generate_sql",
     tool_description="Generate SQL from a natural language question.",
     system_prompt="You are an expert SQL developer. ...",
-    config=AgentConfig(model="gpt-5-mini", profile="readonly"),
+    config=AgentConfig(model="gpt-6.1-terra", profile="readonly"),
     input_schema={
         "type": "object",
         "properties": {

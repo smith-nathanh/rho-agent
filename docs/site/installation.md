@@ -31,6 +31,8 @@ You can also pin a versioned installer URL:
 curl -fsSL https://rho-agent.dev/install/v0.1.0.sh | bash
 ```
 
+For maintainers cutting a release: the installer looks for GitHub release assets named `rho-agent-<target>.tar.gz`, each containing executables named `rho-agent` and `rho-eval`. Supported targets are macOS and Linux on `x86_64` and `arm64` (`aarch64`).
+
 ## Use as a Python library / SDK (project dependency)
 
 Install inside your project directory so `import rho_agent` works in your app code:
@@ -82,11 +84,11 @@ rho-agent --help
 | Variable | Default | Description |
 |---|---|---|
 | `OPENAI_BASE_URL` | OpenAI default | API endpoint override (for compatible providers) |
-| `OPENAI_MODEL` | `gpt-5-mini` | Default model |
+| `OPENAI_MODEL` | `gpt-6.1-terra` | Default model |
 | `RHO_AGENT_PROFILE` | `readonly` | Default permission profile |
 | `RHO_AGENT_BACKEND` | `local` | Agent backend — `local` or `daytona` |
 | `RHO_AGENT_SERVICE_TIER` | — | API service tier (e.g. `flex`) |
-| `RHO_AGENT_REASONING_EFFORT` | — | Reasoning effort level (for o1/o3 models) |
+| `RHO_AGENT_REASONING_EFFORT` | — | Reasoning effort level. See the [FAQ](faq/) for the limits with current OpenAI models |
 | `RHO_AGENT_COMPACT_THRESHOLD` | `0.7` | Compact history at this fraction of the context window |
 | `RHO_AGENT_COMPACT_AT_TOKENS` | — | Compact history at this exact input token count; wins over the fraction |
 | `RHO_AGENT_AUTO_COMPACT` | `1` | Set to `0` to turn automatic compaction off |

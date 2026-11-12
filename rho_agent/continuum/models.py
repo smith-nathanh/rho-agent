@@ -8,7 +8,7 @@ from typing import Any
 
 from ..core.config import AgentConfig
 
-DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-6.1-terra")
 
 
 @dataclass

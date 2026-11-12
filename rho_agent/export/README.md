@@ -26,7 +26,7 @@ from rho_agent.export.atif import trace_to_atif
 trajectory = trace_to_atif(
     "path/to/trace.jsonl",
     session_id="abc123",
-    model_name="gpt-5-mini",
+    model_name="gpt-6.1-terra",
 )
 ```
 

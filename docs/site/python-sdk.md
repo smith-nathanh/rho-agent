@@ -30,7 +30,7 @@ from rho_agent import Agent, AgentConfig, Session, SessionStore
 config = AgentConfig(
     system_prompt="You are a research assistant.",
     profile="developer",
-    model="gpt-5-mini",
+    model="gpt-6.1-terra",
     working_dir="/tmp/work",
 )
 
@@ -53,7 +53,7 @@ A dataclass holding all configuration for an agent. Can be constructed directly 
 class AgentConfig:
     system_prompt: str | None = None
     vars: dict[str, str] = field(default_factory=dict)
-    model: str = "gpt-5-mini"
+    model: str = "gpt-6.1-terra"
     profile: str | PermissionProfile | None = None
     backend: str | DaytonaBackend = "local"  # "local", "daytona", or DaytonaBackend
     working_dir: str | None = None
@@ -75,7 +75,7 @@ class AgentConfig:
 |---|---|---|---|
 | `system_prompt` | `str \| None` | `None` | System prompt text or path to a prompt template file |
 | `vars` | `dict[str, str]` | `{}` | Variables for prompt template substitution |
-| `model` | `str` | `"gpt-5-mini"` | Model identifier passed to the LLM client |
+| `model` | `str` | `"gpt-6.1-terra"` | Model identifier passed to the LLM client |
 | `profile` | `str \| PermissionProfile \| None` | `None` | Permission profile name, object, or path to YAML |
 | `backend` | `str \| DaytonaBackend` | `"local"` | Execution backend: `"local"`, `"daytona"`, or a `DaytonaBackend` instance |
 | `working_dir` | `str \| None` | `None` | Working directory for tool execution |

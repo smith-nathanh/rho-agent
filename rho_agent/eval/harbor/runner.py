@@ -202,8 +202,10 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     )
 
     # Create client from environment
-    # LiteLLM uses model names like "openai/gpt-5-mini" or "anthropic/claude-3-5-sonnet"
-    model = os.environ.get("RHO_AGENT_MODEL") or os.environ.get("OPENAI_MODEL", "openai/gpt-5-mini")
+    # LiteLLM uses model names like "openai/gpt-6.1-terra" or "anthropic/claude-3-5-sonnet"
+    model = os.environ.get("RHO_AGENT_MODEL") or os.environ.get(
+        "OPENAI_MODEL", "openai/gpt-6.1-terra"
+    )
     # Normally unset: LiteLLM then reads the provider's own variable
     # (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...), which works for any provider.
     api_key = os.environ.get("RHO_AGENT_API_KEY")
