@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import platform
+import shutil
 import signal
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +19,7 @@ from prompt_toolkit.key_binding import KeyBindings
 
 from ..core.events import AgentEvent
 from ..core.session import Session
+from ..core.session_meta import update_meta
 from ..core.session_store import SessionStore
 from .completion import create_completer
 from .events import ApprovalHandler, handle_command, handle_event
@@ -115,12 +118,23 @@ class InteractiveSession:
                 try:
                     console.print()
                     self.session.set_status("waiting_input")
-                    user_input = await prompt_session.prompt_async(
-                        HTML(f"<style fg='{THEME.prompt}'><b>&gt;</b></style> ")
-                    )
-                    user_input = user_input.strip()
+                    source, user_input = await self._next_input(prompt_session)
                 except (EOFError, KeyboardInterrupt):
                     break
+
+                if source == "cancel":
+                    self.session_status = "cancelled"
+                    console.print(_markup("Cancelled by external signal", THEME.warning))
+                    break
+                if source == "directive" and not user_input:
+                    continue
+                if source == "directive":
+                    console.print(_markup("Directive from monitor:", THEME.secondary))
+                    console.print(user_input)
+                    await self._execute_turn(user_input)
+                    if self.session_status == "cancelled":
+                        break
+                    continue
 
                 if not user_input:
                     continue
@@ -169,6 +183,65 @@ class InteractiveSession:
                 console.print(f"\n[dim]Goodbye! Session saved: {self.session.id}[/dim]")
             else:
                 console.print(_markup("\nGoodbye!", THEME.muted))
+
+    def _external_request(self) -> str | None:
+        """A request left by the monitor while idle: ``cancel``, ``directive`` or None."""
+        session_dir = self.session._session_dir
+        if session_dir is None:
+            return None
+        if (session_dir / "cancel").exists():
+            return "cancel"
+        try:
+            if (session_dir / "directives.jsonl").stat().st_size > 0:
+                return "directive"
+        except OSError:
+            pass
+        return None
+
+    async def _next_input(
+        self, prompt_session: PromptSession[str], poll_seconds: float = 0.5
+    ) -> tuple[str, str]:
+        """Wait for the user to type something or for the monitor to step in.
+
+        Returns:
+            ``("user", text)`` for typed input, ``("directive", text)`` for
+            directives sent from the monitor, or ``("cancel", "")``.
+
+        Raises:
+            EOFError, KeyboardInterrupt: The user closed the prompt.
+        """
+
+        async def watch() -> str:
+            while True:
+                request = self._external_request()
+                if request:
+                    return request
+                await asyncio.sleep(poll_seconds)
+
+        prompt_task = asyncio.ensure_future(
+            prompt_session.prompt_async(HTML(f"<style fg='{THEME.prompt}'><b>&gt;</b></style> "))
+        )
+        watch_task = asyncio.ensure_future(watch())
+        try:
+            await asyncio.wait({prompt_task, watch_task}, return_when=asyncio.FIRST_COMPLETED)
+            if prompt_task.done():
+                return "user", prompt_task.result().strip()
+
+            # The monitor stepped in: close the prompt cleanly, dropping any half-typed text.
+            if prompt_session.app.is_running:
+                prompt_session.app.exit(result="")
+            else:
+                prompt_task.cancel()
+            await asyncio.gather(prompt_task, return_exceptions=True)
+
+            if watch_task.result() == "cancel":
+                self.session._clear_cancel_request()
+                return "cancel", ""
+            return "directive", "\n\n".join(self.session._consume_directives())
+        finally:
+            for task in (prompt_task, watch_task):
+                if not task.done():
+                    task.cancel()
 
     async def _execute_turn(self, user_input: str) -> None:
         """Run one agent turn, streaming events to the console."""
@@ -408,15 +481,37 @@ class InteractiveSession:
                 )
                 return
 
+        if selected_id == self.session.id:
+            console.print(_markup("Already in that session.", THEME.muted))
+            return
+        selected = next((s for s in sessions if s.id == selected_id), None)
+        if selected and selected.live and selected.pid != os.getpid():
+            console.print(
+                _markup(
+                    f"Session {selected_id} is active in another process (pid {selected.pid}).",
+                    THEME.error,
+                )
+            )
+            return
+
         try:
             resumed = self.session_store.resume(selected_id)
         except FileNotFoundError:
             console.print(_markup(f"Session not found: {selected_id}", THEME.error))
             return
 
-        # Replace our session's state with the resumed one
+        # Continue as the resumed session: its history, ID and directory. The
+        # agent (tools, profile, model) stays the one this process started with.
+        previous_dir = self.session._session_dir
         self.session._state = resumed.state
         self.session._client = resumed.agent.create_client()
+        self.session._id = resumed.id
+        self.session._session_dir = resumed._session_dir
+        if previous_dir is not None and previous_dir != resumed._session_dir:
+            if (previous_dir / "trace.jsonl").exists():
+                update_meta(previous_dir, status="completed")
+            else:
+                shutil.rmtree(previous_dir, ignore_errors=True)  # never used
         self.token_status.total_input_tokens = resumed.state.usage.get("input_tokens", 0)
         self.token_status.total_output_tokens = resumed.state.usage.get("output_tokens", 0)
         self.token_status.context_size = 0

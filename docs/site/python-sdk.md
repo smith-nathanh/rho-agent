@@ -196,6 +196,9 @@ session = Session(agent)
 
 ```python
 session.approval_callback = my_callback    # Called when tool needs approval
+# Or queue approvals for `rho-agent monitor` to answer (needs a SessionStore session):
+#   from rho_agent.core.approvals import ApprovalQueue
+#   session.approval_callback = ApprovalQueue(session)
 session.cancel_check = lambda: False       # Polled to check for cancellation
 # Compaction settings start from AgentConfig and can be changed per session
 session.auto_compact = True                # Auto-compact when context is large
@@ -279,7 +282,8 @@ Returned by `session.run()`. Contains the agent's response and metadata for the 
 class RunResult:
     text: str                      # Final text response
     events: list[AgentEvent]       # All events from the run
-    status: str                    # "completed", "error", "cancelled"
+    status: str                    # "completed", "error", "cancelled", "interrupted",
+                                   # "max_turns", "budget_exceeded"
     usage: dict[str, int]          # Token counts for this run
 ```
 

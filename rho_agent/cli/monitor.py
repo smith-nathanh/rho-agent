@@ -5,17 +5,22 @@ from __future__ import annotations
 import fcntl
 import json
 import shlex
+from datetime import UTC, datetime
 from pathlib import Path
 from time import sleep
 from typing import Annotated
 
 import typer
 from rich.panel import Panel
+from rich.table import Table
 
+from ..core.approvals import respond
 from ..core.session_meta import LIVE_STATUSES, effective_status, read_meta
 from ..core.session_store import SessionStore
 from .formatting import (
+    _format_elapsed,
     _format_token_count,
+    _format_tool_signature,
     _markup,
 )
 from .session_table import print_sessions
@@ -68,7 +73,11 @@ class MonitorSession:
             if command == "ps":
                 self._cmd_ps()
             elif command == "watch" and len(parts) > 1:
-                self._cmd_watch(parts[1])
+                self._cmd_watch(parts[1], parts[2] if len(parts) > 2 else None)
+            elif command == "approvals":
+                self._cmd_approvals()
+            elif command in ("approve", "deny") and len(parts) > 1:
+                self._cmd_answer(parts[1], approved=command == "approve")
             elif command == "cancel" and len(parts) > 1:
                 self._cmd_cancel(parts[1])
             elif command == "pause" and len(parts) > 1:
@@ -84,7 +93,18 @@ class MonitorSession:
     def _print_help(self) -> None:
         console.print(_markup("Commands:", THEME.secondary))
         console.print("[dim]  ps                                      list sessions[/dim]")
-        console.print("[dim]  watch <prefix>                          tail trace events[/dim]")
+        console.print(
+            "[dim]  watch <prefix> [n|all]                  follow a session (last n events first)[/dim]"
+        )
+        console.print(
+            "[dim]  approvals                               list pending tool approvals[/dim]"
+        )
+        console.print(
+            "[dim]  approve <request|all>                   approve a pending tool call[/dim]"
+        )
+        console.print(
+            "[dim]  deny <request>                          deny a pending tool call[/dim]"
+        )
         console.print("[dim]  cancel <prefix|all>                    cancel live session(s)[/dim]")
         console.print("[dim]  pause <prefix|all>                     pause live session(s)[/dim]")
         console.print("[dim]  resume <prefix|all>                    resume session(s)[/dim]")
@@ -110,9 +130,70 @@ class MonitorSession:
 
     def _cmd_ps(self) -> None:
         print_sessions(self._store.list(limit=50))
+        pending = len(self._store.pending_approvals())
+        if pending:
+            console.print(
+                _markup(
+                    f"{pending} tool approval(s) pending. Type 'approvals' to see them.",
+                    THEME.warning,
+                )
+            )
 
-    def _cmd_watch(self, prefix: str) -> None:
-        """Tail trace.jsonl for a session, rendering events as they appear."""
+    def _cmd_approvals(self) -> None:
+        pending = self._store.pending_approvals()
+        if not pending:
+            console.print("[dim]No pending approvals[/dim]")
+            return
+        table = Table(show_header=True, header_style=THEME.secondary)
+        table.add_column("Request", style=THEME.accent, no_wrap=True)
+        table.add_column("Session", no_wrap=True)
+        table.add_column("Waiting", justify="right", no_wrap=True)
+        table.add_column("Tool call", overflow="fold")
+        now = datetime.now(UTC)
+        for info, request in pending:
+            try:
+                waiting = _format_elapsed(datetime.fromisoformat(request.requested_at), now)
+            except (ValueError, TypeError):
+                waiting = "?"
+            signature = _format_tool_signature(request.tool_name, request.tool_args)
+            table.add_row(request.id, info.id, waiting, signature)
+        console.print(table)
+
+    def _cmd_answer(self, prefix: str, *, approved: bool) -> None:
+        pending = self._store.pending_approvals()
+        if prefix == "all" and approved:
+            matches = pending
+        else:
+            matches = [pair for pair in pending if pair[1].id.startswith(prefix)]
+        if not matches:
+            console.print(_markup(f"No pending approval matching '{prefix}'", THEME.error))
+            return
+        if len(matches) > 1 and prefix != "all":
+            ids = ", ".join(request.id for _, request in matches[:5])
+            console.print(_markup(f"Ambiguous request '{prefix}': {ids}", THEME.warning))
+            return
+        for info, request in matches:
+            respond(request, approved)
+            verb, color = ("approved", THEME.success) if approved else ("denied", THEME.warning)
+            console.print(_markup(f"{verb}: {request.id} ({request.tool_name}, {info.id})", color))
+
+    def _cmd_watch(self, prefix: str, tail: str | None = None) -> None:
+        """Follow a session's trace: the last events first, then new ones as they appear.
+
+        Args:
+            prefix: Session ID prefix (a child session's ID works too).
+            tail: How many past events to show first; ``all`` for the whole
+                trace. Defaults to 20.
+        """
+        if tail is None:
+            skip_to_last: int | None = 20
+        elif tail == "all":
+            skip_to_last = None
+        elif tail.isdigit():
+            skip_to_last = int(tail)
+        else:
+            console.print(_markup("Usage: watch <prefix> [n|all]", THEME.warning))
+            return
         session_dir = self._resolve_single_dir(prefix)
         if not session_dir:
             return
@@ -126,6 +207,18 @@ class MonitorSession:
 
         try:
             with open(trace_path, encoding="utf-8") as f:
+                if skip_to_last is not None:
+                    past = [line for line in f if line.strip()]
+                    if len(past) > skip_to_last:
+                        console.print(
+                            _markup(
+                                f"... {len(past) - skip_to_last} earlier events "
+                                f"(watch {session_dir.name} all)",
+                                THEME.muted,
+                            )
+                        )
+                    for line in past[len(past) - skip_to_last :] if skip_to_last else []:
+                        self._render_trace_event(line)
                 while True:
                     line = f.readline()
                     if line:
@@ -209,6 +302,16 @@ class MonitorSession:
                     preview += "..."
                 console.print(_markup(f"assistant: {preview}", THEME.primary))
 
+        elif ev_type == "approval_requested":
+            signature = _format_tool_signature(event.get("tool_name"), event.get("tool_args"))
+            request_id = event.get("request_id", "?")
+            console.print(_markup(f"waiting for approval {request_id}: {signature}", THEME.warning))
+
+        elif ev_type == "approval_resolved":
+            outcome = event.get("outcome", "?")
+            color = THEME.success if outcome == "approved" else THEME.warning
+            console.print(_markup(f"approval {event.get('request_id', '?')}: {outcome}", color))
+
         elif ev_type == "child_start":
             child = event.get("child_session_id", "?")
             tool = event.get("tool_name", "?")
@@ -266,6 +369,15 @@ class MonitorSession:
         session_dir = self._resolve_single_dir(prefix)
         if not session_dir:
             return
+        meta = read_meta(session_dir)
+        status = effective_status(meta) if meta else "running"
+        if status not in LIVE_STATUSES and meta.get("parent_session_id"):
+            console.print(
+                _markup(
+                    f"{session_dir.name} has finished ({status}); nothing to steer", THEME.error
+                )
+            )
+            return
         path = session_dir / "directives.jsonl"
         entry = json.dumps({"text": text}) + "\n"
         try:
@@ -276,6 +388,14 @@ class MonitorSession:
                 finally:
                     fcntl.flock(f, fcntl.LOCK_UN)
             console.print(_markup(f"directive queued for {session_dir.name}", THEME.success))
+            if status not in LIVE_STATUSES:
+                console.print(
+                    _markup(
+                        f"{session_dir.name} is not running ({status}). It will read this when "
+                        f"it is resumed: rho-agent -r {session_dir.name}",
+                        THEME.warning,
+                    )
+                )
         except OSError as exc:
             console.print(_markup(f"Failed to write directive: {exc}", THEME.error))
 

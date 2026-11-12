@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .agent import Agent
+from .approvals import ApprovalRequest, pending_requests
 from .config import AgentConfig
 from .session import Session
 from .session_meta import (
@@ -107,9 +108,20 @@ class SessionStore:
         """
         import uuid
 
-        sid = session_id or str(uuid.uuid4())[:8]
-        session_dir = self._base_dir / sid
-        session_dir.mkdir(parents=True, exist_ok=True)
+        if session_id:
+            sid = session_id
+            session_dir = self._base_dir / sid
+            session_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            # A generated ID must never land on an existing session's directory.
+            while True:
+                sid = uuid.uuid4().hex[:8]
+                session_dir = self._base_dir / sid
+                try:
+                    session_dir.mkdir(parents=True)
+                    break
+                except FileExistsError:
+                    continue
 
         # Write config
         agent.config.to_file(session_dir / "config.yaml")
@@ -140,14 +152,32 @@ class SessionStore:
         update_meta(self._base_dir / session_id, status=status)
 
     def find(self, prefix: str) -> list[SessionInfo]:
-        """Sessions whose ID starts with ``prefix``. ``all`` matches every session."""
+        """Sessions whose ID starts with ``prefix``, child sessions included.
+
+        ``all`` matches every top-level session; their children follow them.
+        """
         matches = []
         for d in self._base_dir.iterdir():
-            if d.is_dir() and (prefix == "all" or d.name.startswith(prefix)):
-                info = self._read_session_info(d)
-                if info:
-                    matches.append(info)
+            if not d.is_dir():
+                continue
+            info = self._read_session_info(d)
+            if info is None:
+                continue
+            if prefix == "all":
+                matches.append(info)
+            else:
+                matches.extend(s for s in _walk(info) if s.id.startswith(prefix))
         return matches
+
+    def pending_approvals(self) -> list[tuple[SessionInfo, ApprovalRequest]]:
+        """Approval requests that live sessions are waiting on, oldest first."""
+        pending = []
+        for top in self.find("all"):
+            for info in _walk(top):
+                if info.live and info.path is not None:
+                    pending.extend((info, request) for request in pending_requests(info.path))
+        pending.sort(key=lambda pair: pair[1].requested_at)
+        return pending
 
     def request_cancel(self, info: SessionInfo) -> bool:
         """Ask a live session to stop its current run.
@@ -277,6 +307,13 @@ class SessionStore:
             )
         except Exception:
             return None
+
+
+def _walk(info: SessionInfo):
+    """A session followed by all of its descendants."""
+    yield info
+    for child in info.children:
+        yield from _walk(child)
 
 
 def _first_prompt_from_trace(trace_path: Path) -> str:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import socket
 import subprocess
 import sys
@@ -13,12 +14,15 @@ import pytest
 
 from rho_agent.client.model import StreamEvent, ToolCall
 from rho_agent.core.agent import Agent
+from rho_agent.core.approvals import ApprovalQueue, pending_requests, respond
 from rho_agent.core.config import AgentConfig
+from rho_agent.core.events import ApprovalInterrupt
+from rho_agent.core.session import Session
 from rho_agent.core.session_meta import read_meta, update_meta
 from rho_agent.core.session_store import SessionStore
 from rho_agent.core.state import State
 from rho_agent.tools.base import ToolHandler, ToolInvocation, ToolOutput
-from rho_agent.tools.handlers._child import child_session_kwargs
+from rho_agent.tools.handlers._child import child_session_kwargs, link_child
 from rho_agent.tools.registry import ToolRegistry
 
 
@@ -269,3 +273,288 @@ def test_print_sessions_groups_by_project(tmp_path: Path) -> None:
     assert parent.id in output
     assert "└" in output
     assert "created" in output
+
+
+# --- approval queue ---
+
+
+def _risky_call() -> list[StreamEvent]:
+    return [
+        StreamEvent(type="tool_call", tool_call=ToolCall(id="tc_1", name="risky", arguments={})),
+        StreamEvent(type="done", usage={"input_tokens": 10, "output_tokens": 5}),
+    ]
+
+
+def _risky_session(tmp_path: Path):
+    registry = ToolRegistry()
+    registry.register(_NeedsApproval())
+    store, session = _session(tmp_path, _risky_call(), _text("finished"), registry=registry)
+    session.approval_callback = ApprovalQueue(session, poll_seconds=0.01)
+    return store, session
+
+
+async def _answer_when_pending(store: SessionStore, approved: bool) -> str:
+    """Play the monitor: wait for a request, check the status, answer it."""
+    for _ in range(500):
+        pending = store.pending_approvals()
+        if pending:
+            info, request = pending[0]
+            assert info.status == "waiting_approval"
+            respond(request, approved)
+            return request.id
+        await asyncio.sleep(0.01)
+    raise AssertionError("no approval request was filed")
+
+
+@pytest.mark.asyncio
+async def test_queued_approval_is_answered_from_another_task(tmp_path: Path) -> None:
+    store, session = _risky_session(tmp_path)
+
+    result, request_id = await asyncio.gather(
+        session.run("do the risky thing"), _answer_when_pending(store, approved=True)
+    )
+
+    assert result.status == "completed"
+    assert [e.tool_name for e in result.events if e.type == "tool_end"] == ["risky"]
+    session_dir = store.base_dir / session.id
+    assert pending_requests(session_dir) == []
+    assert list((session_dir / "approvals").iterdir()) == []
+    trace = (session_dir / "trace.jsonl").read_text()
+    assert f'"type": "approval_requested", "request_id": "{request_id}"' in trace
+    assert '"outcome": "approved"' in trace
+
+
+@pytest.mark.asyncio
+async def test_denied_queued_approval_blocks_the_tool(tmp_path: Path) -> None:
+    store, session = _risky_session(tmp_path)
+
+    result, _ = await asyncio.gather(
+        session.run("do the risky thing"), _answer_when_pending(store, approved=False)
+    )
+
+    assert [e.type for e in result.events if e.type in ("tool_end", "tool_blocked")] == [
+        "tool_blocked"
+    ]
+    assert '"outcome": "denied"' in (store.base_dir / session.id / "trace.jsonl").read_text()
+
+
+@pytest.mark.asyncio
+async def test_cancel_ends_a_wait_for_approval(tmp_path: Path) -> None:
+    store, session = _session(tmp_path)
+    queue = ApprovalQueue(session, poll_seconds=0.01)
+
+    waiting = asyncio.ensure_future(queue("risky", {}))
+    await asyncio.sleep(0.05)
+    assert len(pending_requests(store.base_dir / session.id)) == 1
+    session.cancel()
+
+    assert await asyncio.wait_for(waiting, timeout=2) is False
+    assert pending_requests(store.base_dir / session.id) == []
+
+
+def test_child_session_files_approvals_under_its_own_id(tmp_path: Path) -> None:
+    _, parent = _session(tmp_path)
+    parent.approval_callback = ApprovalQueue(parent)
+    kwargs = child_session_kwargs(parent, State(), share_client=True)
+    child = Session(_agent(tmp_path), **kwargs)
+
+    link_child(parent, child, "delegate", "do part of it")
+
+    assert isinstance(child.approval_callback, ApprovalQueue)
+    assert child.approval_callback._session is child
+
+
+@pytest.mark.asyncio
+async def test_pending_approvals_skip_dead_sessions(tmp_path: Path) -> None:
+    store, session = _session(tmp_path)
+    queue = ApprovalQueue(session, poll_seconds=0.01)
+    waiting = asyncio.ensure_future(queue("risky", {}))
+    await asyncio.sleep(0.05)
+    assert len(store.pending_approvals()) == 1
+
+    update_meta(store.base_dir / session.id, pid=_dead_pid())
+    assert store.pending_approvals() == []
+
+    session.cancel()
+    await waiting
+
+
+@pytest.mark.asyncio
+async def test_interrupted_approval_is_not_recorded_as_completed(tmp_path: Path) -> None:
+    registry = ToolRegistry()
+    registry.register(_NeedsApproval())
+    store, session = _session(tmp_path, _risky_call(), registry=registry)
+
+    async def interrupt(tool_name: str, tool_args: dict[str, Any]) -> bool:
+        raise ApprovalInterrupt("ask someone else")
+
+    session.approval_callback = interrupt
+    result = await session.run("do the risky thing")
+
+    assert result.status == "interrupted"
+    assert read_meta(store.base_dir / session.id)["status"] == "interrupted"
+
+
+# --- targeting children, ID collisions ---
+
+
+def test_find_matches_child_sessions(tmp_path: Path) -> None:
+    store, parent = _session(tmp_path)
+    child_id = child_session_kwargs(parent, State(), share_client=True)["session_id"]
+
+    assert [info.id for info in store.find(child_id[:6])] == [child_id]
+    assert [info.id for info in store.find("all")] == [parent.id]
+
+
+def test_generated_session_id_never_reuses_a_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import uuid
+
+    store, first = _session(tmp_path)
+    ids = iter([uuid.UUID(hex=first.id + "0" * 24), uuid.UUID(hex="ab" * 16)])
+    monkeypatch.setattr(uuid, "uuid4", lambda: next(ids))
+
+    second = store.create_session(_agent(tmp_path))
+
+    assert second.id == "abababab"
+    assert read_meta(store.base_dir / first.id)["id"] == first.id
+
+
+# --- monitor commands ---
+
+
+def _monitor(store: SessionStore):
+    from rho_agent.cli import monitor
+
+    return monitor, monitor.MonitorSession(store.base_dir)
+
+
+@pytest.mark.asyncio
+async def test_monitor_lists_and_approves_requests(tmp_path: Path) -> None:
+    store, session = _session(tmp_path)
+    queue = ApprovalQueue(session, poll_seconds=0.01)
+    waiting = asyncio.ensure_future(queue("risky", {"path": "/etc/hosts"}))
+    await asyncio.sleep(0.05)
+    request_id = pending_requests(store.base_dir / session.id)[0].id
+    module, mon = _monitor(store)
+
+    with module.console.capture() as capture:
+        mon._cmd_approvals()
+        mon._cmd_answer(request_id[:3], approved=True)
+
+    output = capture.get()
+    assert request_id in output
+    assert "risky" in output
+    assert "approved" in output
+    assert await asyncio.wait_for(waiting, timeout=2) is True
+
+
+@pytest.mark.asyncio
+async def test_watch_shows_only_the_tail_by_default(tmp_path: Path) -> None:
+    store, session = _session(tmp_path, _text("first answer"), _text("second answer"))
+    await session.run("one")
+    await session.run("two")
+    module, mon = _monitor(store)
+
+    with module.console.capture() as capture:
+        mon._cmd_watch(session.id, "3")
+
+    output = capture.get()
+    assert "second answer" in output
+    assert "first answer" not in output
+    assert "earlier events" in output
+
+
+def test_directive_to_a_finished_session_says_when_it_will_be_read(tmp_path: Path) -> None:
+    store, session = _session(tmp_path)
+    update_meta(store.base_dir / session.id, status="completed")
+    module, mon = _monitor(store)
+
+    with module.console.capture() as capture:
+        mon._cmd_directive(session.id, "look at the billing module")
+
+    assert "not running" in capture.get()
+    assert session._consume_directives() == ["look at the billing module"]
+
+
+# --- interactive session ---
+
+
+def _interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from rho_agent.cli.interactive import InteractiveSession
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")  # /resume builds a real client
+    store, session = _session(tmp_path)
+    repl = InteractiveSession(
+        session=session,
+        approval_handler=MagicMock(),
+        mode_name="test",
+        working_dir=str(tmp_path),
+        session_store=store,
+    )
+    return store, session, repl
+
+
+async def _idle_prompt(repl, act):
+    """Sit at the prompt, let ``act(pipe)`` happen, and return what the prompt yields."""
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe:
+        prompt_session: PromptSession[str] = PromptSession(input=pipe, output=DummyOutput())
+        waiting = asyncio.ensure_future(repl._next_input(prompt_session, poll_seconds=0.01))
+        await asyncio.sleep(0.1)
+        act(pipe)
+        return await asyncio.wait_for(waiting, timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_idle_prompt_returns_typed_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, _, repl = _interactive(tmp_path, monkeypatch)
+
+    assert await _idle_prompt(repl, lambda pipe: pipe.send_text("hello\r")) == ("user", "hello")
+
+
+@pytest.mark.asyncio
+async def test_idle_prompt_picks_up_a_directive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, session, repl = _interactive(tmp_path, monkeypatch)
+    _, mon = _monitor(store)
+
+    result = await _idle_prompt(repl, lambda pipe: mon._cmd_directive(session.id, "run the tests"))
+
+    assert result == ("directive", "run the tests")
+
+
+@pytest.mark.asyncio
+async def test_idle_prompt_notices_an_external_cancel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, session, repl = _interactive(tmp_path, monkeypatch)
+    cancel_file = store.base_dir / session.id / "cancel"
+
+    assert await _idle_prompt(repl, lambda pipe: cancel_file.touch()) == ("cancel", "")
+    assert not cancel_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_resume_command_continues_as_the_resumed_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, fresh, repl = _interactive(tmp_path, monkeypatch)
+    fresh_id = fresh.id
+    _, earlier = _session(tmp_path, _text("an answer"))
+    await earlier.run("an earlier question")
+
+    repl._handle_resume(f"/resume {earlier.id}")
+
+    assert repl.session.id == earlier.id
+    assert repl.session._session_dir == store.base_dir / earlier.id
+    assert len(repl.session.state.messages) == 2
+    assert not (store.base_dir / fresh_id).exists()  # the unused session is dropped
+    assert [info.id for info in store.list()] == [earlier.id]

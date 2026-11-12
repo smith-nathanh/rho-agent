@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import platform
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
@@ -20,6 +21,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from ..core import Agent, AgentConfig, Session, SessionStore
+from ..core.approvals import ApprovalQueue
 from ..permissions import ShellMode
 from ..permissions.factory import load_profile
 from .errors import (
@@ -28,7 +30,7 @@ from .errors import (
     MissingApiKeyError,
     PromptLoadError,
 )
-from .events import ApprovalHandler
+from .events import ApprovalHandler, announce_queued_approval
 from .formatting import (
     _is_interactive_terminal,
     _markup,
@@ -231,6 +233,16 @@ def main(
     auto_approve: Annotated[
         bool,
         typer.Option("--auto-approve", "-y", help="Auto-approve all tool calls"),
+    ] = False,
+    queue_approvals: Annotated[
+        bool,
+        typer.Option(
+            "--queue-approvals",
+            help=(
+                "Send approval requests to `rho-agent monitor` instead of prompting here. "
+                "This is the default when there is no terminal to prompt on."
+            ),
+        ),
     ] = False,
     resume: Annotated[
         str | None,
@@ -627,6 +639,9 @@ def main(
 
     # Set up approval handler
     approval_handler = ApprovalHandler(auto_approve=auto_approve)
+    if queue_approvals or not sys.stdin.isatty():
+        # Nobody can answer a prompt here; the monitor answers instead.
+        approval_handler.queue = ApprovalQueue(session, on_request=announce_queued_approval)
     session.approval_callback = approval_handler.check_approval
 
     if run_prompt_text:

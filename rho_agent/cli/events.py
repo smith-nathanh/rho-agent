@@ -8,6 +8,7 @@ from rich.markdown import Markdown
 from rich.markup import escape
 from rich.panel import Panel
 
+from ..core.approvals import ApprovalQueue, ApprovalRequest
 from ..core.events import AgentEvent
 from .formatting import (
     TokenStatus,
@@ -25,6 +26,8 @@ class ApprovalHandler:
 
     def __init__(self, auto_approve: bool = False) -> None:
         self.auto_approve = auto_approve
+        # When set, requests go to the monitor instead of this terminal.
+        self.queue: ApprovalQueue | None = None
 
     def enable_auto_approve(self) -> None:
         """Enable auto-approve mode for this session."""
@@ -35,6 +38,8 @@ class ApprovalHandler:
         """Prompt user for approval. Returns True if approved."""
         if self.auto_approve:
             return True
+        if self.queue is not None:
+            return await self.queue(tool_name, tool_args)
 
         sig = _format_tool_signature(tool_name, tool_args)
         console.print(
@@ -55,6 +60,27 @@ class ApprovalHandler:
 
         # Default to yes (empty input = approve)
         return response not in ("n", "no")
+
+
+def announce_queued_approval(request: ApprovalRequest) -> None:
+    """Tell the user a tool call is waiting for an answer in the monitor."""
+    sig = _format_tool_signature(request.tool_name, request.tool_args)
+    console.print(
+        Panel(
+            _markup(sig, THEME.tool_call),
+            title=_markup(f"waiting for approval {request.id}", THEME.warning),
+            title_align="left",
+            border_style=THEME.warning,
+            padding=(0, 1),
+        )
+    )
+    console.print(
+        _markup(
+            f"Answer from another terminal: rho-agent monitor, then "
+            f"'approve {request.id}' or 'deny {request.id}'",
+            THEME.muted,
+        )
+    )
 
 
 def handle_event(

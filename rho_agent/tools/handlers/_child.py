@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ...core.approvals import ApprovalQueue
 from ...core.session_meta import now_iso, process_identity, read_meta, write_meta
 
 
@@ -47,7 +48,11 @@ def child_session_kwargs(
     if parent_dir is not None:
         child_dir = parent_dir / "children" / child_id
         try:
-            child_dir.mkdir(parents=True, exist_ok=True)
+            while child_dir.exists():  # never reuse another child's directory
+                child_id = uuid.uuid4().hex[:8]
+                child_dir = parent_dir / "children" / child_id
+            kwargs["session_id"] = child_id
+            child_dir.mkdir(parents=True)
             state.trace_path = child_dir / "trace.jsonl"
             config = config or parent.agent.config
             started = now_iso()
@@ -76,7 +81,10 @@ def link_child(parent: Any | None, child: Any, tool_name: str, instruction: str)
     if parent is None:
         return
     child.parent = parent
-    child.approval_callback = parent.approval_callback
+    callback = parent.approval_callback
+    if isinstance(callback, ApprovalQueue):
+        callback = callback.for_session(child)  # file requests under the child's ID
+    child.approval_callback = callback
     child.cancel_check = parent._is_cancelled
     child.parallel_tool_calls = parent.parallel_tool_calls
 
