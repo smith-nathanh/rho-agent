@@ -42,7 +42,7 @@ rho-agent continuum <prd> [OPTIONS]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--working-dir`, `-d` | `.` | Project directory to work in |
-| `--model`, `-m` | `$OPENAI_MODEL` or `gpt-5-mini` | Model to use |
+| `--model`, `-m` | `$OPENAI_MODEL` or `gpt-6.1-terra` | Model to use |
 | `--max-sessions` | 10 | Max sessions before pausing |
 | `--budget-threshold` | 0.7 | Context budget fraction before handoff |
 | `--context-window` | 400000 | Token context window size |

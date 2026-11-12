@@ -8,7 +8,18 @@ order: 13
 
 ### What models are supported?
 
-Any OpenAI-compatible API. Set `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL` to point to your provider. The default model is `gpt-5-mini` (override with `OPENAI_MODEL` or `--model`).
+Any OpenAI-compatible API. Set `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL` to point to your provider. The default model is `gpt-6.1-terra` (override with `OPENAI_MODEL` or `--model`).
+
+### Does the agent use reasoning with OpenAI's GPT-5.6 and GPT-6 models?
+
+Not at the moment. rho-agent calls the chat-completions endpoint, and on that endpoint these models refuse tool calls unless reasoning is off. When a model refuses, the client retries with `reasoning_effort` set to `none` and keeps it off for later tool requests, so the agent works but does not reason between tool calls.
+
+Two consequences:
+
+- Setting `--reasoning-effort` (or `RHO_AGENT_REASONING_EFFORT`) to anything but `none` with these models fails with the API's error, because your setting is not overridden.
+- A model that does not accept `none`, such as `gpt-6.1-sol`, cannot be used with tools at all. `gpt-6.1-terra`, `gpt-6-sol` and `gpt-6-luna` work.
+
+Reasoning with tools on these models needs OpenAI's Responses API, which rho-agent does not use yet.
 
 ### Do I need Docker?
 

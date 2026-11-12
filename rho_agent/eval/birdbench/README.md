@@ -8,7 +8,7 @@ Text-to-SQL evaluation on real multi-table SQLite databases using the [BIRD-Benc
 uv run rho-eval bird \
 ~/proj/bird-bench-mini-dev/mini_dev_data/mini_dev_sqlite.json \
 ~/proj/bird-bench-mini-dev/mini_dev_data/dev_databases/ \
---model gpt-5-mini --service-tier flex --difficulty simple
+--model gpt-6.1-terra --service-tier flex --difficulty simple
 ```
 
 ## Data Setup
@@ -74,7 +74,7 @@ rho-eval bird <data_file> <db_dir> [OPTIONS]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--model, -m` | `gpt-5-mini` | Model name |
+| `--model, -m` | `gpt-6.1-terra` | Model name |
 | `--base-url` | env `OPENAI_BASE_URL` | API endpoint |
 | `--max-turns` | `20` | Max agent turns per task |
 | `--parallel, -p` | `1` | Concurrent tasks |
@@ -91,7 +91,7 @@ rho-eval bird <data_file> <db_dir> [OPTIONS]
 
 ```bash
 # Full mini-dev (500 tasks)
-rho-eval bird mini_dev_sqlite.json dev_databases/ -m gpt-5-mini
+rho-eval bird mini_dev_sqlite.json dev_databases/ -m gpt-6.1-terra
 
 # Only challenging tasks
 rho-eval bird mini_dev_sqlite.json dev_databases/ --difficulty challenging
@@ -106,7 +106,7 @@ rho-eval bird mini_dev_sqlite.json dev_databases/ -p 4 --service-tier flex
 rho-eval bird mini_dev_sqlite.json dev_databases/ -n 10
 
 # Resume an interrupted run
-rho-eval bird mini_dev_sqlite.json dev_databases/ --resume results/gpt-5-mini-bird/run-20260126-140000
+rho-eval bird mini_dev_sqlite.json dev_databases/ --resume results/gpt-6.1-terra-bird/run-20260126-140000
 ```
 
 ## How It Works

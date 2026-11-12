@@ -361,7 +361,7 @@ Streaming client for OpenAI-compatible APIs:
 
 ```python
 client = ModelClient(
-    model="gpt-5-mini",
+    model="gpt-6.1-terra",
     base_url="https://api.openai.com/v1",  # or vLLM, etc.
     service_tier="flex",  # Optional: 50% cost savings
 )

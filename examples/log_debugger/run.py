@@ -473,8 +473,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--model",
-        default="gpt-5-mini",
-        help="Model to use for each agent (default: gpt-5-mini)",
+        default="gpt-6.1-terra",
+        help="Model to use for each agent (default: gpt-6.1-terra)",
     )
     return parser
 

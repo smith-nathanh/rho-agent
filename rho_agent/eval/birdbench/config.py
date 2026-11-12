@@ -31,7 +31,7 @@ class EvalAbortedError(Exception):
 class EvalConfig:
     """Runtime configuration for a BIRD-Bench evaluation run."""
 
-    model: str = "gpt-5-mini"
+    model: str = "gpt-6.1-terra"
     base_url: str | None = None
     max_turns: int = 20
     parallel: int = 1

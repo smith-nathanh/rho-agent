@@ -118,7 +118,7 @@ class ModelClient:
 
     def __init__(
         self,
-        model: str = "gpt-5-nano",
+        model: str = "gpt-6.1-terra",
         base_url: str | None = None,
         api_key: str | None = None,
         timeout: float | None = None,
@@ -145,6 +145,31 @@ class ModelClient:
 
         # Cerebras doesn't support streaming with tool calling
         self._use_nonstreaming_tools = "cerebras" in self._base_url.lower()
+        # Set once the endpoint has refused tools together with reasoning.
+        self._tools_need_reasoning_off = False
+
+    async def _create(self, kwargs: dict[str, Any]) -> Any:
+        """Call chat.completions.create, turning reasoning off for tools if required.
+
+        Some models (the GPT-5.6 and GPT-6 families) reject function tools on
+        this endpoint unless ``reasoning_effort`` is ``"none"``. When no effort
+        was configured, the request is retried once with reasoning off and
+        later tool requests are sent that way. An explicitly configured effort
+        is never overridden: that error is raised to the caller.
+        """
+        effort_unset = "reasoning_effort" not in kwargs
+        if self._tools_need_reasoning_off and kwargs.get("tools") and effort_unset:
+            kwargs["reasoning_effort"] = "none"
+        try:
+            return await self._client.chat.completions.create(**kwargs)
+        except APIStatusError as e:
+            message = str(e.message).lower()
+            refused = e.status_code == 400 and "reasoning_effort" in message and "tools" in message
+            if not (refused and kwargs.get("tools") and effort_unset):
+                raise
+            self._tools_need_reasoning_off = True
+            kwargs["reasoning_effort"] = "none"
+            return await self._client.chat.completions.create(**kwargs)
 
     def _build_messages(self, prompt: Prompt) -> list[dict[str, Any]]:
         """Build messages list from prompt."""
@@ -197,7 +222,7 @@ class ModelClient:
             # Track tool calls being built
             tool_calls_in_progress: dict[int, dict[str, str]] = {}
 
-            async with await self._client.chat.completions.create(**kwargs) as stream:
+            async with await self._create(kwargs) as stream:
                 async for chunk in stream:
                     if not chunk.choices:
                         # Usage info comes in final chunk with no choices
@@ -294,7 +319,7 @@ class ModelClient:
             kwargs["response_format"] = self._response_format
 
         try:
-            response = await self._client.chat.completions.create(**kwargs)
+            response = await self._create(kwargs)
             choice = response.choices[0]
             msg = choice.message
 
@@ -356,7 +381,7 @@ class ModelClient:
             if self._response_format:
                 kwargs["response_format"] = self._response_format
 
-            response = await self._client.chat.completions.create(**kwargs)
+            response = await self._create(kwargs)
             content = response.choices[0].message.content or ""
             cached = 0
             if response.usage:
@@ -412,7 +437,7 @@ class ModelClient:
             if self._service_tier:
                 kwargs["service_tier"] = self._service_tier
 
-            response = await self._client.chat.completions.create(**kwargs)
+            response = await self._create(kwargs)
         except APIStatusError as e:
             raise ModelCallError(
                 f"API error {e.status_code} (after retries): {e.message}", classify_error(e)

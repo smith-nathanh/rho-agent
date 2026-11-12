@@ -56,7 +56,9 @@ class DelegateHandler(ToolHandler):
     def description(self) -> str:
         return (
             "Spawn a one-time child agent to execute a focused instruction and return "
-            "its final text output. The child has the same tools as you but none of your "
+            "its final text output. Useful for independent pieces of a larger job, "
+            "especially ones that can run in parallel; a small task is usually quicker "
+            "to do yourself. The child has the same tools as you but none of your "
             "conversation unless full_context is set, so give it a self-contained "
             "instruction. Several delegate calls in one turn run in parallel."
         )

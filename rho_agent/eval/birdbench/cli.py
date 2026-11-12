@@ -41,7 +41,7 @@ def bird(
     model: Annotated[
         str,
         typer.Option("--model", "-m", help="Model to use"),
-    ] = os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+    ] = os.getenv("OPENAI_MODEL", "gpt-6.1-terra"),
     base_url: Annotated[
         str | None,
         typer.Option("--base-url", help="API base URL"),

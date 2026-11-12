@@ -36,9 +36,9 @@ monitor> ps
 ┌────────────┬──────────────────┬────────────┬─────────┬────────┬───────┬──────────────────────────────────┐
 │ Session    │ Status           │ Model      │ Started │ Active │  Cost │ Preview                          │
 ├────────────┼──────────────────┼────────────┼─────────┼────────┼───────┼──────────────────────────────────┤
-│ a3f8c1d2   │ running          │ gpt-5-mini │   4m12s │     3s │ $0.42 │ migrate the sync client to async │
-│ └ 51c09e7a │ waiting_approval │ gpt-5-mini │   1m05s │    40s │ $0.08 │ update the callers in billing/   │
-│ 7b2e09aa   │ completed        │ gpt-5-mini │   1h02m │    58m │ $0.11 │ find all TODO comments           │
+│ a3f8c1d2   │ running          │ gpt-6.1-terra │   4m12s │     3s │ $0.42 │ migrate the sync client to async │
+│ └ 51c09e7a │ waiting_approval │ gpt-6.1-terra │   1m05s │    40s │ $0.08 │ update the callers in billing/   │
+│ 7b2e09aa   │ completed        │ gpt-6.1-terra │   1h02m │    58m │ $0.11 │ find all TODO comments           │
 └────────────┴──────────────────┴────────────┴─────────┴────────┴───────┴──────────────────────────────────┘
 ```
 
@@ -65,11 +65,11 @@ Shows the last 20 events of `trace.jsonl`, then renders new events as the agent 
 monitor> watch a3f
 Watching a3f8c1 (Ctrl+C to stop)
 run_start: migrate the sync client to async and update all callers
-llm_start model=gpt-5-mini context=2
+llm_start model=gpt-6.1-terra context=2
 llm_end in=1.2k out=89 cost=$0.0012
 tool: bash({"command": "find . -name '*.py' | head -20"})
   bash: ok
-llm_start model=gpt-5-mini context=4
+llm_start model=gpt-6.1-terra context=4
 llm_end in=2.8k out=145 cost=$0.0031
 tool: read({"file_path": "src/sync_client.py"})
   read: ok

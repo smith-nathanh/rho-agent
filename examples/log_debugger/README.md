@@ -40,7 +40,7 @@ uv run python examples/log_debugger/run.py \
     --output report.json
 
 # Use a different model
-uv run python examples/log_debugger/run.py --demo --model gpt-5
+uv run python examples/log_debugger/run.py --demo --model gpt-6-sol
 ```
 
 ## Monitoring

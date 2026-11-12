@@ -32,7 +32,7 @@ class LiteLLMClient:
 
     def __init__(
         self,
-        model: str = "gpt-5-nano",
+        model: str = "gpt-6.1-terra",
         api_key: str | None = None,
         chunk_timeout: float | None = None,
         initial_timeout: float | None = None,

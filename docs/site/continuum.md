@@ -67,7 +67,7 @@ rho-agent continuum path/to/prd.md --working-dir ./my-project
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--working-dir`, `-d` | `.` | Project working directory |
-| `--model`, `-m` | `gpt-5-mini` | Model to use |
+| `--model`, `-m` | `gpt-6.1-terra` | Model to use |
 | `--max-sessions` | `10` | Max sessions before pausing |
 | `--budget-threshold` | `0.7` | Context budget threshold (0-1) |
 | `--context-window` | `400000` | Context window size |

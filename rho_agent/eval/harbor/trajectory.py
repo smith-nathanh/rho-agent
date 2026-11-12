@@ -46,7 +46,7 @@ class TrajectoryBuilder:
     """Builds ATIF-compliant trajectories from AgentEvent streams.
 
     Usage:
-        builder = TrajectoryBuilder(model="gpt-5-mini")
+        builder = TrajectoryBuilder(model="gpt-6.1-terra")
         builder.add_user_step("What is 2+2?")
         builder.build_from_events(events)
         builder.save(path / "trajectory.json")

@@ -26,7 +26,7 @@ Without a prompt argument, the agent starts in interactive mode. With a prompt, 
 | `--var key=value` | Set a template variable (repeatable) |
 | `--vars-file <file.yaml>` | Load template variables from a YAML file |
 | `--prompt / -p <text>` | Prompt text for one-shot mode |
-| `--model <name>` | Model to use (default: `gpt-5-mini` or `OPENAI_MODEL`) |
+| `--model <name>` | Model to use (default: `gpt-6.1-terra` or `OPENAI_MODEL`) |
 | `--base-url <url>` | API endpoint override |
 | `--config / -c <path>` | Agent config YAML file |
 | `--output <path>` | Write the agent's final response to a file |

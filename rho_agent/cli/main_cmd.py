@@ -181,7 +181,7 @@ def main(
     model: Annotated[
         str,
         typer.Option("--model", "-m", help="Model to use"),
-    ] = os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+    ] = os.getenv("OPENAI_MODEL", "gpt-6.1-terra"),
     base_url: Annotated[
         str | None,
         typer.Option("--base-url", help="API base URL for OpenAI-compatible endpoints"),
@@ -402,7 +402,7 @@ def main(
         try:
             # Build override config if CLI flags differ from defaults
             override_config = None
-            if model != os.getenv("OPENAI_MODEL", "gpt-5-mini"):
+            if model != os.getenv("OPENAI_MODEL", "gpt-6.1-terra"):
                 # User explicitly set --model, use it as override
                 override_config = AgentConfig(model=model)
             resumed_session = session_store.resume(resume, agent_config=override_config)
@@ -433,7 +433,7 @@ def main(
     elif config_file:
         # Load from config file with CLI overrides
         agent_config = AgentConfig.from_file(config_file)
-        if model != os.getenv("OPENAI_MODEL", "gpt-5-mini"):
+        if model != os.getenv("OPENAI_MODEL", "gpt-6.1-terra"):
             agent_config.model = model
         if profile:
             agent_config.profile = profile
