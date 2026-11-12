@@ -11,6 +11,7 @@ from time import sleep
 from typing import Annotated
 
 import typer
+from rich import box
 from rich.panel import Panel
 from rich.table import Table
 
@@ -144,7 +145,7 @@ class MonitorSession:
         if not pending:
             console.print("[dim]No pending approvals[/dim]")
             return
-        table = Table(show_header=True, header_style=THEME.secondary)
+        table = Table(show_header=True, header_style=THEME.secondary, box=box.SIMPLE_HEAD)
         table.add_column("Request", style=THEME.accent, no_wrap=True)
         table.add_column("Session", no_wrap=True)
         table.add_column("Waiting", justify="right", no_wrap=True)
@@ -266,10 +267,11 @@ class MonitorSession:
         elif ev_type == "llm_end":
             inp = event.get("input_tokens", 0)
             out = event.get("output_tokens", 0)
-            cost = event.get("cost_usd", 0.0)
+            cost = event.get("cost_usd", 0.0) or 0.0
+            cost_str = f" cost=${cost:.4f}" if cost else ""  # not every client reports cost
             console.print(
                 _markup(
-                    f"llm_end in={_format_token_count(inp)} out={_format_token_count(out)} cost=${cost:.4f}",
+                    f"llm_end in={_format_token_count(inp)} out={_format_token_count(out)}{cost_str}",
                     THEME.muted,
                 )
             )

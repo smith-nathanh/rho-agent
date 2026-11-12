@@ -63,6 +63,15 @@ def _session(tmp_path: Path, *turns: list[StreamEvent], registry: ToolRegistry |
     return store, session
 
 
+async def _until(condition, timeout: float = 5.0) -> None:
+    """Wait for a condition instead of sleeping a fixed time (slow CI machines)."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not condition():
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError("condition was not met in time")
+        await asyncio.sleep(0.01)
+
+
 def _dead_pid() -> int:
     proc = subprocess.Popen([sys.executable, "-c", "pass"])
     proc.wait()
@@ -344,8 +353,7 @@ async def test_cancel_ends_a_wait_for_approval(tmp_path: Path) -> None:
     queue = ApprovalQueue(session, poll_seconds=0.01)
 
     waiting = asyncio.ensure_future(queue("risky", {}))
-    await asyncio.sleep(0.05)
-    assert len(pending_requests(store.base_dir / session.id)) == 1
+    await _until(lambda: len(pending_requests(store.base_dir / session.id)) == 1)
     session.cancel()
 
     assert await asyncio.wait_for(waiting, timeout=2) is False
@@ -369,8 +377,7 @@ async def test_pending_approvals_skip_dead_sessions(tmp_path: Path) -> None:
     store, session = _session(tmp_path)
     queue = ApprovalQueue(session, poll_seconds=0.01)
     waiting = asyncio.ensure_future(queue("risky", {}))
-    await asyncio.sleep(0.05)
-    assert len(store.pending_approvals()) == 1
+    await _until(lambda: len(store.pending_approvals()) == 1)
 
     update_meta(store.base_dir / session.id, pid=_dead_pid())
     assert store.pending_approvals() == []
@@ -435,7 +442,7 @@ async def test_monitor_lists_and_approves_requests(tmp_path: Path) -> None:
     store, session = _session(tmp_path)
     queue = ApprovalQueue(session, poll_seconds=0.01)
     waiting = asyncio.ensure_future(queue("risky", {"path": "/etc/hosts"}))
-    await asyncio.sleep(0.05)
+    await _until(lambda: pending_requests(store.base_dir / session.id))
     request_id = pending_requests(store.base_dir / session.id)[0].id
     module, mon = _monitor(store)
 
@@ -505,7 +512,7 @@ async def _idle_prompt(repl, act):
     with create_pipe_input() as pipe:
         prompt_session: PromptSession[str] = PromptSession(input=pipe, output=DummyOutput())
         waiting = asyncio.ensure_future(repl._next_input(prompt_session, poll_seconds=0.01))
-        await asyncio.sleep(0.1)
+        await _until(lambda: prompt_session.app.is_running)
         act(pipe)
         return await asyncio.wait_for(waiting, timeout=5)
 
