@@ -108,6 +108,9 @@ class Prompt:
     system: str
     messages: list[Message]
     tools: list[dict[str, Any]] = field(default_factory=list)
+    # "none" keeps the tool definitions in the request (so a cached prefix is
+    # still reused) while forbidding the model from calling one.
+    tool_choice: str | None = None
 
 
 class ModelClient:
@@ -404,6 +407,8 @@ class ModelClient:
                 kwargs["temperature"] = self._temperature
             if prompt.tools:
                 kwargs["tools"] = prompt.tools
+                if prompt.tool_choice:
+                    kwargs["tool_choice"] = prompt.tool_choice
             if self._service_tier:
                 kwargs["service_tier"] = self._service_tier
 

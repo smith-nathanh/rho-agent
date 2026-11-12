@@ -106,6 +106,8 @@ class LiteLLMClient:
 
         if prompt and prompt.tools:
             kwargs["tools"] = prompt.tools
+            if prompt.tool_choice:
+                kwargs["tool_choice"] = prompt.tool_choice
 
         if self._response_format:
             kwargs["response_format"] = self._response_format

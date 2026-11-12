@@ -10,15 +10,41 @@ from typing import Any
 AUTO_COMPACT_THRESHOLD = 0.7
 
 COMPACTION_SYSTEM_PROMPT = """\
-You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
+You are performing a CONTEXT CHECKPOINT COMPACTION. The conversation above is about to be \
+replaced by your summary, and another LLM will resume the task from it. Anything you leave out \
+is lost. Do not call tools; reply with the summary only.
 
-Include:
-- Current progress and key decisions made
-- Important context, constraints, or user preferences discovered
-- What remains to be done (clear next steps)
-- Any critical data, file paths, or references needed to continue
+The user's own messages are kept verbatim separately, so do not restate them. If the history \
+contains an earlier summary, carry forward everything in it that still matters.
 
-Be concise, structured, and focused on helping the next LLM seamlessly continue the work."""
+Write these sections, in this order. Write "None" for a section that does not apply.
+
+## Goal
+What is being built or fixed, and what counts as done, including constraints and preferences \
+discovered along the way.
+
+## State of the work
+What exists now: files created or changed (with paths) and what each one does. Say which \
+parts are finished, which are partial, and which are not started.
+
+## Verified versus unverified
+What has actually been run and checked, with the command and its result. What has been \
+written but not yet tested.
+
+## Tried and ruled out
+Approaches that failed or were rejected, and why, so they are not attempted again.
+
+## How to build, run and test
+The exact commands that work in this environment, copied as they were run.
+
+## Environment
+Packages or tools installed, services or background jobs still running (PID and log path), \
+paths of saved command output, and anything unusual about the machine.
+
+## Next steps
+What to do next, in order, starting with the step that was in progress.
+
+Prefer exact names, paths, commands, numbers and error messages over descriptions of them."""
 
 SUMMARY_PREFIX = """\
 Another language model worked on this task and produced a summary of its progress. Use this to build on the work that has already been done and avoid duplicating effort. Here is the summary:
@@ -108,6 +134,9 @@ class CompactResult:
     tokens_after: int
     trigger: str  # "manual", "auto" or "overflow"
     error: str | None = None  # set when the summarisation call failed
+    # "summary": older history was summarised. "prune": trimming old tool
+    # output freed enough room, so no summary was written.
+    method: str = "summary"
 
 
 @dataclass
