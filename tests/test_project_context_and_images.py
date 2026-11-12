@@ -410,3 +410,59 @@ async def test_images_survive_resume_and_export_as_a_marker(tmp_path: Path) -> N
     assert "base64" not in json.dumps(step)
     harbor_models = pytest.importorskip("harbor.models.trajectories")
     harbor_models.Trajectory.model_validate(trajectory)
+
+
+# ---------------------------------------------------------------------------
+# The view_image switch
+# ---------------------------------------------------------------------------
+
+
+def _tool_names(**profile_settings: Any) -> set[str]:
+    from rho_agent.permissions import PermissionProfile
+    from rho_agent.permissions.factory import ToolFactory
+
+    profile = PermissionProfile.unrestricted()
+    profile.delegate = False
+    for key, value in profile_settings.items():
+        setattr(profile, key, value)
+    return set(ToolFactory(profile).create_registry()._handlers)
+
+
+def test_view_image_is_on_by_default_and_off_in_bash_only_mode() -> None:
+    assert "view_image" in _tool_names()
+    assert _tool_names(bash_only=True) == {"bash"}
+
+
+def test_bash_only_with_view_image_gives_exactly_two_tools() -> None:
+    assert _tool_names(bash_only=True, view_image=True) == {"bash", "view_image"}
+
+
+async def test_view_image_off_removes_the_tool_and_stops_read_attaching(tmp_path: Path) -> None:
+    from rho_agent.permissions import PermissionProfile
+    from rho_agent.permissions.factory import ToolFactory
+
+    profile = PermissionProfile.unrestricted()
+    profile.view_image = False
+    registry = ToolFactory(profile).create_registry()
+    path = tmp_path / "plot.png"
+    path.write_bytes(PNG)
+
+    out = await registry.dispatch(
+        ToolInvocation(call_id="r", tool_name="read", arguments={"path": str(path)})
+    )
+
+    assert "view_image" not in registry._handlers
+    assert not out.success and not out.images  # treated as a binary file again
+
+
+def test_view_image_setting_round_trips_through_a_profile_file() -> None:
+    from rho_agent.permissions import PermissionProfile
+
+    profile = PermissionProfile.unrestricted()
+    assert profile.to_dict()["view_image"] is None
+    profile.bash_only, profile.view_image = True, True
+
+    loaded = PermissionProfile.from_dict(profile.to_dict())
+
+    assert loaded.bash_only is True and loaded.view_image is True
+    assert loaded.view_image_enabled is True

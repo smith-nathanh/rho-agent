@@ -139,6 +139,19 @@ async def test_run_omits_optional_settings_by_default(tmp_path: Path) -> None:
         assert name not in run_env
 
 
+async def test_run_passes_view_image_only_when_set(tmp_path: Path) -> None:
+    env = _FakeEnvironment()
+    await _agent(tmp_path, bash_only=True).run("task", env, AgentContext())
+    assert "RHO_AGENT_VIEW_IMAGE" not in env.calls[-1]["env"]
+
+    await _agent(tmp_path, bash_only=True, view_image="true").run("task", env, AgentContext())
+    assert env.calls[-1]["env"]["RHO_AGENT_VIEW_IMAGE"] == "1"
+    assert " --bash-only " in env.calls[-1]["command"]
+
+    await _agent(tmp_path, view_image=False).run("task", env, AgentContext())
+    assert env.calls[-1]["env"]["RHO_AGENT_VIEW_IMAGE"] == "0"
+
+
 async def test_run_passes_compaction_settings(tmp_path: Path) -> None:
     env = _FakeEnvironment()
     agent = _agent(tmp_path, auto_compact=False, compact_threshold="0.25", compact_at_tokens=40000)

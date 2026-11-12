@@ -56,6 +56,7 @@ Pass as `--ak key=value` or under `kwargs` in a job config.
 | `repo_url` | this repo | Repository for `install_source: git` |
 | `version` | latest | PyPI version, or git branch, tag or commit |
 | `bash_only` | `false` | Only the bash tool |
+| `view_image` | on, off with `bash_only` | The image-viewing tool. Set `true` with `bash_only` for bash plus images |
 | `reasoning_effort` | provider default | Also settable with Harbor's `--effort` |
 | `enable_confirm_done` | `true` | Completion gate: the agent must confirm it verified its work |
 | `confirm_done_max` | `3` | Maximum gate rounds |

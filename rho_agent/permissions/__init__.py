@@ -110,6 +110,14 @@ class PermissionProfile:
     parallel_bash: bool = False
     # If True, register the delegate tool (spawn a child agent). Ignored in bash_only mode.
     delegate: bool = True
+    # The view_image tool, which lets the model look at image files. None means
+    # the default: on, except in bash_only mode. Set True to get bash plus
+    # images, or False for a model that cannot take image input.
+    view_image: bool | None = None
+
+    @property
+    def view_image_enabled(self) -> bool:
+        return (not self.bash_only) if self.view_image is None else self.view_image
 
     @classmethod
     def readonly(cls) -> PermissionProfile:
@@ -229,6 +237,7 @@ class PermissionProfile:
             bash_only=bool(data.get("bash_only", False)),
             parallel_bash=bool(data.get("parallel_bash", False)),
             delegate=bool(data.get("delegate", True)),
+            view_image=None if data.get("view_image") is None else bool(data["view_image"]),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -249,6 +258,7 @@ class PermissionProfile:
             "bash_only": self.bash_only,
             "parallel_bash": self.parallel_bash,
             "delegate": self.delegate,
+            "view_image": self.view_image,
         }
 
     def requires_tool_approval(self, tool_name: str) -> bool:

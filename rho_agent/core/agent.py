@@ -64,7 +64,9 @@ class Agent:
         registry = ToolRegistry()
         working_dir = self._config.working_dir or profile.shell_working_dir or "/home/daytona"
         backend = self._config.backend if isinstance(self._config.backend, DaytonaBackend) else None
-        self._sandbox_manager = register_daytona_tools(registry, working_dir, backend=backend)
+        self._sandbox_manager = register_daytona_tools(
+            registry, working_dir, backend=backend, view_image=profile.view_image_enabled
+        )
 
         # Database tools still use the local factory path
         factory = ToolFactory(profile)

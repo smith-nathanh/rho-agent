@@ -62,6 +62,12 @@ class ToolFactory:
         # Register bash tool (mode depends on profile)
         self._register_bash_tool(registry, working_dir)
 
+        # Image viewing has its own switch, so bash_only can be bash plus images.
+        if self.profile.view_image_enabled:
+            from ..tools.handlers.view_image import ViewImageHandler
+
+            registry.register(ViewImageHandler())
+
         # Register write/edit tools (if enabled and not bash_only)
         if not self.profile.bash_only:
             self._register_write_tools(registry)
@@ -95,10 +101,8 @@ class ToolFactory:
         from ..tools.handlers.grep import GrepHandler
         from ..tools.handlers.list import ListHandler
         from ..tools.handlers.read import ReadHandler
-        from ..tools.handlers.view_image import ViewImageHandler
 
-        registry.register(ReadHandler())
-        registry.register(ViewImageHandler())
+        registry.register(ReadHandler(attach_images=self.profile.view_image_enabled))
         registry.register(GlobHandler())
         registry.register(GrepHandler())
         registry.register(ListHandler())
