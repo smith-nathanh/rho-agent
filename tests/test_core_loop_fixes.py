@@ -690,7 +690,7 @@ def test_session_takes_compaction_settings_from_the_agent_config() -> None:
 
 
 def test_cli_compaction_flags_only_override_what_was_passed() -> None:
-    from typer.testing import CliRunner
+    import typer
 
     from rho_agent.cli import app
     from rho_agent.cli.main_cmd import _apply_compaction_flags
@@ -703,6 +703,7 @@ def test_cli_compaction_flags_only_override_what_was_passed() -> None:
         False,
     )
 
-    help_text = CliRunner().invoke(app, ["main", "--help"], env={"COLUMNS": "200"}).output
-    for flag in ("--compact-threshold", "--compact-at-tokens", "--no-auto-compact"):
-        assert flag in help_text
+    # Read the declared options, not the help text, which is styled in CI.
+    command = typer.main.get_command(app).commands["main"]
+    declared = {opt for param in command.params for opt in (*param.opts, *param.secondary_opts)}
+    assert {"--compact-threshold", "--compact-at-tokens", "--no-auto-compact"} <= declared
