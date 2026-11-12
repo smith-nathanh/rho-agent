@@ -64,10 +64,10 @@ rho-agent main "summarize this project" --output summary.md
 Interactive command center for managing running agents.
 
 ```bash
-rho-agent monitor <dir>
+rho-agent monitor [dir]
 ```
 
-Takes a positional argument pointing to a session directory (e.g. `~/.config/rho-agent/sessions`).
+Takes an optional session directory. Defaults to the CLI's own sessions in `~/.config/rho-agent/sessions`.
 
 ### Monitor commands
 
@@ -75,10 +75,10 @@ Once inside the monitor, these commands are available:
 
 | Command | Description |
 |---|---|
-| `ps` | List sessions in the directory |
+| `ps` | List sessions by project, with status, cost and child sessions |
 | `watch <prefix>` | Live-follow a session's trace output |
-| `cancel <prefix\|all>` | Cancel a running session |
-| `pause <prefix\|all>` | Pause a running session |
+| `cancel <prefix\|all>` | Cancel the current run of a live session |
+| `pause <prefix\|all>` | Pause a live session |
 | `resume <prefix\|all>` | Resume a paused session |
 | `directive <prefix> <text>` | Inject a directive into a running agent |
 | `help` | Show all monitor commands |
@@ -86,28 +86,28 @@ Once inside the monitor, these commands are available:
 
 ## `rho-agent ps`
 
-List sessions in a directory.
+List sessions by project, with status, last activity, cost and child sessions. See the [Monitor](monitor/) guide for the status values.
 
 ```bash
-rho-agent ps <dir>
+rho-agent ps [dir]
 ```
 
-Takes a positional argument pointing to a session directory (e.g. `~/.config/rho-agent/sessions`).
+Takes an optional session directory. Defaults to the CLI's own sessions in `~/.config/rho-agent/sessions`.
 
 ## `rho-agent cancel`
 
 Cancel running agent sessions.
 
 ```bash
-rho-agent cancel [PREFIX] --dir <dir> [--all]
+rho-agent cancel [PREFIX] [--dir <dir>] [--all]
 ```
 
 | Flag | Description |
 |---|---|
-| `--dir <dir>` | Session directory (required) |
-| `--all` | Cancel all running agents |
+| `--dir <dir>` | Session directory (default: `~/.config/rho-agent/sessions`) |
+| `--all` | Cancel all live sessions |
 
-Pass a session ID prefix to cancel a specific agent, or use `--all` to cancel every running session.
+Pass a session ID prefix to cancel a specific agent, or use `--all` to cancel every live session. Finished and dead sessions are skipped, and a cancelled session can be resumed later.
 
 ## `rho-agent export`
 

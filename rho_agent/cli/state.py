@@ -15,6 +15,7 @@ from .theme import THEME
 # Config directory for rho-agent data
 CONFIG_DIR = Path.home() / ".config" / "rho-agent"
 HISTORY_FILE = CONFIG_DIR / "history"
+SESSIONS_DIR = CONFIG_DIR / "sessions"
 DEFAULT_PROMPT_FILE = CONFIG_DIR / "default.md"
 
 # Built-in default prompt (ships with package)

@@ -114,6 +114,7 @@ class InteractiveSession:
             while True:
                 try:
                     console.print()
+                    self.session.set_status("waiting_input")
                     user_input = await prompt_session.prompt_async(
                         HTML(f"<style fg='{THEME.prompt}'><b>&gt;</b></style> ")
                     )
@@ -162,6 +163,7 @@ class InteractiveSession:
             self.session_status = "error"
             raise
         finally:
+            self.session.set_status(self.session_status)
             await self.session.close()
             if self.session.state.messages:
                 console.print(f"\n[dim]Goodbye! Session saved: {self.session.id}[/dim]")
@@ -207,11 +209,8 @@ class InteractiveSession:
                         status_ctx = None
                 if event.type == "cancelled":
                     _sync_token_status_from_state(self.token_status, self.session.state)
-                    # Check if cancelled via sentinel (external cancel)
-                    if (
-                        self.session._session_dir is not None
-                        and (self.session._session_dir / "cancel").exists()
-                    ):
+                    # Cancelled from another process (monitor or `rho-agent cancel`)
+                    if self.session.cancelled_externally:
                         self.session_status = "cancelled"
                         console.print(_markup("Cancelled by external signal", THEME.warning))
                     else:

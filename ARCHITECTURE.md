@@ -318,7 +318,7 @@ Manages session directories under `~/.config/rho-agent/sessions/`:
   abc123/
     config.yaml       # AgentConfig snapshot
     trace.jsonl        # Event log (run_start, llm_start, tool_end, ...)
-    meta.json          # Session metadata (status, timestamps, labels)
+    meta.json          # Registry record (status, owner, project, usage)
     cancel             # Sentinel: triggers cancellation
     pause              # Sentinel: pauses execution
     directives.jsonl   # Sentinel: external instructions appended here

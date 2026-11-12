@@ -37,15 +37,13 @@ from .interactive import run_interactive
 from .single import run_single, run_single_with_output
 from .state import (
     BUILTIN_PROMPT_FILE,
-    CONFIG_DIR,
     DEFAULT_PROMPT_FILE,
+    SESSIONS_DIR,
     app,
     console,
     settings,
 )
 from .theme import THEME
-
-SESSIONS_DIR = CONFIG_DIR / "sessions"
 
 SANDBOX_CONFIG_FILE = ".rho-agent.toml"
 

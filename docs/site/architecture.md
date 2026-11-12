@@ -125,7 +125,7 @@ The [Monitor](monitor/) reads `trace.jsonl` for live observation and writes sent
 |---|---|
 | `config.yaml` | AgentConfig snapshot for the session |
 | `trace.jsonl` | Append-only event log (all events from all runs) |
-| `meta.json` | Session metadata (id, status, created_at, model, profile, first_prompt) |
+| `meta.json` | Registry record: status, owner (pid, host, user), project, usage |
 | `cancel` | Cancel sentinel (created when cancellation requested) |
 | `pause` | Pause sentinel (created when pause requested) |
 | `directives.jsonl` | Operator directives (JSON lines) |
