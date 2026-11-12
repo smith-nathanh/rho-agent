@@ -62,6 +62,10 @@ class AgentConfig:
     reasoning_effort: str | None = None
     response_format: dict | None = None
     auto_approve: bool = True
+    auto_compact: bool = True
+    compact_threshold: float | None = None   # fraction of the context window
+    compact_at_tokens: int | None = None     # exact token count; wins over the fraction
+    context_window: int | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 ```
 
@@ -80,6 +84,10 @@ class AgentConfig:
 | `reasoning_effort` | `str \| None` | `None` | Reasoning effort level (model-specific) |
 | `response_format` | `dict \| None` | `None` | Structured output format specification |
 | `auto_approve` | `bool` | `True` | Auto-approve tool calls without prompting |
+| `auto_compact` | `bool` | `True` | Summarize older history automatically when the context grows large |
+| `compact_threshold` | `float \| None` | `None` | Compact when input reaches this fraction of the context window. `None` uses `0.7`, kept below a model's higher price tier if it has one |
+| `compact_at_tokens` | `int \| None` | `None` | Compact at this exact input token count. Wins over `compact_threshold` |
+| `context_window` | `int \| None` | `None` | Context window size in tokens. `None` looks the model up in a built-in table |
 | `extras` | `dict[str, Any]` | `{}` | Arbitrary metadata passed through to session |
 
 ### Loading and saving
@@ -187,7 +195,10 @@ session = Session(agent)
 ```python
 session.approval_callback = my_callback    # Called when tool needs approval
 session.cancel_check = lambda: False       # Polled to check for cancellation
+# Compaction settings start from AgentConfig and can be changed per session
 session.auto_compact = True                # Auto-compact when context is large
+session.compact_threshold = 0.5            # Fraction of the context window
+session.compact_at_tokens = 40_000         # Exact token count; wins over the fraction
 session.context_window = 128_000           # Context window size for compaction
 ```
 

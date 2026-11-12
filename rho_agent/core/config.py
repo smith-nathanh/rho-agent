@@ -10,6 +10,24 @@ from typing import Any
 import yaml
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
+def _env_number(name: str, cast: Any) -> Any:
+    """Read an optional number from the environment; unset or empty is None."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return cast(raw)
+    except ValueError as err:
+        raise ValueError(f"{name} must be a number, got {raw!r}") from err
+
+
 @dataclass
 class AgentConfig:
     """Portable agent configuration — what an agent is and how it runs.
@@ -53,9 +71,20 @@ class AgentConfig:
     response_format: dict[str, Any] | None = None
     databases: dict[str, dict[str, Any]] | None = None
     auto_approve: bool = True
-    # Context management. None means: look the model up in core/models.py.
+    # Context management. Compaction replaces older history with a summary
+    # once the input grows past a threshold.
+    #   auto_compact       turn automatic compaction on or off
+    #   compact_threshold  fraction of the context window (default 0.7)
+    #   compact_at_tokens  exact token count; wins over the fraction
+    #   context_window     window size; None looks the model up in core/models.py
+    auto_compact: bool = field(default_factory=lambda: _env_bool("RHO_AGENT_AUTO_COMPACT", True))
+    compact_threshold: float | None = field(
+        default_factory=lambda: _env_number("RHO_AGENT_COMPACT_THRESHOLD", float)
+    )
+    compact_at_tokens: int | None = field(
+        default_factory=lambda: _env_number("RHO_AGENT_COMPACT_AT_TOKENS", int)
+    )
     context_window: int | None = None
-    compact_at_tokens: int | None = None
     # Hard caps for one session. None means no cap. The cost cap only works
     # with a client that reports cost (LiteLLMClient).
     max_cost_usd: float | None = None
@@ -81,14 +110,21 @@ class AgentConfig:
             "response_format",
             "databases",
             "auto_approve",
-            "context_window",
+            "auto_compact",
+            "compact_threshold",
             "compact_at_tokens",
+            "context_window",
             "max_cost_usd",
             "max_wall_seconds",
             "max_call_seconds",
             "completion_gate",
         }
     )
+
+    def __post_init__(self) -> None:
+        from .models import validate_compaction_settings
+
+        validate_compaction_settings(self.compact_threshold, self.compact_at_tokens)
 
     @classmethod
     def from_file(cls, path: str | Path) -> AgentConfig:
@@ -146,9 +182,12 @@ class AgentConfig:
         if self.databases:
             data["databases"] = self.databases
         data["auto_approve"] = self.auto_approve
+        if not self.auto_compact:
+            data["auto_compact"] = False
         for key in (
-            "context_window",
+            "compact_threshold",
             "compact_at_tokens",
+            "context_window",
             "max_cost_usd",
             "max_wall_seconds",
             "max_call_seconds",

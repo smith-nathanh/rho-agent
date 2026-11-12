@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
 from rho_agent.client.model import (
     ModelCallError,
     StreamEvent,
@@ -586,3 +588,121 @@ async def test_time_cap_interrupts_a_stalled_model_call() -> None:
 
     assert result.status == "budget_exceeded"
     assert client.n == 1
+
+
+# ---------------------------------------------------------------------------
+# Compaction settings
+# ---------------------------------------------------------------------------
+
+
+def test_explicit_fraction_is_used_as_given_and_tokens_win() -> None:
+    # The default is capped below the price tier; an explicit fraction is not.
+    assert compact_threshold("openai/gpt-6.1-sol", threshold=0.9) == 360_000
+    assert compact_threshold("unknown-model", threshold=0.5) == 64_000
+    assert compact_threshold("unknown-model", context_window=1_000, threshold=0.1) == 100
+    assert compact_threshold("unknown-model", threshold=0.5, compact_at_tokens=7) == 7
+
+
+@pytest.mark.parametrize("bad", [0, -0.1, 1.5, 70])
+def test_fraction_outside_zero_to_one_is_rejected(bad: float) -> None:
+    with pytest.raises(ValueError, match="compact_threshold"):
+        AgentConfig(model="m", compact_threshold=bad)
+    with pytest.raises(ValueError, match="compact_at_tokens"):
+        AgentConfig(model="m", compact_at_tokens=0)
+
+
+def test_compaction_settings_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "RHO_AGENT_AUTO_COMPACT",
+        "RHO_AGENT_COMPACT_THRESHOLD",
+        "RHO_AGENT_COMPACT_AT_TOKENS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    defaults = AgentConfig(model="m")
+    assert (defaults.auto_compact, defaults.compact_threshold, defaults.compact_at_tokens) == (
+        True,
+        None,
+        None,
+    )
+
+    monkeypatch.setenv("RHO_AGENT_AUTO_COMPACT", "0")
+    monkeypatch.setenv("RHO_AGENT_COMPACT_THRESHOLD", "0.25")
+    monkeypatch.setenv("RHO_AGENT_COMPACT_AT_TOKENS", "40000")
+    from_env = AgentConfig(model="m")
+    assert (from_env.auto_compact, from_env.compact_threshold, from_env.compact_at_tokens) == (
+        False,
+        0.25,
+        40_000,
+    )
+    # An explicit argument beats the environment.
+    assert AgentConfig(model="m", compact_threshold=0.5).compact_threshold == 0.5
+
+    monkeypatch.setenv("RHO_AGENT_COMPACT_THRESHOLD", "lots")
+    with pytest.raises(ValueError, match="RHO_AGENT_COMPACT_THRESHOLD"):
+        AgentConfig(model="m")
+
+
+def test_compaction_settings_round_trip_through_yaml(tmp_path: Path) -> None:
+    path = tmp_path / "agent.yaml"
+    AgentConfig(
+        model="m", auto_compact=False, compact_threshold=0.4, compact_at_tokens=9000
+    ).to_file(path)
+    loaded = AgentConfig.from_file(path)
+    assert (loaded.auto_compact, loaded.compact_threshold, loaded.compact_at_tokens) == (
+        False,
+        0.4,
+        9000,
+    )
+    assert not loaded.extras
+
+
+async def test_session_compacts_at_the_configured_fraction() -> None:
+    def run_with(**settings: Any):
+        client = _ScriptedClient(
+            [_call("a", text="x" * 4000), _done(input_tokens=1_000)],
+            [_call("b", text="y" * 4000), _done(input_tokens=30_000)],
+            [_text("final"), _done(input_tokens=2_000)],
+        )
+        session = _session(client, _EchoHandler())
+        for key, value in settings.items():
+            setattr(session, key, value)
+        return session
+
+    # 30K input is under the default threshold (70% of 128K): no compaction.
+    result = await run_with().run("task")
+    assert [e.type for e in result.events].count("compact_end") == 0
+
+    # At 20% of the window (25.6K) the same run compacts once.
+    result = await run_with(compact_threshold=0.2).run("task")
+    assert [e.type for e in result.events].count("compact_end") == 1
+
+    # Turned off, it never compacts whatever the threshold.
+    result = await run_with(compact_threshold=0.2, auto_compact=False).run("task")
+    assert [e.type for e in result.events].count("compact_end") == 0
+
+
+def test_session_takes_compaction_settings_from_the_agent_config() -> None:
+    agent = Agent(AgentConfig(model="m", auto_compact=False, compact_threshold=0.3))
+    session = Session(agent, client=_ScriptedClient())
+    assert session.auto_compact is False
+    assert session.compact_threshold == 0.3
+    assert session._compact_threshold() == int(128_000 * 0.3)
+
+
+def test_cli_compaction_flags_only_override_what_was_passed() -> None:
+    from typer.testing import CliRunner
+
+    from rho_agent.cli import app
+    from rho_agent.cli.main_cmd import _apply_compaction_flags
+
+    config = AgentConfig(model="m", compact_threshold=0.6)
+    _apply_compaction_flags(config, None, 5000, False)
+    assert (config.compact_threshold, config.compact_at_tokens, config.auto_compact) == (
+        0.6,
+        5000,
+        False,
+    )
+
+    help_text = CliRunner().invoke(app, ["main", "--help"], env={"COLUMNS": "200"}).output
+    for flag in ("--compact-threshold", "--compact-at-tokens", "--no-auto-compact"):
+        assert flag in help_text

@@ -87,6 +87,9 @@ rho-agent --help
 | `RHO_AGENT_BACKEND` | `local` | Agent backend — `local` or `daytona` |
 | `RHO_AGENT_SERVICE_TIER` | — | API service tier (e.g. `flex`) |
 | `RHO_AGENT_REASONING_EFFORT` | — | Reasoning effort level (for o1/o3 models) |
+| `RHO_AGENT_COMPACT_THRESHOLD` | `0.7` | Compact history at this fraction of the context window |
+| `RHO_AGENT_COMPACT_AT_TOKENS` | — | Compact history at this exact input token count; wins over the fraction |
+| `RHO_AGENT_AUTO_COMPACT` | `1` | Set to `0` to turn automatic compaction off |
 
 ### Database connections
 

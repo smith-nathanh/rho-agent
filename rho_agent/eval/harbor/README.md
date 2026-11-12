@@ -62,6 +62,9 @@ Pass as `--ak key=value` or under `kwargs` in a job config.
 | `cost_ceiling_usd` | `0` (off) | Stop the agent at this cost per task |
 | `max_wall_seconds` | `0` (off) | Stop the agent cleanly after this long; set below the task timeout |
 | `max_call_seconds` | `1200` | Abandon and retry one model call after this long |
+| `auto_compact` | `true` | Summarize older history automatically when the context grows large |
+| `compact_threshold` | `0.7` | Compact at this fraction of the context window |
+| `compact_at_tokens` | unset | Compact at this exact input token count; wins over the fraction |
 | `enable_reviewer` | `false` | Separate review pass after the agent finishes |
 | `reviewer_max_iterations` | `1` | Review-and-revise loops |
 | `temperature` | provider default | Sampling temperature |
