@@ -21,6 +21,7 @@ from rho_agent.core.agent import Agent
 from rho_agent.core.config import AgentConfig
 from rho_agent.core.models import compact_threshold
 from rho_agent.core.session import Session
+from rho_agent.core.session_store import SessionStore
 from rho_agent.core.state import State
 from rho_agent.eval.harbor.trajectory import TrajectoryBuilder
 from rho_agent.tools.base import ToolHandler, ToolInvocation, ToolOutput
@@ -179,6 +180,63 @@ async def test_resume_rebuilds_usage_and_run_count(tmp_path: Path) -> None:
     assert restored.usage["input_tokens"] == 300
     assert restored.usage["cost_usd"] == 0.75
     assert restored.usage == session.state.usage
+
+
+async def test_resume_with_model_override_keeps_the_saved_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")  # resume builds a real client
+    store = SessionStore(tmp_path / "sessions")
+    saved = AgentConfig(
+        system_prompt="You are the saved agent.",
+        model="saved-model",
+        profile="developer",
+        working_dir=str(tmp_path),
+        base_url="http://localhost:9/v1",
+        reasoning_effort="high",
+        project_instructions=False,
+        skills=False,
+    )
+    original = store.create_session(Agent(saved))
+    original._client = _ScriptedClient([_text("one"), _done()])
+    await original.run("first")
+
+    resumed = store.resume(original.id, model="other-model")
+    client = _ScriptedClient([_text("two"), _done()])
+    resumed._client = client
+    result = await resumed.run("second")
+
+    assert result.status == "completed"
+    config = resumed.agent.config
+    assert config.model == "other-model"
+    assert (config.profile, config.working_dir) == ("developer", str(tmp_path))
+    assert (config.base_url, config.reasoning_effort) == ("http://localhost:9/v1", "high")
+    assert client.prompts[0].system == "You are the saved agent."
+    assert [m["content"] for m in resumed.state.messages if m["role"] == "user"] == [
+        "first",
+        "second",
+    ]
+    # The override lasts for this resume only.
+    assert AgentConfig.from_file(store.base_dir / original.id / "config.yaml").model == (
+        "saved-model"
+    )
+
+
+async def test_unresolvable_system_prompt_leaves_the_trace_untouched(tmp_path: Path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text(
+        "---\nvariables:\n  platform:\n    required: true\n---\nRunning on {{ platform }}.\n"
+    )
+    trace = tmp_path / "trace.jsonl"
+    agent = Agent(AgentConfig(system_prompt=str(prompt_file), model="test-model"))
+    session = Session(agent, client=_ScriptedClient(), state=State(trace_path=trace))
+
+    with pytest.raises(ValueError, match="Missing required variable: platform"):
+        await session.run("hello")
+
+    assert session.state.messages == []
+    assert session.state.run_count == 0
+    assert not trace.exists() or trace.read_text() == ""
 
 
 def test_resume_of_killed_run_closes_dangling_tool_calls() -> None:

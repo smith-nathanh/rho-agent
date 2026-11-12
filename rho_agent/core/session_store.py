@@ -195,12 +195,17 @@ class SessionStore:
         session_id: str,
         *,
         agent_config: AgentConfig | None = None,
+        model: str | None = None,
     ) -> Session:
         """Resume a session by loading config and replaying trace.
 
         Args:
             session_id: The session ID (directory name) to resume.
-            agent_config: Optional override config. If None, loads from session dir.
+            agent_config: Optional config that replaces the saved one entirely.
+                If None, loads from session dir.
+            model: Optional model to run with instead of the configured one;
+                everything else in the config is kept. Not written back to
+                config.yaml.
 
         Returns:
             A Session with restored state.
@@ -216,6 +221,8 @@ class SessionStore:
                 agent_config = AgentConfig.from_file(config_path)
             else:
                 agent_config = AgentConfig()
+        if model:
+            agent_config.model = model
 
         # Replay trace to restore state
         trace_path = session_dir / "trace.jsonl"

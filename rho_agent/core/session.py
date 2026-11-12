@@ -318,6 +318,11 @@ class Session:
             (stopped for an out-of-band approval), ``max_turns`` or
             ``budget_exceeded``.
         """
+        # Resolve the system prompt before anything is recorded: if it cannot be
+        # built, the trace must not keep a run_start and user message for a run
+        # that never reached the model.
+        _ = self._agent.system_prompt
+
         if self._wall_start is None:
             self._wall_start = time.monotonic()
         # A previous run that was killed or interrupted may have left tool calls
