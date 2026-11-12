@@ -707,3 +707,143 @@ def test_cli_compaction_flags_only_override_what_was_passed() -> None:
     command = typer.main.get_command(app).commands["main"]
     declared = {opt for param in command.params for opt in (*param.opts, *param.secondary_opts)}
     assert {"--compact-threshold", "--compact-at-tokens", "--no-auto-compact"} <= declared
+
+
+# ---------------------------------------------------------------------------
+# Compaction quality
+# ---------------------------------------------------------------------------
+
+
+async def _session_with_history(
+    client: _ScriptedClient, *prompts: str, output_chars: int = 400
+) -> Session:
+    """Run each prompt through three tool calls so there is history to compact."""
+    session = _session(client, _EchoHandler())
+    for n, prompt in enumerate(prompts):
+        client._calls.extend(
+            [[_call(f"p{n}c{i}", text=f"out-{n}-{i} " + "z" * output_chars), _done()]][0]
+            for i in range(3)
+        )
+        client._calls.append([_text(f"answer {n}"), _done()])
+        await session.run(prompt)
+    session.compact_at_tokens = 1_000  # tail budget = 250 tokens
+    return session
+
+
+@pytest.mark.parametrize("empty", ["", "   \n"])
+async def test_empty_summary_is_a_failure_and_history_is_kept(empty: str) -> None:
+    client = _ScriptedClient(summary=empty)
+    session = await _session_with_history(client, "task")
+    before = list(session.state.messages)
+
+    result = await session.compact()
+
+    assert result.error and "empty summary" in result.error
+    assert session.state.messages == before
+
+
+async def test_summary_request_keeps_tools_but_forbids_calling_them() -> None:
+    client = _ScriptedClient()
+    session = await _session_with_history(client, "task")
+
+    await session.compact()
+
+    prompt = client.summary_prompts[0]
+    assert prompt.tools  # still sent, so the cached prefix is reused
+    assert prompt.tool_choice == "none"
+    assert "## Tried and ruled out" in prompt.messages[-1].content
+
+
+def test_litellm_client_sends_tool_choice() -> None:
+    from rho_agent.client.litellm_client import LiteLLMClient
+    from rho_agent.client.model import Message, Prompt
+
+    client = LiteLLMClient(model="openai/test")
+    tools = [{"type": "function", "function": {"name": "t", "parameters": {}}}]
+    messages = [Message(role="user", content="hi")]
+
+    plain = client._build_kwargs(prompt=Prompt(system="s", messages=messages, tools=tools))
+    forced = client._build_kwargs(
+        prompt=Prompt(system="s", messages=messages, tools=tools, tool_choice="none")
+    )
+
+    assert "tool_choice" not in plain
+    assert forced["tool_choice"] == "none" and forced["tools"] == tools
+
+
+async def test_every_user_message_survives_compaction_verbatim() -> None:
+    client = _ScriptedClient()
+    session = await _session_with_history(
+        client, "the original task", "also keep the API stable", "and use tabs"
+    )
+
+    await session.compact()
+    # A second round must not stack summaries or lose the user's words.
+    client._calls.extend([[_call(f"x{i}", text="w" * 400), _done()] for i in range(3)])
+    client._calls.append([_text("more"), _done()])
+    await session.run("one more thing")
+    await session.compact()
+
+    messages = session.state.messages
+    users = [m["content"] for m in messages if m["role"] == "user"]
+    summaries = [u for u in users if "SUMMARY" in u]
+    assert len(summaries) == 1
+    spoken = [u for u in users if "SUMMARY" not in u]
+    assert spoken[:3] == ["the original task", "also keep the API stable", "and use tabs"]
+    assert "one more thing" in spoken
+    _assert_tool_calls_paired(messages)
+
+
+async def test_an_oversized_later_user_message_is_summarised_not_kept() -> None:
+    client = _ScriptedClient()
+    huge = "paste " * 20_000  # far above the verbatim budget
+    session = await _session_with_history(client, "task", huge, "short follow-up")
+
+    await session.compact()
+
+    users = [m["content"] for m in session.state.messages if m["role"] == "user"]
+    assert "task" in users and "short follow-up" in users
+    assert huge not in users
+
+
+async def test_auto_compaction_trims_old_tool_output_without_a_model_call() -> None:
+    client = _ScriptedClient()
+    session = await _session_with_history(client, "task", output_chars=20_000)
+    before = list(session.state.messages)
+
+    result = await session.compact(trigger="auto")
+
+    assert result.method == "prune" and result.error is None
+    assert client.summary_prompts == []  # no summarisation call was made
+    # The echo tool's arguments hold a second copy of the text, which stays.
+    assert result.tokens_after < result.tokens_before * 0.6
+    messages = session.state.messages
+    assert len(messages) == len(before)  # nothing dropped, only shortened
+    assert [m["role"] for m in messages] == [m["role"] for m in before]
+    trimmed = [m for m in messages if m["role"] == "tool" and "were removed" in m["content"]]
+    # The start and end of each result are kept, so it is still recognisable.
+    assert trimmed and all("out-0-" in m["content"] for m in trimmed)
+    assert all(len(m["content"]) < 1_000 for m in trimmed)
+    _assert_tool_calls_paired(messages)
+
+    # A second automatic round finds nothing left to trim, so it summarises.
+    result = await session.compact(trigger="auto")
+    assert result.method == "summary" and len(client.summary_prompts) == 1
+
+
+async def test_manual_compaction_always_summarises() -> None:
+    client = _ScriptedClient()
+    session = await _session_with_history(client, "task", output_chars=20_000)
+
+    result = await session.compact()
+
+    assert result.method == "summary" and len(client.summary_prompts) == 1
+
+
+async def test_small_tool_output_goes_straight_to_a_summary() -> None:
+    client = _ScriptedClient()
+    session = await _session_with_history(client, "task", output_chars=400)
+
+    result = await session.compact(trigger="auto")
+
+    assert result.method == "summary" and len(client.summary_prompts) == 1

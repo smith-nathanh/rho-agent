@@ -22,7 +22,7 @@ Every significant event during a session is appended as a JSON line to `trace.js
 | `tool_start` | Tool execution begins (includes tool name and args) |
 | `tool_end` | Tool execution completes (includes result) |
 | `tool_blocked` | Tool call denied by permissions or approval |
-| `compact` | Context compaction occurred (includes tokens before/after) |
+| `compact` | Context compaction occurred (includes tokens before/after and `method`: `summary` or `prune`) |
 | `usage` | Cumulative usage snapshot |
 
 ### Sample trace

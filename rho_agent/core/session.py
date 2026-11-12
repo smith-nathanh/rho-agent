@@ -43,6 +43,16 @@ COMPACT_TAIL_TOKENS_AGGRESSIVE = 5_000
 # Tool results longer than this are clipped in the summarisation request when
 # recovering from an overflow (the stored history is not changed).
 COMPACT_CLIP_CHARS = 2_000
+# Before summarising, old tool results longer than this are cut down to their
+# first and last COMPACT_PRUNE_KEEP_CHARS characters.
+COMPACT_PRUNE_MIN_CHARS = 1_200
+COMPACT_PRUNE_KEEP_CHARS = 200
+# If cutting old tool results frees at least this share of the context, the
+# summarisation call is skipped for this round.
+COMPACT_PRUNE_MIN_SAVING = 0.3
+# User messages older than the tail are kept verbatim up to this many tokens
+# (the first one, the task, is always kept).
+COMPACT_USER_TOKENS = 8_000
 
 INTERRUPTED_TOOL_RESULT = "Interrupted before this tool call finished."
 TIME_CAP_TOOL_RESULT = "Interrupted: the session time cap was reached."
@@ -927,7 +937,8 @@ class Session:
         if result.error:
             content = f"Compaction failed, history unchanged: {result.error}"
         else:
-            content = f"Compacted: {result.tokens_before} -> {result.tokens_after} tokens"
+            how = " by trimming old tool output" if result.method == "prune" else ""
+            content = f"Compacted{how}: {result.tokens_before} -> {result.tokens_after} tokens"
         yield AgentEvent(type="compact_end", content=content)
 
     @staticmethod
@@ -957,17 +968,78 @@ class Session:
             start += 1
         return messages[:start], messages[start:]
 
+    @staticmethod
+    def _prune_tool_outputs(
+        messages: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Cut long tool results down to their first and last few lines.
+
+        Returns the new list and the number of characters removed. Messages are
+        copied, never changed in place. Already-cut results are left alone.
+        """
+        pruned: list[dict[str, Any]] = []
+        removed = 0
+        keep = COMPACT_PRUNE_KEEP_CHARS
+        for m in messages:
+            content = m.get("content")
+            if (
+                m.get("role") == "tool"
+                and isinstance(content, str)
+                and len(content) > COMPACT_PRUNE_MIN_CHARS
+            ):
+                cut = len(content) - 2 * keep
+                stub = (
+                    f"{content[:keep]}\n"
+                    f"[... {cut} characters of this earlier tool output were removed to save "
+                    f"context. Run the command again if you need them. ...]\n"
+                    f"{content[-keep:]}"
+                )
+                removed += len(content) - len(stub)
+                m = {**m, "content": stub}
+            pruned.append(m)
+        return pruned, removed
+
+    def _user_messages_to_keep(self, head: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """User messages from the summarised part that stay verbatim.
+
+        What the user said should not be paraphrased. The first message (the
+        task) is always kept; later ones are kept newest first within
+        COMPACT_USER_TOKENS. Earlier summaries are not user speech and are left
+        to be folded into the new summary.
+        """
+        users = [
+            m
+            for m in head
+            if m.get("role") == "user"
+            and not (isinstance(m.get("content"), str) and m["content"].startswith(SUMMARY_PREFIX))
+        ]
+        if not users:
+            return []
+        first, later = users[0], users[1:]
+        budget = COMPACT_USER_TOKENS
+        kept_ids: set[int] = set()
+        for m in reversed(later):
+            cost = self._message_tokens(m)
+            if cost > budget:
+                continue
+            budget -= cost
+            kept_ids.add(id(m))
+        return [first, *(m for m in later if id(m) in kept_ids)]
+
     async def compact(
         self,
         custom_instructions: str = "",
         trigger: str = "manual",
         aggressive: bool = False,
     ) -> CompactResult:
-        """Summarise older history, keeping the original task and a recent tail.
+        """Shrink older history, keeping what the user said and a recent tail.
 
-        After compaction the history is: the first user message (the task), a
-        summary of everything up to the tail, then the tail verbatim. If the
-        summarisation call fails the history is left unchanged.
+        Automatic compaction first cuts long tool results in the older part of
+        the history. If that frees enough room, nothing else happens. Otherwise
+        the older part is summarised and the history becomes: the user's
+        messages verbatim, the summary, then the tail verbatim. If the
+        summarisation call fails or returns nothing, the history is left
+        unchanged.
 
         Args:
             custom_instructions: Extra guidance for the summary.
@@ -988,6 +1060,39 @@ class Session:
             return CompactResult(
                 summary="", tokens_before=tokens_before, tokens_after=tokens_before, trigger=trigger
             )
+
+        # Cheap first step: drop bulky old tool output. A manual compact asks for
+        # a summary, and overflow recovery needs the largest possible cut, so
+        # only automatic compaction may stop here.
+        if trigger == "auto" and not aggressive:
+            pruned_head, removed_chars = self._prune_tool_outputs(head)
+            if removed_chars // 4 >= COMPACT_PRUNE_MIN_SAVING * max(tokens_before, 1):
+                self._state.replace_messages(pruned_head + tail)
+                tokens_after = self._state.estimate_tokens(system_prompt)
+                # Scale the last real count by the estimated saving until the
+                # next model call reports a new one.
+                if self._last_input_tokens:
+                    ratio = tokens_after / max(tokens_before, 1)
+                    self._last_input_tokens = int(self._last_input_tokens * ratio)
+                else:
+                    self._last_input_tokens = tokens_after
+                self._compact_retry_above = 0
+                self._state._emit(
+                    {
+                        "type": "compact",
+                        "method": "prune",
+                        "tokens_before": tokens_before,
+                        "tokens_after": tokens_after,
+                        "trigger": trigger,
+                    }
+                )
+                return CompactResult(
+                    summary="",
+                    tokens_before=tokens_before,
+                    tokens_after=tokens_after,
+                    trigger=trigger,
+                    method="prune",
+                )
 
         compaction_msg = COMPACTION_SYSTEM_PROMPT
         if custom_instructions:
@@ -1012,23 +1117,29 @@ class Session:
         prompt = Prompt(
             system=system_prompt,
             messages=history_messages,
+            # The tool definitions stay in the request so the cached prefix is
+            # reused, but the model may not call one instead of summarising.
             tools=self._registry.get_specs(),
+            tool_choice="none",
         )
 
-        try:
-            summary, usage = await self._client.complete_prompt(prompt)
-        except ModelCallError as e:
+        def failed(error: str) -> CompactResult:
             # Do not retry on every turn: wait until the context has grown.
             current = self._last_input_tokens or tokens_before
             self._compact_retry_above = int(current * 1.1)
-            self._state._emit({"type": "compact_failed", "trigger": trigger, "error": str(e)})
+            self._state._emit({"type": "compact_failed", "trigger": trigger, "error": error})
             return CompactResult(
                 summary="",
                 tokens_before=tokens_before,
                 tokens_after=tokens_before,
                 trigger=trigger,
-                error=str(e),
+                error=error,
             )
+
+        try:
+            summary, usage = await self._client.complete_prompt(prompt)
+        except ModelCallError as e:
+            return failed(str(e))
 
         usage_totals = {
             "input_tokens": usage.get("input_tokens", 0),
@@ -1052,10 +1163,11 @@ class Session:
             }
         )
 
-        new_messages: list[dict[str, Any]] = []
-        first_user = next((m for m in head if m.get("role") == "user"), None)
-        if first_user is not None:
-            new_messages.append(first_user)
+        if not (summary or "").strip():
+            # Replacing the history with nothing would lose the whole task.
+            return failed("The model returned an empty summary.")
+
+        new_messages: list[dict[str, Any]] = self._user_messages_to_keep(head)
         new_messages.append({"role": "user", "content": SUMMARY_PREFIX + summary})
         new_messages.extend(tail)
         self._state.replace_messages(new_messages)
@@ -1069,6 +1181,7 @@ class Session:
         self._state._emit(
             {
                 "type": "compact",
+                "method": "summary",
                 "tokens_before": tokens_before,
                 "tokens_after": tokens_after,
                 "trigger": trigger,

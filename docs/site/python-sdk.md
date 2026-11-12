@@ -324,8 +324,17 @@ class CompactResult:
     summary: str
     tokens_before: int
     tokens_after: int
-    trigger: str                   # "auto" or "manual"
+    trigger: str                   # "auto", "manual" or "overflow"
+    error: str | None = None       # set when the summary call failed; history is unchanged
+    method: str = "summary"        # "summary", or "prune" when trimming was enough
 ```
+
+Automatic compaction works in two steps. It first trims long tool results in the
+older part of the history, keeping the start and end of each. If that frees at
+least 30% of the context, it stops there and makes no model call. Otherwise it
+asks the model for a structured summary, and the history becomes: every message
+from the user verbatim, the summary, then the most recent messages verbatim.
+A manual `session.compact()` always writes a summary.
 
 ## Patterns
 
