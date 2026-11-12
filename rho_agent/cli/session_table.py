@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+from rich import box
 from rich.table import Table
 
 from ..core.session_store import SessionInfo
@@ -61,16 +62,19 @@ def print_sessions(sessions: list[SessionInfo]) -> None:
             title_style=f"bold {THEME.secondary}",
             show_header=True,
             header_style=THEME.secondary,
+            box=box.SIMPLE_HEAD,
+            expand=True,
         )
         table.add_column("Session", style=THEME.accent, no_wrap=True)
         table.add_column("Status", no_wrap=True)
-        table.add_column("Model", style=THEME.muted)
+        table.add_column("Model", style=THEME.muted, no_wrap=True)
         if show_owner:
-            table.add_column("Owner", style=THEME.muted)
+            table.add_column("Owner", style=THEME.muted, no_wrap=True)
         table.add_column("Started", justify="right", no_wrap=True)
         table.add_column("Active", justify="right", no_wrap=True)
         table.add_column("Cost", justify="right", no_wrap=True)
-        table.add_column("Preview", overflow="fold")
+        # The preview takes whatever width is left and is cut to fit.
+        table.add_column("Preview", no_wrap=True, overflow="ellipsis", ratio=1)
         return table
 
     now = datetime.now(UTC)
