@@ -34,6 +34,7 @@ from .events import (
     RunResult,
 )
 from .models import compact_threshold
+from .session_meta import now_iso, process_identity, update_meta
 from .state import State, content_chars
 from .truncate import truncate_output
 
@@ -68,8 +69,9 @@ class Session:
     so the agent retains full context across runs. Supports:
     - **Multi-run conversations**: call ``run()`` multiple times for follow-ups.
     - **Streaming**: pass ``on_event`` to receive AgentEvents as they happen.
-    - **Cancellation**: ``cancel()`` sets a cooperative flag (also writes a sentinel
-      file when the session has a directory, for cross-process cancellation).
+    - **Cancellation**: ``cancel()`` sets a cooperative flag. Another process can
+      cancel the current run by creating a ``cancel`` file in the session
+      directory; the request is consumed by the run it stops.
     - **Auto-compaction**: when context approaches the window limit, automatically
       summarizes history to stay within bounds.
     - **Async context manager**: ``async with Session(agent) as s:`` for backends
@@ -90,6 +92,9 @@ class Session:
         self._state = state or State()
         self._client = client or agent.create_client()
         self._cancelled = False
+        # True when the current or last run was stopped by a ``cancel`` file
+        # (another process) rather than by ``cancel()``.
+        self.cancelled_externally = False
         self._session_dir = session_dir
         # Set on a child session spawned by a tool (delegate); pause and
         # cancel requests on the parent then apply to the child as well.
@@ -157,11 +162,8 @@ class Session:
     # --- Cancellation ---
 
     def cancel(self) -> None:
-        """Request cooperative cancellation."""
+        """Request cooperative cancellation of the current run."""
         self._cancelled = True
-        if self._session_dir is not None:
-            cancel_sentinel = self._session_dir / "cancel"
-            cancel_sentinel.touch()
 
     def _is_cancelled(self) -> bool:
         """Check if cancellation has been requested (including sentinel file)."""
@@ -170,6 +172,7 @@ class Session:
         # Check sentinel file in session directory
         if self._session_dir is not None and (self._session_dir / "cancel").exists():
             self._cancelled = True
+            self.cancelled_externally = True
             return True
         if self.cancel_check is not None and self.cancel_check():
             self._cancelled = True
@@ -187,10 +190,25 @@ class Session:
 
     async def _check_pause(self) -> None:
         """Sleep-poll while paused. Returns when unpaused or cancelled."""
-        while self._pause_requested():
-            if self._is_cancelled():
-                return
-            await asyncio.sleep(0.5)
+        if not self._pause_requested():
+            return
+        self._update_meta(status="paused")
+        try:
+            while self._pause_requested():
+                if self._is_cancelled():
+                    return
+                await asyncio.sleep(0.5)
+        finally:
+            self._update_meta(status="running")
+
+    def _clear_cancel_request(self) -> None:
+        """Remove the ``cancel`` file so it does not stop the next run as well."""
+        if self._session_dir is None:
+            return
+        try:
+            (self._session_dir / "cancel").unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def _consume_directives(self) -> list[str]:
         """Read and truncate directives.jsonl with fcntl locking. Returns list of directive strings."""
@@ -220,19 +238,25 @@ class Session:
             pass
         return directives
 
-    def _update_meta_status(self, status: str) -> None:
-        """Write final status to meta.json if session directory exists."""
+    def _update_meta(self, *, defaults: dict[str, Any] | None = None, **fields: Any) -> None:
+        """Update this session's meta.json with status, usage and activity time."""
         if self._session_dir is None:
             return
-        meta_path = self._session_dir / "meta.json"
-        if not meta_path.exists():
-            return
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            meta["status"] = status
-            meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        except Exception:
-            pass  # best-effort
+        usage = self._state.usage
+        update_meta(
+            self._session_dir,
+            defaults=defaults,
+            last_activity=now_iso(),
+            run_count=self._state.run_count,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            cost_usd=usage.get("cost_usd", 0.0),
+            **fields,
+        )
+
+    def set_status(self, status: str) -> None:
+        """Record a status between runs, such as ``waiting_input``."""
+        self._update_meta(status=status, **process_identity())
 
     # --- Async context manager (for Daytona cleanup) ---
 
@@ -301,7 +325,15 @@ class Session:
 
         self._state.run_count += 1
         self._state.status = "running"
+        self.cancelled_externally = False
         self._state._emit({"type": "run_start", "prompt": prompt})
+        # The process running the session can change on resume, so the owner
+        # is recorded at the start of every run.
+        self._update_meta(
+            defaults={"first_prompt": str(prompt)[:200]},
+            status="running",
+            **process_identity(),
+        )
 
         collected_text: list[str] = []
         collected_events: list[AgentEvent] = []
@@ -342,7 +374,8 @@ class Session:
             self._state.close_pending_tool_calls(INTERRUPTED_TOOL_RESULT)
             self._state.status = status
             self._state._emit({"type": "run_end", "status": status})
-            self._update_meta_status(status)
+            self._clear_cancel_request()
+            self._update_meta(status=status, waiting_on=None)
 
         return RunResult(
             text="".join(collected_text),
@@ -469,6 +502,8 @@ class Session:
 
             # Check pause sentinel
             await self._check_pause()
+            if turn > 1:
+                self._update_meta(status="running")  # usage and activity so far
 
             # Consume directives between turns
             for directive in self._consume_directives():
@@ -686,6 +721,7 @@ class Session:
                 # Check approval
                 approved = True
                 if self.approval_callback and self._registry.requires_approval(tool_name):
+                    self._update_meta(status="waiting_approval", waiting_on=tool_name)
                     try:
                         approved = await self.approval_callback(tool_name, tool_args)
                     except ApprovalInterrupt:
@@ -697,6 +733,7 @@ class Session:
                             tool_args=tool_args,
                         )
                         return
+                    self._update_meta(status="running", waiting_on=None)
 
                 if not approved:
                     self._state.add_tool_result(

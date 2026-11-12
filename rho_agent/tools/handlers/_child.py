@@ -9,14 +9,20 @@ A child session is linked to the session that spawned it so that:
 
 from __future__ import annotations
 
-import json
 import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ...core.session_meta import now_iso, process_identity, read_meta, write_meta
 
-def child_session_kwargs(parent: Any | None, state: Any, *, share_client: bool) -> dict[str, Any]:
+
+def child_session_kwargs(
+    parent: Any | None,
+    state: Any,
+    *,
+    share_client: bool,
+    config: Any | None = None,
+) -> dict[str, Any]:
     """Constructor kwargs for a child Session, and wire its trace file.
 
     Args:
@@ -25,6 +31,8 @@ def child_session_kwargs(parent: Any | None, state: Any, *, share_client: bool) 
             a session directory.
         share_client: Reuse the parent's model client. Only correct when the
             child uses the same model and endpoint as the parent.
+        config: The child's AgentConfig, recorded in its ``meta.json``.
+            Defaults to the parent's.
     """
     kwargs: dict[str, Any] = {"state": state}
     if parent is None:
@@ -41,13 +49,22 @@ def child_session_kwargs(parent: Any | None, state: Any, *, share_client: bool) 
         try:
             child_dir.mkdir(parents=True, exist_ok=True)
             state.trace_path = child_dir / "trace.jsonl"
-            meta = {
-                "parent_session_id": parent.id,
-                "model": parent.agent.config.model,
-                "status": "running",
-                "started_at": datetime.now(UTC).isoformat(),
-            }
-            (child_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+            config = config or parent.agent.config
+            started = now_iso()
+            write_meta(
+                child_dir,
+                {
+                    "id": child_id,
+                    "parent_session_id": parent.id,
+                    "status": "created",
+                    "model": config.model,
+                    "profile": config.profile,
+                    "cwd": config.working_dir or read_meta(parent_dir).get("cwd", ""),
+                    **process_identity(),
+                    "started_at": started,
+                    "last_activity": started,
+                },
+            )
             kwargs["session_dir"] = child_dir
         except OSError:
             pass  # tracing a child is best-effort

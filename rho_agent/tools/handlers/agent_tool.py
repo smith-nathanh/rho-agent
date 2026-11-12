@@ -130,7 +130,8 @@ class AgentToolHandler(ToolHandler):
             and parent.agent.config.base_url == child_config.base_url
         )
         child_session = Session(
-            child_agent, **child_session_kwargs(parent, State(), share_client=same_model)
+            child_agent,
+            **child_session_kwargs(parent, State(), share_client=same_model, config=child_config),
         )
         if parent is None:
             child_session.approval_callback = self._approval_callback

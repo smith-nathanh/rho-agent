@@ -5,22 +5,21 @@ from __future__ import annotations
 import fcntl
 import json
 import shlex
-from datetime import UTC, datetime
 from pathlib import Path
 from time import sleep
 from typing import Annotated
 
 import typer
 from rich.panel import Panel
-from rich.table import Table
 
+from ..core.session_meta import LIVE_STATUSES, effective_status, read_meta
 from ..core.session_store import SessionStore
 from .formatting import (
-    _format_elapsed,
     _format_token_count,
     _markup,
 )
-from .state import app, console
+from .session_table import print_sessions
+from .state import SESSIONS_DIR, app, console
 from .theme import THEME
 
 
@@ -86,8 +85,8 @@ class MonitorSession:
         console.print(_markup("Commands:", THEME.secondary))
         console.print("[dim]  ps                                      list sessions[/dim]")
         console.print("[dim]  watch <prefix>                          tail trace events[/dim]")
-        console.print("[dim]  cancel <prefix|all>                    cancel session(s)[/dim]")
-        console.print("[dim]  pause <prefix|all>                     pause session(s)[/dim]")
+        console.print("[dim]  cancel <prefix|all>                    cancel live session(s)[/dim]")
+        console.print("[dim]  pause <prefix|all>                     pause live session(s)[/dim]")
         console.print("[dim]  resume <prefix|all>                    resume session(s)[/dim]")
         console.print("[dim]  directive <prefix> <text>               inject directive[/dim]")
         console.print("[dim]  help                                    show this help[/dim]")
@@ -95,9 +94,7 @@ class MonitorSession:
 
     def _resolve_dirs(self, prefix: str) -> list[Path]:
         """Resolve prefix to matching session directories."""
-        if prefix == "all":
-            return [d for d in self._dir.iterdir() if d.is_dir()]
-        return [d for d in self._dir.iterdir() if d.is_dir() and d.name.startswith(prefix)]
+        return [info.path for info in self._store.find(prefix) if info.path is not None]
 
     def _resolve_single_dir(self, prefix: str) -> Path | None:
         """Resolve prefix to exactly one session directory."""
@@ -112,41 +109,7 @@ class MonitorSession:
         return matches[0]
 
     def _cmd_ps(self) -> None:
-        sessions = self._store.list(limit=50)
-        if not sessions:
-            console.print("[dim]No sessions found[/dim]")
-            return
-
-        table = Table(show_header=True, header_style=THEME.secondary)
-        table.add_column("Session", style=THEME.accent)
-        table.add_column("Status")
-        table.add_column("Model", style=THEME.muted)
-        table.add_column("Started", justify="right")
-        table.add_column("Preview", overflow="fold")
-
-        now = datetime.now(UTC)
-        for info in sessions:
-            status_color = {
-                "running": THEME.success,
-                "completed": THEME.muted,
-                "error": THEME.error,
-                "cancelled": THEME.warning,
-            }.get(info.status, THEME.muted)
-
-            try:
-                started = datetime.fromisoformat(info.created_at)
-                elapsed = _format_elapsed(started, now)
-            except (ValueError, TypeError):
-                elapsed = "?"
-
-            table.add_row(
-                info.id,
-                _markup(info.status, status_color),
-                info.model,
-                elapsed,
-                info.display_preview,
-            )
-        console.print(table)
+        print_sessions(self._store.list(limit=50))
 
     def _cmd_watch(self, prefix: str) -> None:
         """Tail trace.jsonl for a session, rendering events as they appear."""
@@ -170,21 +133,13 @@ class MonitorSession:
                         if line:
                             self._render_trace_event(line)
                     else:
-                        # Check if session is still running
-                        meta_path = session_dir / "meta.json"
-                        if meta_path.exists():
-                            try:
-                                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                                if meta.get("status") not in ("running",):
-                                    console.print(
-                                        _markup(
-                                            f"Session ended ({meta.get('status', '?')})",
-                                            THEME.muted,
-                                        )
-                                    )
-                                    return
-                            except (json.JSONDecodeError, OSError):
-                                pass
+                        # Stop once the session is finished or its process is gone.
+                        meta = read_meta(session_dir)
+                        if meta:
+                            status = effective_status(meta)
+                            if status not in LIVE_STATUSES:
+                                console.print(_markup(f"Session ended ({status})", THEME.muted))
+                                return
                         sleep(0.5)
         except KeyboardInterrupt:
             console.print()
@@ -254,28 +209,45 @@ class MonitorSession:
                     preview += "..."
                 console.print(_markup(f"assistant: {preview}", THEME.primary))
 
+        elif ev_type == "child_start":
+            child = event.get("child_session_id", "?")
+            tool = event.get("tool_name", "?")
+            instruction = str(event.get("instruction", ""))[:120].replace("\n", " ")
+            console.print(
+                _markup(f"child {child} started ({tool}): {instruction}", THEME.secondary)
+            )
+
+        elif ev_type == "child_end":
+            child = event.get("child_session_id", "?")
+            console.print(_markup(f"child {child} ended: {event.get('status', '?')}", THEME.muted))
+
         elif ev_type == "compact":
             before = event.get("tokens_before", "?")
             after = event.get("tokens_after", "?")
             console.print(_markup(f"compact: {before} -> {after} tokens", THEME.muted))
 
     def _cmd_cancel(self, prefix: str) -> None:
-        dirs = self._resolve_dirs(prefix)
-        if not dirs:
+        matches = self._store.find(prefix)
+        if not matches:
             console.print(_markup(f"No sessions matching '{prefix}'", THEME.error))
             return
-        for d in dirs:
-            (d / "cancel").touch()
-            console.print(_markup(f"cancel: {d.name}", THEME.warning))
+        for info in matches:
+            if self._store.request_cancel(info):
+                console.print(_markup(f"cancel: {info.id}", THEME.warning))
+            elif prefix != "all":
+                console.print(_markup(f"{info.id}: not running ({info.status})", THEME.muted))
 
     def _cmd_pause(self, prefix: str) -> None:
-        dirs = self._resolve_dirs(prefix)
-        if not dirs:
+        matches = self._store.find(prefix)
+        if not matches:
             console.print(_markup(f"No sessions matching '{prefix}'", THEME.error))
             return
-        for d in dirs:
-            (d / "pause").touch()
-            console.print(_markup(f"pause: {d.name}", THEME.success))
+        for info in matches:
+            if info.live and info.path is not None:
+                (info.path / "pause").touch()
+                console.print(_markup(f"pause: {info.id}", THEME.success))
+            elif prefix != "all":
+                console.print(_markup(f"{info.id}: not running ({info.status})", THEME.muted))
 
     def _cmd_resume(self, prefix: str) -> None:
         dirs = self._resolve_dirs(prefix)
@@ -311,12 +283,12 @@ class MonitorSession:
 @app.command()
 def monitor(
     dir: Annotated[
-        str,
-        typer.Argument(help="Sessions directory to monitor"),
-    ],
+        str | None,
+        typer.Argument(help="Sessions directory to monitor (default: the CLI's sessions)"),
+    ] = None,
 ) -> None:
     """Interactive command loop for session directory observability."""
-    sessions_dir = Path(dir).expanduser().resolve()
+    sessions_dir = Path(dir).expanduser().resolve() if dir else SESSIONS_DIR
     if not sessions_dir.is_dir():
         console.print(_markup(f"Not a directory: {sessions_dir}", THEME.error))
         raise typer.Exit(1)
