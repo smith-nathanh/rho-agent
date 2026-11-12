@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import os
 import platform
 import sys
@@ -12,6 +13,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 import yaml
+from click.core import ParameterSource
 
 if TYPE_CHECKING:
     from ..tools.handlers.daytona.backend import DaytonaBackend
@@ -48,6 +50,9 @@ from .state import (
 from .theme import THEME
 
 SANDBOX_CONFIG_FILE = ".rho-agent.toml"
+
+# Config fields the default system prompt describes.
+_PROMPT_FIELDS = ("profile", "working_dir", "backend")
 
 
 def _resolve_daytona_config(
@@ -169,8 +174,136 @@ def _apply_compaction_flags(
         target.auto_compact = auto_compact
 
 
+def _render_prompt_file(
+    system_prompt_file: str, vars_file: str | None, var: list[str] | None
+) -> tuple[str, str | None]:
+    """Render a --system-prompt file with --vars-file and --var; exits on error."""
+    from ..prompts import load_prompt, parse_vars, prepare_prompt
+
+    try:
+        loaded_prompt = load_prompt(system_prompt_file)
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(_markup(str(PromptLoadError(str(exc))), THEME.error))
+        raise typer.Exit(1) from exc
+
+    prompt_vars: dict[str, str] = {}
+    if vars_file:
+        vars_path = Path(vars_file).expanduser().resolve()
+        if not vars_path.exists():
+            console.print(
+                _markup(str(PromptLoadError(f"Vars file not found: {vars_path}")), THEME.error)
+            )
+            raise typer.Exit(1)
+        try:
+            with open(vars_path, encoding="utf-8") as f:
+                file_vars = yaml.safe_load(f)
+            if isinstance(file_vars, dict):
+                prompt_vars.update({k: str(v) for k, v in file_vars.items()})
+        except Exception as exc:
+            console.print(
+                _markup(str(PromptLoadError(f"Failed to load vars file: {exc}")), THEME.error)
+            )
+            raise typer.Exit(1) from exc
+
+    if var:
+        try:
+            prompt_vars.update(parse_vars(var))
+        except ValueError as exc:
+            console.print(_markup(str(PromptLoadError(str(exc))), THEME.error))
+            raise typer.Exit(1) from exc
+
+    try:
+        return prepare_prompt(loaded_prompt, prompt_vars)
+    except ValueError as exc:
+        console.print(_markup(str(PromptLoadError(str(exc))), THEME.error))
+        raise typer.Exit(1) from exc
+
+
+def _default_prompt(
+    capability_profile: Any, working_dir: str, *, is_remote: bool
+) -> tuple[str, str | None]:
+    """Render the default system prompt for a profile, working dir and backend.
+
+    Remote backends execute on Linux VMs, not the host machine.
+    """
+    from ..prompts import load_prompt, prepare_prompt
+
+    prompt_path = DEFAULT_PROMPT_FILE if DEFAULT_PROMPT_FILE.exists() else BUILTIN_PROMPT_FILE
+    try:
+        loaded_prompt = load_prompt(prompt_path)
+    except (FileNotFoundError, ValueError) as exc:
+        raise ValueError(f"Could not load default prompt at {prompt_path}: {exc}") from exc
+
+    sandbox_info = ""
+    if is_remote:
+        sandbox_info = (
+            "Pre-installed tools: python3, pip, node, git, uv.\n"
+            "Prefer uv over pip for Python package management.\n"
+            "PATH includes ~/.local/bin.\n"
+            "\n"
+            "Important: uv-managed venvs do not include pip. To install packages:\n"
+            "- `uv pip install <pkg>` — install into the project venv\n"
+            "- `uv run --with <pkg> <cmd>` — run a command with a temporary dependency\n"
+            "- `uv run <cmd>` — run a command using the project venv\n"
+            "Always use `uv run` or `uv pip install` instead of plain `pip` or `.venv/bin/python -m pip`."
+        )
+
+    prompt_vars: dict[str, str] = {
+        "platform": "Linux" if is_remote else platform.system(),
+        "home_dir": "/home/daytona" if is_remote else str(Path.home()),
+        "working_dir": working_dir,
+        "profile_name": capability_profile.name,
+        "shell_mode": capability_profile.shell.value,
+        "file_write_mode": capability_profile.file_write.value,
+        "database_mode": capability_profile.database.value,
+        "sandbox_info": sandbox_info,
+    }
+    return prepare_prompt(loaded_prompt, prompt_vars)
+
+
+def _default_prompt_for(config: AgentConfig) -> str | None:
+    """The default system prompt a config would get, or None if it cannot be built."""
+    if not config.working_dir:
+        return None
+    try:
+        text, _ = _default_prompt(
+            load_profile(config.profile), config.working_dir, is_remote=config.backend != "local"
+        )
+    except (ValueError, FileNotFoundError):
+        return None
+    return text
+
+
+def _resume_config(
+    base: AgentConfig,
+    overrides: dict[str, Any],
+    *,
+    system_prompt: str | None = None,
+) -> tuple[AgentConfig, bool]:
+    """The config to resume a session with: ``base`` with flag overrides applied.
+
+    The default system prompt names the profile, working directory and
+    platform, so it is rendered again when one of those changes. A custom
+    prompt is kept as it is; the second return value is True in that case, to
+    tell the user it may describe the old settings.
+    """
+    config = dataclasses.replace(base, **overrides)
+    if system_prompt is not None:
+        config.system_prompt = system_prompt
+        return config, False
+    if not any(getattr(config, k) != getattr(base, k) for k in _PROMPT_FIELDS):
+        return config, False
+    if base.system_prompt and base.system_prompt == _default_prompt_for(base):
+        rendered = _default_prompt_for(config)
+        if rendered is not None:
+            config.system_prompt = rendered
+            return config, False
+    return config, bool(base.system_prompt)
+
+
 @app.command()
 def main(
+    ctx: typer.Context,
     prompt_arg: Annotated[
         str | None,
         typer.Argument(
@@ -324,8 +457,6 @@ def main(
     ] = None,
 ) -> None:
     """rho-agent: An agent harness and CLI with readonly and developer modes."""
-    from ..prompts import load_prompt, parse_vars, prepare_prompt
-
     # --- Daytona sandbox configuration ---
     # When --backend daytona, read .rho-agent.toml from the project root.
     # CLI flags (--dockerfile, --snapshot, --upload, --working-dir) override the toml.
@@ -389,25 +520,13 @@ def main(
             console.print()
         raise typer.Exit(0)
 
-    # Handle --resume: load a previous session
-    resumed_session: Session | None = None
-    if resume:
-        if resume.lower() == "latest":
-            latest_id = session_store.get_latest_id()
-            if not latest_id:
-                console.print(_markup("No saved sessions to resume.", THEME.error))
-                raise typer.Exit(1)
-            resume = latest_id
-
-        try:
-            # An explicit --model replaces the saved model; the rest of the
-            # saved config (system prompt, profile, working dir) is kept.
-            model_override = model if model != os.getenv("OPENAI_MODEL", "gpt-6.1-terra") else None
-            resumed_session = session_store.resume(resume, model=model_override)
-        except FileNotFoundError as err:
-            console.print(_markup(f"Session not found: {resume}", THEME.error))
-            console.print(_markup("Use --list to see saved sessions.", THEME.muted))
-            raise typer.Exit(1) from err
+    # Handle --resume: find the session to load
+    if resume and resume.lower() == "latest":
+        latest_id = session_store.get_latest_id()
+        if not latest_id:
+            console.print(_markup("No saved sessions to resume.", THEME.error))
+            raise typer.Exit(1)
+        resume = latest_id
 
     # Resolve working directory — skip local resolution for remote backends
     # (macOS resolves /home → /System/Volumes/Data/home which breaks remote paths)
@@ -418,12 +537,64 @@ def main(
     else:
         resolved_working_dir = os.getcwd()
 
-    # Build AgentConfig from flags or --config file
-    if resumed_session:
-        agent = resumed_session.agent
-        session = resumed_session
+    initial_prompt: str | None = None
+
+    # Build AgentConfig from the saved session, a --config file, or flags
+    if resume:
+        # The saved config (or --config) is the base; flags given on the
+        # command line override it for this run. config.yaml is not rewritten.
+        try:
+            base_config = session_store.load_config(resume)
+        except FileNotFoundError as err:
+            console.print(_markup(f"Session not found: {resume}", THEME.error))
+            console.print(_markup("Use --list to see saved sessions.", THEME.muted))
+            raise typer.Exit(1) from err
+        if config_file:
+            base_config = AgentConfig.from_file(config_file)
+
+        def given(name: str) -> bool:
+            return ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE
+
+        overrides: dict[str, Any] = {}
+        if given("model"):
+            overrides["model"] = model
+        if given("base_url"):
+            overrides["base_url"] = base_url
+        if given("reasoning_effort"):
+            overrides["reasoning_effort"] = reasoning_effort
+        if given("profile"):
+            overrides["profile"] = profile
+        if daytona_backend or given("backend"):
+            overrides["backend"] = daytona_backend or backend
+        if given("working_dir") or (working_dir and "backend" in overrides):
+            overrides["working_dir"] = resolved_working_dir
+
+        new_prompt = None
+        if system_prompt_file:
+            new_prompt, _ = _render_prompt_file(system_prompt_file, vars_file, var)
+        try:
+            agent_config, prompt_kept = _resume_config(
+                base_config, overrides, system_prompt=new_prompt
+            )
+            session = session_store.resume(resume, agent_config=agent_config)
+        except (ValueError, FileNotFoundError) as e:
+            console.print(_markup(str(InvalidProfileError(str(e))), THEME.error))
+            raise typer.Exit(1) from e
+        agent = session.agent
+        if prompt_kept:
+            console.print(
+                _markup(
+                    "Keeping the session's custom system prompt; it may describe the "
+                    "previous profile, working directory or backend.",
+                    THEME.warning,
+                )
+            )
+        if shell_mode:
+            console.print(_markup("--shell-mode is ignored with --resume.", THEME.warning))
+
         capability_profile = load_profile(agent.config.profile)
         mode_name = capability_profile.name
+        resolved_working_dir = agent.config.working_dir or resolved_working_dir
         # Flags apply to the resumed session and to any child agents it starts.
         for target in (agent.config, session):
             _apply_compaction_flags(target, compact_threshold, compact_at_tokens, auto_compact)
@@ -481,100 +652,16 @@ def main(
                 raise typer.Exit(1) from err
 
         # Resolve system prompt
-        system_prompt_text: str = ""
-        initial_prompt: str | None = None
-
         if system_prompt_file:
-            try:
-                loaded_prompt = load_prompt(system_prompt_file)
-            except (FileNotFoundError, ValueError) as exc:
-                console.print(_markup(str(PromptLoadError(str(exc))), THEME.error))
-                raise typer.Exit(1) from exc
-
-            prompt_vars: dict[str, str] = {}
-            if vars_file:
-                vars_path = Path(vars_file).expanduser().resolve()
-                if not vars_path.exists():
-                    console.print(
-                        _markup(
-                            str(PromptLoadError(f"Vars file not found: {vars_path}")), THEME.error
-                        )
-                    )
-                    raise typer.Exit(1)
-                try:
-                    with open(vars_path, encoding="utf-8") as f:
-                        file_vars = yaml.safe_load(f)
-                    if isinstance(file_vars, dict):
-                        prompt_vars.update({k: str(v) for k, v in file_vars.items()})
-                except Exception as exc:
-                    console.print(
-                        _markup(
-                            str(PromptLoadError(f"Failed to load vars file: {exc}")), THEME.error
-                        )
-                    )
-                    raise typer.Exit(1) from exc
-
-            if var:
-                try:
-                    prompt_vars.update(parse_vars(var))
-                except ValueError as exc:
-                    console.print(_markup(str(PromptLoadError(str(exc))), THEME.error))
-                    raise typer.Exit(1) from exc
-
-            try:
-                system_prompt_text, initial_prompt = prepare_prompt(loaded_prompt, prompt_vars)
-            except ValueError as exc:
-                console.print(_markup(str(PromptLoadError(str(exc))), THEME.error))
-                raise typer.Exit(1) from exc
-        else:
-            # Use default prompt
-            default_prompt_path = (
-                DEFAULT_PROMPT_FILE if DEFAULT_PROMPT_FILE.exists() else BUILTIN_PROMPT_FILE
+            system_prompt_text, initial_prompt = _render_prompt_file(
+                system_prompt_file, vars_file, var
             )
+        else:
             try:
-                loaded_prompt = load_prompt(default_prompt_path)
+                system_prompt_text, initial_prompt = _default_prompt(
+                    capability_profile, resolved_working_dir, is_remote=backend != "local"
+                )
             except (FileNotFoundError, ValueError) as exc:
-                console.print(
-                    _markup(
-                        str(
-                            PromptLoadError(
-                                f"Could not load default prompt at {default_prompt_path}: {exc}"
-                            )
-                        ),
-                        THEME.error,
-                    )
-                )
-                raise typer.Exit(1) from exc
-
-            # Remote backends execute on Linux VMs, not the host machine
-            is_remote = backend != "local"
-            sandbox_info = ""
-            if is_remote:
-                sandbox_info = (
-                    "Pre-installed tools: python3, pip, node, git, uv.\n"
-                    "Prefer uv over pip for Python package management.\n"
-                    "PATH includes ~/.local/bin.\n"
-                    "\n"
-                    "Important: uv-managed venvs do not include pip. To install packages:\n"
-                    "- `uv pip install <pkg>` — install into the project venv\n"
-                    "- `uv run --with <pkg> <cmd>` — run a command with a temporary dependency\n"
-                    "- `uv run <cmd>` — run a command using the project venv\n"
-                    "Always use `uv run` or `uv pip install` instead of plain `pip` or `.venv/bin/python -m pip`."
-                )
-
-            prompt_vars: dict[str, str] = {
-                "platform": "Linux" if is_remote else platform.system(),
-                "home_dir": "/home/daytona" if is_remote else str(Path.home()),
-                "working_dir": resolved_working_dir,
-                "profile_name": capability_profile.name,
-                "shell_mode": capability_profile.shell.value,
-                "file_write_mode": capability_profile.file_write.value,
-                "database_mode": capability_profile.database.value,
-                "sandbox_info": sandbox_info,
-            }
-            try:
-                system_prompt_text, initial_prompt = prepare_prompt(loaded_prompt, prompt_vars)
-            except ValueError as exc:
                 console.print(_markup(f"Prompt error: {PromptLoadError(str(exc))}", THEME.error))
                 raise typer.Exit(1) from exc
 
@@ -623,7 +710,7 @@ def main(
     run_prompt_text = (
         prompt
         if prompt
-        else (prompt_arg if prompt_arg else (initial_prompt if not resumed_session else None))
+        else (prompt_arg if prompt_arg else (initial_prompt if not resume else None))
     )
 
     if not run_prompt_text and not _is_interactive_terminal():

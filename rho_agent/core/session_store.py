@@ -190,22 +190,25 @@ class SessionStore:
         (info.path / "cancel").touch()
         return True
 
+    def load_config(self, session_id: str) -> AgentConfig:
+        """The config a session was saved with (defaults if it has none)."""
+        config_path = self._resolve_session_dir(session_id) / "config.yaml"
+        if config_path.exists():
+            return AgentConfig.from_file(config_path)
+        return AgentConfig()
+
     def resume(
         self,
         session_id: str,
         *,
         agent_config: AgentConfig | None = None,
-        model: str | None = None,
     ) -> Session:
         """Resume a session by loading config and replaying trace.
 
         Args:
             session_id: The session ID (directory name) to resume.
             agent_config: Optional config that replaces the saved one entirely.
-                If None, loads from session dir.
-            model: Optional model to run with instead of the configured one;
-                everything else in the config is kept. Not written back to
-                config.yaml.
+                To change a few fields, start from ``load_config()``.
 
         Returns:
             A Session with restored state.
@@ -214,15 +217,7 @@ class SessionStore:
         # A cancel request that was never consumed must not stop the resumed run.
         (session_dir / "cancel").unlink(missing_ok=True)
 
-        # Load config
-        config_path = session_dir / "config.yaml"
-        if agent_config is None:
-            if config_path.exists():
-                agent_config = AgentConfig.from_file(config_path)
-            else:
-                agent_config = AgentConfig()
-        if model:
-            agent_config.model = model
+        agent = Agent(agent_config or self.load_config(session_id))
 
         # Replay trace to restore state
         trace_path = session_dir / "trace.jsonl"
@@ -232,7 +227,6 @@ class SessionStore:
             state = State()
         state.trace_path = trace_path
 
-        agent = Agent(agent_config)
         return Session(agent, session_id=session_id, state=state, session_dir=session_dir)
 
     def list(self, limit: int = 20) -> list[SessionInfo]:

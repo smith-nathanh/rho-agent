@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from rho_agent.cli.main_cmd import _default_prompt_for, _resume_config
 from rho_agent.client.model import (
     ModelCallError,
     StreamEvent,
@@ -201,7 +202,9 @@ async def test_resume_with_model_override_keeps_the_saved_config(
     original._client = _ScriptedClient([_text("one"), _done()])
     await original.run("first")
 
-    resumed = store.resume(original.id, model="other-model")
+    config, prompt_kept = _resume_config(store.load_config(original.id), {"model": "other-model"})
+    assert not prompt_kept
+    resumed = store.resume(original.id, agent_config=config)
     client = _ScriptedClient([_text("two"), _done()])
     resumed._client = client
     result = await resumed.run("second")
@@ -220,6 +223,98 @@ async def test_resume_with_model_override_keeps_the_saved_config(
     assert AgentConfig.from_file(store.base_dir / original.id / "config.yaml").model == (
         "saved-model"
     )
+
+
+def test_resume_flags_override_the_saved_config(tmp_path: Path) -> None:
+    saved = AgentConfig(
+        system_prompt="Custom prompt.",
+        model="saved-model",
+        profile="readonly",
+        working_dir=str(tmp_path),
+        reasoning_effort="low",
+    )
+    overrides = {
+        "reasoning_effort": "high",
+        "base_url": "http://localhost:9/v1",
+        "profile": "developer",
+    }
+
+    config, prompt_kept = _resume_config(saved, overrides)
+
+    assert (config.reasoning_effort, config.base_url) == ("high", "http://localhost:9/v1")
+    assert (config.profile, config.model) == ("developer", "saved-model")
+    assert config.system_prompt == "Custom prompt."
+    assert prompt_kept  # a custom prompt may describe the old profile
+    assert saved.profile == "readonly"
+
+    config, prompt_kept = _resume_config(saved, {"profile": "developer"}, system_prompt="New.")
+    assert (config.system_prompt, prompt_kept) == ("New.", False)
+
+
+def test_resume_renders_the_default_prompt_again_for_a_new_profile_or_dir(
+    tmp_path: Path,
+) -> None:
+    old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+    saved = AgentConfig(profile="readonly", working_dir=str(old_dir))
+    saved.system_prompt = _default_prompt_for(saved)
+    assert str(old_dir) in saved.system_prompt
+
+    config, prompt_kept = _resume_config(
+        saved, {"profile": "developer", "working_dir": str(new_dir)}
+    )
+
+    assert not prompt_kept
+    assert config.system_prompt == _default_prompt_for(config)
+    assert str(new_dir) in config.system_prompt
+    assert str(old_dir) not in config.system_prompt
+
+    # Flags that the prompt does not describe leave it alone.
+    config, prompt_kept = _resume_config(saved, {"reasoning_effort": "high"})
+    assert (config.system_prompt, prompt_kept) == (saved.system_prompt, False)
+
+
+def test_resume_cli_applies_flags_given_on_the_command_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typer.testing import CliRunner
+
+    from rho_agent.cli import main_cmd
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(main_cmd, "SESSIONS_DIR", tmp_path / "sessions")
+    store = SessionStore(tmp_path / "sessions")
+    saved = AgentConfig(
+        system_prompt="Custom prompt.",
+        model="saved-model",
+        profile="readonly",
+        working_dir=str(tmp_path),
+        base_url="http://localhost:9/v1",
+    )
+    session_id = store.create_session(Agent(saved)).id
+    seen: dict[str, Any] = {}
+
+    async def fake_run_single(session: Session, prompt: str, **_: Any) -> None:
+        seen["config"] = session.agent.config
+        seen["system"] = session.agent.system_prompt
+        seen["prompt"] = prompt
+
+    monkeypatch.setattr(main_cmd, "run_single", fake_run_single)
+    new_dir = tmp_path / "elsewhere"
+    new_dir.mkdir()
+    args = ["main", "-r", session_id, "--reasoning-effort", "high", "--profile", "developer"]
+    args += ["--working-dir", str(new_dir), "go on"]
+
+    result = CliRunner().invoke(main_cmd.app, args)
+
+    assert result.exit_code == 0, result.output
+    config = seen["config"]
+    assert (config.reasoning_effort, config.profile) == ("high", "developer")
+    assert config.working_dir == str(new_dir.resolve())
+    # Not given on the command line, so kept from the saved session.
+    assert (config.model, config.base_url) == ("saved-model", "http://localhost:9/v1")
+    assert seen["system"].startswith("Custom prompt.")
+    assert seen["prompt"] == "go on"
+    assert "custom system prompt" in result.output
 
 
 async def test_unresolvable_system_prompt_leaves_the_trace_untouched(tmp_path: Path) -> None:
