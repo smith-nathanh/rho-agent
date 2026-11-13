@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
+from .paths import resolve_path
 
 IMAGE_MEDIA_TYPES = {
     ".png": "image/png",
@@ -95,6 +96,9 @@ def encode_image(path: str, data: bytes) -> ToolOutput:
 class ViewImageHandler(ToolHandler):
     """Attach a local image file so the model can look at it."""
 
+    def __init__(self, working_dir: str | None = None) -> None:
+        self._working_dir = working_dir
+
     @property
     def parallel_safe(self) -> bool:
         return True
@@ -124,7 +128,7 @@ class ViewImageHandler(ToolHandler):
         path_str = invocation.arguments.get("path", "")
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
-        path = Path(path_str).expanduser().resolve()
+        path = resolve_path(path_str, self._working_dir)
         if not path.exists():
             return ToolOutput(content=f"File not found: {path}", success=False)
         if not path.is_file():
