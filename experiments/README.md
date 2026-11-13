@@ -21,7 +21,7 @@ not happen.
 ## How to record an experiment
 
 1. **Before running**, add a folder `E<NNN>-<short-name>/` with a `README.md`
-   from [`TEMPLATE.md`](TEMPLATE.md): the question, the design, the exact
+   following the [template](#template) below: the question, the design, the exact
    configs (copied into `configs/`), the rho-agent commit and the budget. Add a
    row to the index above with status "Ready, not run".
 2. **Pin the code.** Configs install rho-agent from git, so set `version` to a
@@ -47,3 +47,57 @@ paths are recorded in each experiment so the raw traces can be found.
 - [`tools/compare_trials.py`](tools/compare_trials.py): compares two job
   directories task by task (reward, cost, tokens, model and tool calls,
   minutes). Standard library only.
+
+## Template
+
+Copy this into `E<NNN>-<short-name>/README.md`.
+
+````markdown
+# E<NNN>: <title>
+
+| | |
+|---|---|
+| Status | Ready, not run / Running / Done / Abandoned |
+| Dates | planned YYYY-MM-DD, run YYYY-MM-DD |
+| rho-agent commit | `<full SHA>` |
+| Harbor version | |
+| Budget | worst case $X (cap x trials), expected $Y |
+| Cost | $Z (actual) |
+| Job output | `jobs/<dir>/<timestamp>/` in the main checkout |
+
+## Question
+
+What this experiment is meant to answer, in one or two sentences.
+
+## Hypothesis
+
+What we expect and why. Something that could turn out the other way.
+
+## Design
+
+- **Model and settings:** model, reasoning effort, completion gate, caps.
+- **Arms:** what differs between them, and the claim that nothing else does.
+- **Tasks:** which, why these, and the dataset version.
+- **Repetitions:** attempts per task per arm.
+- **Configs:** `configs/*.yaml` (copies of what was run).
+
+## Metrics
+
+What is compared and how (per task, per arm).
+
+## Limits
+
+What this design cannot show (sample size, task mix, noise).
+
+## Results
+
+Filled in after the run: the comparison table, then what it shows.
+
+## Cost
+
+Per arm and total, with where the figures came from.
+
+## Follow-ups
+
+What this result suggests doing next.
+````
