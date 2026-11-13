@@ -16,6 +16,7 @@ Every significant event during a session is appended as a JSON line to `trace.js
 |---|---|
 | `run_start` | A new `session.run()` call begins |
 | `run_end` | A `session.run()` call completes (includes status) |
+| `system_prompt` | The final system prompt the model receives (`content`, including any `AGENTS.md` text and skill list) and the enabled tool names (`tools`). Written at the start of a run whenever either changed since it was last recorded |
 | `message` | A message added to conversation (role: user, assistant, tool, system) |
 | `llm_start` | LLM API call initiated (`purpose: compaction` for a summarising call) |
 | `llm_end` | LLM API call completed (includes token counts and cost) |
