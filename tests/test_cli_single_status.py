@@ -51,3 +51,14 @@ async def test_run_single_with_output_returns_false_on_error(
 
     assert result is False
     assert not output_path.exists()
+
+
+def test_status_bar_shows_reasoning_tokens_only_when_there_are_some() -> None:
+    from rho_agent.cli.formatting import TokenStatus
+
+    status = TokenStatus()
+    status.update({"context_size": 900, "total_input_tokens": 1200, "total_output_tokens": 300})
+    assert status.render() == "context:900, session: 1200 in | 300 out"
+
+    status.update({"total_reasoning_tokens": 120})
+    assert status.render() == "context:900, session: 1200 in | 300 out (120 reasoning)"

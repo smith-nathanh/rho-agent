@@ -12,9 +12,12 @@ You need `vhs`, `ffmpeg`, the project virtualenv (`uv sync --group dev`) and `OP
 ## What the script does
 
 - Copies the sample projects in `projects/` into a throwaway home directory, `/tmp/rho-agent-demo` (set `DEMO_HOME` to use another). The recorded shell uses that as `HOME`, so none of your own sessions, config or paths appear on screen.
-- `cli`: types into an interactive `rho-agent` session in `projects/orders`, which has one bug behind two failing tests.
+- `cli`: types into an interactive `rho-agent` session in `projects/shop`. Two checkout tests fail there, and the cause is in a different module from the one the tests exercise (`money.py` rounds half a cent to even, not up).
 - `monitor`: starts two unattended agents under [`careful.yaml`](careful.yaml), a profile that requires approval for every shell command. It waits until both are blocked on an approval, then records `rho-agent monitor` with their session IDs filled into [`monitor.tape`](monitor.tape).
 - Converts the video to a GIF, cut a few seconds after the screen last changed.
+- Checks that nothing in this repository changed while the agents ran, and fails if something did. The agents only ever work on the copies.
+
+`projects/orders` is not recorded; the Python example in the top-level README reads it.
 
 ## Retakes
 

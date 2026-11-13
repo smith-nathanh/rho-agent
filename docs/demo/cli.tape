@@ -1,4 +1,4 @@
-# Interactive session: ask the agent to fix a failing test.
+# Interactive session: ask the agent to find the cause of two failing tests.
 # Record with docs/demo/record.sh cli (it prepares the sample project).
 
 Output docs/demo/cli.mp4
@@ -14,7 +14,7 @@ Set CursorBlink false
 Set Framerate 20
 
 Hide
-Type "export HOME=$DEMO_HOME RHO_AGENT_PREVIEW_LINES=3 && cd ~/proj/orders && export PS1='\[\e[2m\]orders\[\e[0m\] $ ' && clear"
+Type "export HOME=$DEMO_HOME RHO_AGENT_PREVIEW_LINES=3 && cd ~/proj/shop && export PS1='\[\e[2m\]shop\[\e[0m\] $ ' && clear"
 Enter
 Show
 
@@ -26,7 +26,7 @@ Type "rho-agent --profile developer"
 Enter
 Sleep 4s
 
-Type "the pricing tests are failing. find the bug, fix it, and run the tests"
+Type "two checkout tests are failing. find the root cause, fix it, and run the tests"
 Sleep 500ms
 Enter
 # Longer than the agent needs. record.sh cuts the recording a few seconds

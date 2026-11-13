@@ -514,6 +514,7 @@ class InteractiveSession:
                 shutil.rmtree(previous_dir, ignore_errors=True)  # never used
         self.token_status.total_input_tokens = resumed.state.usage.get("input_tokens", 0)
         self.token_status.total_output_tokens = resumed.state.usage.get("output_tokens", 0)
+        self.token_status.total_reasoning_tokens = resumed.state.usage.get("reasoning_tokens", 0)
         self.token_status.context_size = 0
 
         console.print(_markup(f"Resumed session: {selected_id}", THEME.success))
