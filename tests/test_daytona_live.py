@@ -74,3 +74,38 @@ async def test_every_remote_tool_round_trips() -> None:
         assert out.success is False and out.metadata.get("timed_out") is True
     finally:
         await manager.close()
+
+
+async def test_relative_paths_use_the_working_directory() -> None:
+    """File tools and bash agree on where a relative path points."""
+    from rho_agent.tools.base import ToolInvocation
+    from rho_agent.tools.handlers.daytona import register_daytona_tools
+    from rho_agent.tools.registry import ToolRegistry
+
+    work = "/home/daytona/rho-smoke-rel/proj"
+    registry = ToolRegistry()
+    manager = register_daytona_tools(registry, working_dir=work)
+
+    async def call(tool: str, **arguments: Any):
+        out = await registry.dispatch(
+            ToolInvocation(call_id=tool, tool_name=tool, arguments=arguments)
+        )
+        assert out.success, f"{tool} failed: {out.content}"
+        return out
+
+    try:
+        await call("bash", command=f"mkdir -p {work}", working_dir="/home/daytona")
+
+        await call("write", path="sub/a.txt", content="alpha\nbeta\n")
+        out = await call("bash", command="pwd && cat sub/a.txt")
+        assert work in out.content and "beta" in out.content
+
+        assert "beta" in (await call("read", path="sub/a.txt")).content
+        await call("edit", path="sub/a.txt", old_string="beta", new_string="gamma")
+        out = await call("bash", command=f"cat {work}/sub/a.txt")
+        assert "gamma" in out.content
+        assert "sub" in (await call("list", path=".")).content
+        assert "a.txt" in (await call("glob", pattern="*.txt", path=".")).content
+        assert "gamma" in (await call("grep", pattern="gamma", path="sub")).content
+    finally:
+        await manager.close()
