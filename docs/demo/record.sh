@@ -15,6 +15,18 @@ cd "$repo"
 if [[ -f .env ]]; then set -a; . ./.env; set +a; fi
 : "${OPENAI_API_KEY:?set OPENAI_API_KEY or add it to .env}"
 
+# The agents work on copies of the sample projects, never in this repository.
+# Remember its state so a stray write is caught when the recording ends.
+repo_state() { git -C "$repo" status --porcelain -- . ':!docs/demo/*.gif' ':!docs/demo/*.mp4'; }
+repo_before="$(repo_state)"
+check_repo() {
+  if [[ "$(repo_state)" != "$repo_before" ]]; then
+    echo "WARNING: files in the repository changed during the recording:" >&2
+    diff <(echo "$repo_before") <(repo_state) >&2 || true
+    exit 1
+  fi
+}
+
 # A short path, because the agent's tool calls show absolute paths on screen.
 demo_home="${DEMO_HOME:-/tmp/rho-agent-demo}"
 if [[ -e "$demo_home" ]]; then
@@ -54,6 +66,7 @@ case "${1:-}" in
   cli)
     vhs docs/demo/cli.tape
     to_gif cli trim
+    check_repo
     ;;
   monitor)
     # Start two unattended agents in the demo home. With no terminal attached
@@ -91,6 +104,7 @@ cover every route in routes.py (that reviewer should run the test suite). Then s
     vhs "$tape"
     to_gif monitor
     HOME="$demo_home" rho-agent cancel --all >/dev/null || true
+    check_repo
     ;;
   *)
     echo "usage: $0 cli|monitor" >&2
