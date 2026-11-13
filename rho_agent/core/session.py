@@ -120,6 +120,8 @@ class Session:
         self.max_cost_usd: float | None = getattr(config, "max_cost_usd", None)
         self.max_wall_seconds: float | None = getattr(config, "max_wall_seconds", None)
         self._warned_unpriced = False
+        # The system prompt and tool names last written to the trace.
+        self._recorded_setup: tuple[str, list[str]] | None = None
 
         self.max_call_seconds: float | None = getattr(config, "max_call_seconds", None)
 
@@ -342,6 +344,7 @@ class Session:
         self._state.status = "running"
         self.cancelled_externally = False
         self._state._emit({"type": "run_start", "prompt": prompt})
+        self._record_setup()
         # The process running the session can change on resume, so the owner
         # is recorded at the start of every run.
         self._update_meta(
@@ -408,6 +411,22 @@ class Session:
         if self.max_wall_seconds is None or self._wall_start is None:
             return None
         return self.max_wall_seconds - (time.monotonic() - self._wall_start)
+
+    def _record_setup(self) -> None:
+        """Write the system prompt and tool names to the trace when they change.
+
+        The prompt is the final text the model receives, including any
+        AGENTS.md instructions and skill list, so a trace shows exactly what
+        a run was given.
+        """
+        setup = (
+            self._agent.system_prompt,
+            [spec["function"]["name"] for spec in self._registry.get_specs()],
+        )
+        if setup == self._recorded_setup:
+            return
+        self._recorded_setup = setup
+        self._state._emit({"type": "system_prompt", "content": setup[0], "tools": setup[1]})
 
     def _warn_if_cost_cap_cannot_work(self) -> None:
         """Warn once when a cost cap is set but the client cannot price calls."""

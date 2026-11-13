@@ -104,5 +104,9 @@ trial still has them:
 
 ## Notes
 
+- Every task gets the same system prompt: the runner does not read an
+  `AGENTS.md`, `CLAUDE.md` or skills folder that a task ships with. The exact
+  prompt and tool list are recorded as a `system_prompt` event in `trace.jsonl`.
+
 - `qemu-*` tasks were not reliable under Docker on ARM Macs in earlier runs.
 - The `delegate` tool is disabled in this runner: a run measures one agent.

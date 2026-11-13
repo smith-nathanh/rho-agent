@@ -244,6 +244,10 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
             profile="unrestricted",
             working_dir=working_dir,
             auto_approve=True,
+            # Every task gets the same prompt: an AGENTS.md or skills folder
+            # shipped with a task would otherwise be appended to it.
+            project_instructions=False,
+            skills=False,
         )
     )
 
