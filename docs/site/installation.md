@@ -96,6 +96,17 @@ rho-agent reads only these three for the model connection. `OPENAI_API_KEY`, `OP
 | `RHO_AGENT_AUTO_COMPACT` | `1` | Set to `0` to turn automatic compaction off |
 | `RHO_AGENT_PROJECT_INSTRUCTIONS` | `1` | Set to `0` to stop reading `AGENTS.md` / `CLAUDE.md` |
 | `RHO_AGENT_SKILLS` | `1` | Set to `0` to stop listing `SKILL.md` skills |
+| `RHO_AGENT_PRICE_INPUT` | — | Price of input tokens, USD per million. Set with `RHO_AGENT_PRICE_OUTPUT` to price a model yourself |
+| `RHO_AGENT_PRICE_CACHED_INPUT` | input price | Price of cached input tokens, USD per million |
+| `RHO_AGENT_PRICE_OUTPUT` | — | Price of output tokens, USD per million |
+
+### Cost
+
+Providers report tokens, not dollars, so rho-agent computes each call's cost from its token counts. With the `evals` extra installed, prices come from LiteLLM's price list, which covers cached input, long-context price tiers and the flex and priority service tiers; the list bundled with the installed LiteLLM is used and nothing is fetched. The `RHO_AGENT_PRICE_*` variables override it with flat prices. With neither, cost is reported as `0`, and a session with a cost cap warns that the cap cannot trigger.
+
+```bash
+uv tool install 'rho-agent[evals] @ git+https://github.com/smith-nathanh/rho-agent'
+```
 
 ### Database connections
 

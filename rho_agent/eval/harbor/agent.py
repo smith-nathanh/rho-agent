@@ -19,16 +19,15 @@ from importlib import metadata
 from pathlib import PurePosixPath
 from typing import Literal, override
 
-from harbor.agents.agent_auth_resolution import ModelConnectionSpec, ProviderAccess
+from harbor.agents.agent_auth_resolution import (
+    ModelConnectionSpec,
+    ProviderAccess,
+    require_model_api_key,
+)
 from harbor.agents.capabilities import AgentCapabilities
 from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_template
 from harbor.agents.options import InstalledAgentOptions
 from harbor.environments.base import BaseEnvironment
-from harbor.llms.litellm_config import (
-    LITELLM_BASE_URL_OVERRIDES,
-    litellm_model_name,
-    require_litellm_credentials,
-)
 from harbor.models.agent.context import AgentContext
 from harbor.models.model_api_format import ModelApiFormat
 from pydantic import Field
@@ -121,6 +120,15 @@ class RhoAgentOptions(InstalledAgentOptions):
     )
 
 
+_ANTHROPIC_OPENAI_URL = "https://api.anthropic.com/v1"
+
+
+def _require_key(connection, agent_name: str) -> None:
+    """A provider's public endpoint needs a key; a server you name may not."""
+    if not connection.user_supplied_base_url:
+        require_model_api_key(connection, agent_name)
+
+
 class RhoAgent(BaseInstalledAgent):
     """Runs rho-agent inside Harbor's task environment."""
 
@@ -129,28 +137,36 @@ class RhoAgent(BaseInstalledAgent):
 
     capabilities = AgentCapabilities(base_url=True, reasoning_effort=True, atif=True)
 
-    # The runner calls models through LiteLLM, so credentials and endpoints are
-    # resolved the way Harbor resolves them for its other LiteLLM-based agents.
+    # The runner uses rho-agent's own ModelClient: the Responses API, falling
+    # back to Chat Completions on servers without it. Harbor hands the
+    # provider's key and endpoint to the container as RHO_AGENT_API_KEY and
+    # RHO_AGENT_BASE_URL, the variables ModelClient reads.
     MODEL_CONNECTION = ModelConnectionSpec(
-        base_url_overrides=LITELLM_BASE_URL_OVERRIDES,
+        default_provider="openai",
         supported_api_formats=[
+            ModelApiFormat.OPENAI_RESPONSES,
             ModelApiFormat.OPENAI_CHAT_COMPLETIONS,
-            ModelApiFormat.ANTHROPIC_MESSAGES,
         ],
+        default_api_format_by_provider={"default": ModelApiFormat.OPENAI_RESPONSES},
         agent_provider_access=ProviderAccess(
             api_key_candidate_names=["RHO_AGENT_API_KEY"],
-            base_url_candidate_names=["RHO_AGENT_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE"],
+            base_url_candidate_names=["RHO_AGENT_BASE_URL"],
         ),
-        base_url_destination_names={
-            "default": "OPENAI_BASE_URL",
-            ModelApiFormat.ANTHROPIC_MESSAGES: "ANTHROPIC_API_BASE",
+        api_key_destination_names={"default": "RHO_AGENT_API_KEY"},
+        base_url_destination_names={"default": "RHO_AGENT_BASE_URL"},
+        # Anthropic's OpenAI-compatible endpoint. It has no Responses API, so
+        # ModelClient falls back to Chat Completions there.
+        base_url_overrides={
+            ("anthropic", ModelApiFormat.OPENAI_RESPONSES): _ANTHROPIC_OPENAI_URL,
+            ("anthropic", ModelApiFormat.OPENAI_CHAT_COMPLETIONS): _ANTHROPIC_OPENAI_URL,
         },
+        inject_default_base_url=True,
     )
 
     @classmethod
     @override
     def check_model_credentials(cls, connection, *, kwargs, env, explicit_env=None):
-        require_litellm_credentials(connection, cls.name())
+        _require_key(connection, cls.name())
 
     @staticmethod
     @override
@@ -214,15 +230,11 @@ class RhoAgent(BaseInstalledAgent):
             raise ValueError("A model is required, in the form provider/model_name")
 
         access = self.model_connection
-        require_litellm_credentials(access, self.name())
+        _require_key(access, self.name())
         opts = self.options
         env: dict[str, str] = {
             **access.env,
-            "RHO_AGENT_MODEL": litellm_model_name(
-                self.model_name,
-                model_api_format=self._model_api_format,
-                skip_model_parsing=self.skip_model_parsing,
-            ),
+            "RHO_AGENT_MODEL": self._model_id(),
             "RHO_AGENT_LOGS_DIR": str(self.environment_logs_dir),
             "RHO_AGENT_CONFIRM_DONE": "1" if opts.enable_confirm_done else "0",
             "RHO_AGENT_CONFIRM_DONE_MAX": str(opts.confirm_done_max),
@@ -248,6 +260,12 @@ class RhoAgent(BaseInstalledAgent):
         if opts.compact_at_tokens is not None:
             env["RHO_AGENT_COMPACT_AT_TOKENS"] = str(opts.compact_at_tokens)
         return env
+
+    def _model_id(self) -> str:
+        """The model name the provider's API expects, without Harbor's provider prefix."""
+        if self.skip_model_parsing:
+            return self.model_name
+        return self._parsed_model_name or self.model_name
 
     def _run_command(self, instruction: str) -> str:
         logs = PurePosixPath(self.environment_logs_dir)

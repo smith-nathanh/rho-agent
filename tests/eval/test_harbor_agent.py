@@ -40,7 +40,15 @@ class _FakeEnvironment:
 @pytest.fixture(autouse=True)
 def _api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
-    for name in ("RHO_AGENT_API_KEY", "RHO_AGENT_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE"):
+    for name in (
+        "RHO_AGENT_API_KEY",
+        "RHO_AGENT_BASE_URL",
+        "OPENAI_BASE_URL",
+        "OPENAI_API_BASE",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_API_BASE",
+    ):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -109,8 +117,11 @@ async def test_run_passes_instruction_settings_and_credentials(tmp_path: Path) -
     assert "'fix the '\"'\"'thing'\"'\"''" in command  # shell-quoted instruction
     assert command.rstrip().endswith("tee /logs/agent/stdout.txt")
     assert " --bash-only " in command
-    assert run_env["RHO_AGENT_MODEL"] == "openai/gpt-6.1-sol"
-    assert run_env["OPENAI_API_KEY"] == "sk-test-not-real"
+    # ModelClient takes the bare model name and reads only RHO_AGENT_* variables.
+    assert run_env["RHO_AGENT_MODEL"] == "gpt-6.1-sol"
+    assert run_env["RHO_AGENT_API_KEY"] == "sk-test-not-real"
+    assert run_env["RHO_AGENT_BASE_URL"] == "https://api.openai.com/v1"
+    assert "OPENAI_API_KEY" not in run_env
     assert run_env["RHO_AGENT_LOGS_DIR"] == "/logs/agent"
     assert run_env["RHO_AGENT_COST_CEILING_USD"] == "4.0"
     assert run_env["RHO_AGENT_MAX_WALL_SECONDS"] == "600.0"
@@ -175,8 +186,24 @@ def test_non_openai_models_get_their_own_credentials(
 ) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
     env = _agent(tmp_path, model_name="anthropic/claude-opus-5-5")._runner_env()
-    assert env["ANTHROPIC_API_KEY"] == "sk-ant-test-not-real"
-    assert env["RHO_AGENT_MODEL"] == "anthropic/claude-opus-5-5"
+    assert env["RHO_AGENT_API_KEY"] == "sk-ant-test-not-real"
+    # Anthropic's OpenAI-compatible endpoint, which ModelClient can call.
+    assert env["RHO_AGENT_BASE_URL"] == "https://api.anthropic.com/v1"
+    assert env["RHO_AGENT_MODEL"] == "claude-opus-5-5"
+
+
+def test_a_server_you_name_needs_no_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:8000/v1")
+    env = _agent(tmp_path, model_name="openai/my-model")._runner_env()
+    assert env["RHO_AGENT_BASE_URL"] == "http://localhost:8000/v1"
+    assert "RHO_AGENT_API_KEY" not in env
+
+
+def test_openai_without_a_key_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY")
+    with pytest.raises(Exception, match="API key"):
+        _agent(tmp_path)._runner_env()
 
 
 def test_missing_model_is_rejected(tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from openai import APIStatusError
 
+from rho_agent.client import pricing
 from rho_agent.client.model import (
     Message,
     MissingApiKeyError,
@@ -43,8 +44,18 @@ TOOLS = [
 
 @pytest.fixture(autouse=True)
 def _openai_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("RHO_AGENT_BASE_URL", "RHO_AGENT_API_KEY", "RHO_AGENT_MODEL", "RHO_AGENT_API"):
+    for name in (
+        "RHO_AGENT_BASE_URL",
+        "RHO_AGENT_API_KEY",
+        "RHO_AGENT_MODEL",
+        "RHO_AGENT_API",
+        "RHO_AGENT_PRICE_INPUT",
+        "RHO_AGENT_PRICE_CACHED_INPUT",
+        "RHO_AGENT_PRICE_OUTPUT",
+    ):
         monkeypatch.delenv(name, raising=False)
+    # No price list, so usage is exactly what the fake server reported.
+    monkeypatch.setattr(pricing, "_load_litellm", lambda: None)
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +354,7 @@ async def test_stream_assembles_text_tool_calls_and_usage() -> None:
         "output_tokens": 60,
         "cached_tokens": 80,
         "reasoning_tokens": 35,
+        "cost_usd": 0.0,  # no price known in these tests
     }
     assert done.response_items == [
         {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "ENC1"},

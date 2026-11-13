@@ -93,8 +93,8 @@ class AgentConfig:
         default_factory=lambda: _env_bool("RHO_AGENT_PROJECT_INSTRUCTIONS", True)
     )
     skills: bool = field(default_factory=lambda: _env_bool("RHO_AGENT_SKILLS", True))
-    # Hard caps for one session. None means no cap. The cost cap only works
-    # with a client that reports cost (LiteLLMClient).
+    # Hard caps for one session. None means no cap. The cost cap needs a price
+    # for the model (see rho_agent.client.pricing).
     max_cost_usd: float | None = None
     max_wall_seconds: float | None = None
     # Longest a single model call may take before it is abandoned and retried.

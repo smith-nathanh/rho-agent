@@ -21,6 +21,8 @@ from urllib.parse import urlparse
 
 from openai import APIStatusError, AsyncOpenAI
 
+from .pricing import Prices, call_cost, can_price, prices_from_env
+
 # The only environment variables rho-agent reads for the model connection.
 # OPENAI_API_KEY and OPENAI_BASE_URL are deliberately ignored, so a key set
 # for another tool is never sent anywhere by accident.
@@ -116,7 +118,8 @@ class StreamEvent:
         - input_tokens: int
         - output_tokens: int
         - cached_tokens: int (optional, provider-dependent)
-        - cost_usd: float (optional, from LiteLLMClient)
+        - reasoning_tokens: int (optional, already counted in output_tokens)
+        - cost_usd: float (0.0 when no price is known; see ``pricing``)
     """
 
     type: str  # "text", "tool_call", "done", "error"
@@ -451,6 +454,7 @@ class ModelClient:
         response_format: dict[str, Any] | None = None,
         api: str | None = None,
         streaming: bool = True,
+        prices: Prices | None = None,
     ) -> None:
         self._temperature = temperature
         self._reasoning_effort = reasoning_effort
@@ -476,6 +480,8 @@ class ModelClient:
         self._model = model
         self._service_tier = service_tier
         self._streaming = streaming
+        # Explicit prices win; otherwise the environment, then LiteLLM's list.
+        self._prices = prices if prices is not None else prices_from_env()
 
         self._send_include = True
         requested = _requested_api(api)
@@ -489,6 +495,19 @@ class ModelClient:
     def api(self) -> str:
         """The endpoint in use: ``"responses"`` or ``"chat"``."""
         return "chat" if self._chat is not None else "responses"
+
+    def can_price(self) -> bool:
+        """Whether calls to this model can be priced, so a cost cap can work."""
+        return can_price(self._model, self._prices)
+
+    def _priced(self, usage: dict[str, Any]) -> dict[str, Any]:
+        """``usage`` with ``cost_usd`` filled in from the token counts."""
+        if usage.get("cost_usd"):
+            return usage  # the server reported a cost itself
+        if not (usage.get("input_tokens") or usage.get("output_tokens")):
+            return {**usage, "cost_usd": 0.0}
+        cost = call_cost(self._model, usage, service_tier=self._service_tier, prices=self._prices)
+        return {**usage, "cost_usd": cost or 0.0}
 
     def _use_chat(self) -> None:
         """Send this and every later call to Chat Completions."""
@@ -577,7 +596,13 @@ class ModelClient:
         )
 
     async def stream(self, prompt: Prompt) -> AsyncIterator[StreamEvent]:
-        """Stream a response from the model."""
+        """Stream a response from the model. The ``done`` event carries the cost."""
+        async for event in self._stream_events(prompt):
+            if event.type == "done" and event.usage is not None:
+                event.usage = self._priced(event.usage)
+            yield event
+
+    async def _stream_events(self, prompt: Prompt) -> AsyncIterator[StreamEvent]:
         if self._chat is not None:
             async for event in self._chat.stream(prompt):
                 yield event
@@ -716,6 +741,10 @@ class ModelClient:
 
         A failure is returned as the content, not raised.
         """
+        text, usage = await self._complete(messages)
+        return text, self._priced(usage)
+
+    async def _complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         if self._chat is not None:
             return await self._chat.complete(messages)
         history = [
@@ -749,6 +778,10 @@ class ModelClient:
             ModelCallError: if the call fails. The error text is never returned
                 as content, because callers use the content as a summary.
         """
+        text, usage = await self._complete_prompt(prompt)
+        return text, self._priced(usage)
+
+    async def _complete_prompt(self, prompt: Prompt) -> tuple[str, dict[str, Any]]:
         if self._chat is not None:
             return await self._chat.complete_prompt(prompt)
         try:
