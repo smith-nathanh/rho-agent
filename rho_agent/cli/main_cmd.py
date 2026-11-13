@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 import yaml
-from click.core import ParameterSource
 
 if TYPE_CHECKING:
     from ..tools.handlers.daytona.backend import DaytonaBackend
@@ -553,7 +552,10 @@ def main(
             base_config = AgentConfig.from_file(config_file)
 
         def given(name: str) -> bool:
-            return ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE
+            # Compared by name: the enum lives in click, or inside typer in
+            # releases that bundle their own copy of click.
+            source = ctx.get_parameter_source(name)
+            return getattr(source, "name", None) == "COMMANDLINE"
 
         overrides: dict[str, Any] = {}
         if given("model"):

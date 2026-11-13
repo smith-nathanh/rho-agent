@@ -236,8 +236,40 @@ class AgentConfig:
         prompt_path = user_default if user_default.exists() else builtin
 
         loaded = load_prompt(prompt_path)
-        system_prompt, _ = prepare_prompt(loaded, dict(self.vars))
+        system_prompt, _ = prepare_prompt(loaded, {**self._default_prompt_vars(), **self.vars})
         return system_prompt
+
+    def _default_prompt_vars(self) -> dict[str, str]:
+        """What the default prompt says about the machine, directory and profile.
+
+        Filled in here so a config with no ``system_prompt`` works from Python
+        as it does from the CLI. Entries in ``vars`` take precedence.
+        """
+        import platform
+
+        remote = self.backend != "local"
+        values = {
+            "platform": "Linux" if remote else platform.system(),
+            "home_dir": "/home/daytona" if remote else str(Path.home()),
+            "working_dir": self.working_dir or ("/home/daytona" if remote else os.getcwd()),
+        }
+        if isinstance(self.profile, str):
+            from ..permissions.factory import load_profile
+
+            try:
+                profile = load_profile(self.profile)
+            except (FileNotFoundError, ValueError):
+                return values  # the Agent reports a bad profile itself
+        else:
+            profile = self.profile
+        if profile is not None:
+            values.update(
+                profile_name=profile.name,
+                shell_mode=profile.shell.value,
+                file_write_mode=profile.file_write.value,
+                database_mode=profile.database.value,
+            )
+        return values
 
     def _resolve_prompt_file(self, path: str) -> str:
         """Load a .md prompt file and render with vars."""

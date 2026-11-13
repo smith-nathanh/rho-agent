@@ -261,6 +261,15 @@ def test_children_are_listed_under_their_parent(tmp_path: Path) -> None:
     assert child.cwd == str(tmp_path)
 
 
+def test_store_defaults_to_the_cli_sessions_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    assert SessionStore().base_dir == tmp_path / ".config" / "rho-agent" / "sessions"
+    assert SessionStore("~/elsewhere").base_dir == tmp_path / "elsewhere"
+
+
 def test_list_orders_by_last_activity(tmp_path: Path) -> None:
     store, older = _session(tmp_path)
     _, newer = _session(tmp_path)

@@ -1,28 +1,91 @@
 # rho-agent
 
-rho-agent is an agent harness for the terminal. You can work with an agent one-on-one in a CLI, start several on different projects and supervise them from one place, or build agents into your own programs with the Python API. Every agent runs under a permission profile that sets what it is allowed to touch.
+rho-agent runs AI agents that read code, run commands and edit files, each under a permission profile that sets what it is allowed to touch. You can use it two ways:
+
+- **From the terminal.** Work with an agent in a conversation, hand it a task to finish on its own, or start several and supervise them from one place.
+- **From Python.** Import `rho_agent` and build agents into your own programs. The CLI is a thin layer over the same three classes.
 
 ![An interactive session: the agent finds a bug behind two failing tests, fixes it and reruns the tests](docs/demo/cli.gif)
 
 ## Install
 
+You need Python 3.11 or newer, [uv](https://docs.astral.sh/uv/), and an OpenAI API key (or any OpenAI-compatible endpoint). rho-agent is not on PyPI yet, so install it from GitHub.
+
+For the command-line tool:
+
 ```bash
-uv tool install rho-agent
+uv tool install git+https://github.com/smith-nathanh/rho-agent
 ```
 
-This puts `rho-agent` and `rho-eval` on your `PATH`. The agent needs a model key:
+This puts `rho-agent` and `rho-eval` on your `PATH`.
+
+To use it as a library, add it to your project instead:
+
+```bash
+uv add git+https://github.com/smith-nathanh/rho-agent
+```
+
+Then give it a model key:
 
 ```bash
 export OPENAI_API_KEY=your-key
-export OPENAI_MODEL=gpt-6.1-terra                    # optional, this is the default
+export OPENAI_MODEL=gpt-6.1-terra                 # optional, this is the default
 export OPENAI_BASE_URL=http://localhost:8000/v1   # optional, for any OpenAI-compatible endpoint
 ```
 
 A `.env` file in the directory you run from works too. See [Installation](docs/site/installation.md) for extras (database drivers, Daytona, evals) and the other install options.
 
-## Work with an agent
+OpenAI models are called through the Responses API, so they reason between tool calls; `--reasoning-effort` (or `AgentConfig.reasoning_effort`) sets how much. With `OPENAI_BASE_URL` pointing at another server, rho-agent uses Chat Completions, which is what most of them implement. The [FAQ](docs/site/faq.md) has the details.
 
-Run `rho-agent` in a project to start a conversation. The default profile is `readonly`, which can look but not change anything; `developer` can edit files and run commands.
+## Quick start
+
+In the terminal, go to a project and start a conversation:
+
+```bash
+cd ~/proj/myapp
+rho-agent
+```
+
+```
+> where is the retry logic for failed webhooks, and what does it do on the third failure?
+```
+
+In Python, the same thing is a few lines. Save this as `ask.py` in a project and run it with `uv run python ask.py`:
+
+```python
+import asyncio
+
+from rho_agent import Agent, AgentConfig, Session
+
+
+async def main() -> None:
+    config = AgentConfig(
+        system_prompt="You answer questions about the code in the current directory.",
+        profile="readonly",
+    )
+    async with Session(Agent(config)) as session:
+        result = await session.run("At what quantity does the bulk discount start? One sentence.")
+        print(result.text)
+        print(result.status)
+
+
+asyncio.run(main())
+```
+
+Run in a copy of this repository's [`docs/demo/projects/orders`](docs/demo/projects/orders), it prints:
+
+```
+The bulk discount starts at 11 units in the implementation, though the documentation says 10.
+completed
+```
+
+Both of these use the `readonly` profile, the default, which can look but not change anything. The rest of this page covers the terminal first, then [Python](#in-python).
+
+## In the terminal
+
+### Work with an agent
+
+Run `rho-agent` in a project to start a conversation. To let the agent edit files and run commands, start it with the `developer` profile.
 
 ```bash
 cd ~/proj/myapp
@@ -34,7 +97,9 @@ rho-agent --profile developer
 > now run the whole suite
 ```
 
-Ctrl+C stops the current turn without ending the session. Sessions are saved as you go, so you can leave and come back:
+When the profile requires approval for a call, the agent asks at the prompt and waits for your answer. Ctrl+C stops the current turn without ending the session, `/help` lists the commands available inside it, and the status bar shows how many tokens the session has used.
+
+Sessions are saved as you go, so you can leave and come back:
 
 ```bash
 rho-agent --list          # saved sessions
@@ -43,7 +108,7 @@ rho-agent -r latest       # pick up the most recent one
 
 The agent reads `AGENTS.md` (or `CLAUDE.md`) from the project for instructions, and can hand parts of a job to subagents that run in parallel.
 
-## Hand off a task
+### Hand off a task
 
 Give a prompt on the command line and the agent runs it to completion and exits.
 
@@ -60,7 +125,7 @@ rho-agent --prompt examples/log_debugger/debug.md --var log_path=/mnt/logs/12345
 
 [Prompt files](docs/site/prompt-files.md) are Markdown with a little frontmatter, for tasks you run repeatedly with different inputs.
 
-## Run several and supervise them
+### Run several and supervise them
 
 Agents started in the background keep working on their own. `rho-agent monitor` shows all of them, grouped by project, with subagents listed under the agent that started them.
 
@@ -80,43 +145,69 @@ An agent with no terminal attached cannot ask you to approve a command, so it qu
 rho-agent --profile careful.yaml "split payments don't add up to the invoice total. fix it" &
 ```
 
+[`careful.yaml`](docs/demo/careful.yaml) is a short YAML file; see [Permission profiles](#permission-profiles) for writing your own.
+
 There is no daemon and no server behind this. Each session is a directory of plain files under `~/.config/rho-agent/sessions`, and the monitor reads and writes those files. See [Monitor](docs/site/monitor.md).
 
-## Python API
+## In Python
 
-The CLI is a thin layer over three objects: an `Agent` (configuration and tools), a `Session` (one conversation), and its `State` (the full record of what happened).
+There are three objects. An `Agent` is configuration and tools, and can be reused. A `Session` is one conversation with it. The session's `State` is the full record of what happened: messages, token usage and status.
+
+This program lets an agent change files, prints each tool call as it happens, then asks a follow-up in the same conversation:
 
 ```python
 import asyncio
 
-from rho_agent import Agent, AgentConfig, Session
+from rho_agent import Agent, AgentConfig, AgentEvent, SessionStore
+
+
+def show(event: AgentEvent) -> None:
+    if event.type == "tool_start":
+        print(f"  {event.tool_name}")
 
 
 async def main() -> None:
-    config = AgentConfig(
-        system_prompt="You answer questions about the code in the working directory.",
-        profile="readonly",
-        working_dir="docs/demo/projects/orders",
-    )
-    async with Session(Agent(config)) as session:
-        result = await session.run("At what quantity does the bulk discount start? Answer in one sentence.")
-        print(result.text)
-        print(result.status)
+    agent = Agent(AgentConfig(profile="developer"))
+    session = SessionStore().create_session(agent)  # saved, so the monitor sees it
+
+    fixed = await session.run("The pricing tests fail. Fix the bug.", on_event=show)
+    print(fixed.text)
+
+    checked = await session.run("Run the tests and report the result in one line.")
+    print(checked.text)
+    print(session.state.usage)
 
 
 asyncio.run(main())
 ```
 
 ```
-The bulk discount starts at **11 units** in the current code, although the documentation and test expect it to start at 10.
-completed
+  bash
+  bash
+  read
+  read
+  bash
+  edit
+  bash
+Fixed the bulk discount to apply at the threshold in `pricing.py:12`.
+
+All 4 pricing tests pass.
+4 tests passed.
+{'input_tokens': 27114, 'output_tokens': 799, 'cached_tokens': 22489, 'reasoning_tokens': 9, 'cost_usd': 0.0}
 ```
 
-`session.run()` can be called repeatedly on the same session, takes an `on_event` callback for streaming, and returns token usage alongside the text. The [Python SDK](docs/site/python-sdk.md) guide covers events, cancellation, and saving sessions with `SessionStore` so the monitor can see them. There are complete programs in [`examples/`](examples/).
+A few things to know:
+
+- **The agent works in the directory your program runs from.** With the `developer` profile it can change anything there, so try it on a copy of a project first.
+- **No one is asked for approval by default.** A session created in Python runs every tool call its profile allows. Set `session.approval_callback` to be asked first about the calls the profile marks as needing approval.
+- **`Session(agent)` keeps nothing on disk.** `SessionStore().create_session(agent)` saves the session under `~/.config/rho-agent/sessions`, where `rho-agent monitor`, `rho-agent --list` and `rho-agent -r` find it.
+- **Leave out `system_prompt`** to get the same built-in prompt the CLI uses, or pass your own text or a prompt file.
+
+The [Python SDK](docs/site/python-sdk.md) guide covers every `AgentConfig` field, the event types, cancellation and custom tools. There are complete programs in [`examples/`](examples/): a single agent, several agents working in parallel, and a Streamlit app that streams an agent's work into a chat window.
 
 ## Permission profiles
 
-A profile decides what an agent can do before it starts. Pass a built-in name or a path to your own YAML file.
+A profile decides what an agent can do before it starts. Pass a built-in name or a path to your own YAML file, as `--profile` on the command line or `AgentConfig(profile=...)` in Python.
 
 | Profile | Shell | File writes | Database | Asks for approval |
 |---|---|---|---|---|
@@ -158,6 +249,9 @@ Every session writes a `trace.jsonl` of each model call, tool call and result. Y
 | [Observability](docs/site/observability.md) | Session traces, offline inspection, and observers |
 | [Export](rho_agent/export/README.md) | Convert traces to ATIF for training data |
 | [Monitor](docs/site/monitor.md) | Watch, control, and steer running agents |
+| [Prompt files](docs/site/prompt-files.md) | Reusable prompts with variables |
+| [Continuum](docs/site/continuum.md) | Build a project from a requirements document across many sessions |
+| [FAQ](docs/site/faq.md) | Models, reasoning, endpoints and common problems |
 
 ## Development
 
@@ -169,3 +263,7 @@ uv run pytest
 ```
 
 The recordings in this README are made by [`docs/demo/record.sh`](docs/demo/record.sh) against a real model, using the small projects in `docs/demo/projects`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -83,8 +83,12 @@ class SessionStore:
     ``session_meta`` for its fields and how a dead process is detected.
     """
 
-    def __init__(self, base_dir: str | Path) -> None:
-        self._base_dir = Path(base_dir)
+    def __init__(self, base_dir: str | Path | None = None) -> None:
+        """Open the store at ``base_dir``, by default the CLI's own
+        ``~/.config/rho-agent/sessions``, so `rho-agent monitor` sees the sessions."""
+        if base_dir is None:
+            base_dir = Path.home() / ".config" / "rho-agent" / "sessions"
+        self._base_dir = Path(base_dir).expanduser()
         self._base_dir.mkdir(parents=True, exist_ok=True)
 
     @property
