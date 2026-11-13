@@ -168,7 +168,7 @@ The conversation trajectory — messages, token usage, cost, and status. State a
 state = session.state
 
 # Check cost and token usage after a run
-state.usage["cost_usd"]              # Cumulative cost across all runs
+state.usage["cost_usd"]              # Cumulative cost across all runs (see below)
 state.usage["input_tokens"]          # Total input tokens
 state.usage["output_tokens"]         # Total output tokens
 
@@ -177,6 +177,17 @@ state.status                          # "running", "completed", "error", "cancel
 state.run_count                       # Number of run() calls completed
 state.messages                        # Full message list (OpenAI chat format; see below)
 state.get_user_messages()             # Extract just the user prompts
+```
+
+`cost_usd` is computed from token counts and a price for the model: LiteLLM's price list when the `evals` extra is installed, or flat prices you give. Without either it stays `0`, and `max_cost_usd` cannot stop a session (it warns when the session starts):
+
+```python
+from rho_agent.client.model import ModelClient
+from rho_agent.client.pricing import Prices
+
+# USD per million tokens
+client = ModelClient(model="my-model", prices=Prices(input=2.0, cached_input=0.2, output=8.0))
+session = Session(agent, client=client)
 ```
 
 Assistant messages from a reasoning model carry one extra key, `response_items`: the model's output items in order, with its reasoning in encrypted form. The client sends them back on later requests so the model keeps its reasoning across tool calls and after a resume. Treat the key as opaque and keep it when you copy messages around; dropping it is harmless but loses that reasoning.

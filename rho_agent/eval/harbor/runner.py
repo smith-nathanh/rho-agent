@@ -13,7 +13,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from rho_agent.client.litellm_client import LiteLLMClient
+from rho_agent.client.model import ModelClient, default_model
 from rho_agent.core import Agent, AgentConfig, Session
 from rho_agent.core.events import AgentEvent, CompletionGate
 from rho_agent.core.state import State
@@ -99,7 +99,7 @@ async def run_reviewer_phase(
     instruction: str,
     event_trace: list[AgentEvent],
     session: Session,
-    client: LiteLLMClient,
+    client: ModelClient,
     max_iterations: int,
 ) -> None:
     """Run post-execution review with optional revision loop.
@@ -201,35 +201,40 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
         },
     )
 
-    # Create client from environment
-    # LiteLLM uses model names like "openai/gpt-6.1-terra" or "anthropic/claude-3-5-sonnet"
-    model = os.environ.get("RHO_AGENT_MODEL") or os.environ.get(
-        "OPENAI_MODEL", "openai/gpt-6.1-terra"
-    )
-    # Normally unset: LiteLLM then reads the provider's own variable
-    # (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...), which works for any provider.
-    api_key = os.environ.get("RHO_AGENT_API_KEY")
+    # The same client the CLI and Python API use. Harbor passes the model as
+    # RHO_AGENT_MODEL and the provider's key and endpoint as RHO_AGENT_API_KEY
+    # and RHO_AGENT_BASE_URL, which ModelClient reads itself.
+    model = default_model()
     temperature = (
         float(os.environ["RHO_AGENT_TEMPERATURE"])
         if "RHO_AGENT_TEMPERATURE" in os.environ
         else None
     )
     reasoning_effort = os.environ.get("RHO_AGENT_REASONING_EFFORT")
-    chunk_timeout = float(os.environ.get("RHO_AGENT_CHUNK_TIMEOUT", "180.0"))
-    initial_timeout = float(os.environ.get("RHO_AGENT_INITIAL_TIMEOUT", "600.0"))
+    # Longest wait for the next bytes of a response. Reasoning models can think
+    # for minutes before streaming anything; max_call_seconds bounds the call.
+    request_timeout = float(os.environ.get("RHO_AGENT_REQUEST_TIMEOUT", "600.0"))
     cost_ceiling_usd = float(os.environ.get("RHO_AGENT_COST_CEILING_USD", "0.0"))
     max_wall_seconds = float(os.environ.get("RHO_AGENT_MAX_WALL_SECONDS", "0.0"))
     max_call_seconds = float(os.environ.get("RHO_AGENT_MAX_CALL_SECONDS", "1200.0"))
     logs_dir = Path(os.environ.get("RHO_AGENT_LOGS_DIR", "/logs/agent"))
 
-    client = LiteLLMClient(
+    client = ModelClient(
         model=model,
-        api_key=api_key,
+        timeout=request_timeout,
         temperature=temperature,
         reasoning_effort=reasoning_effort,
-        chunk_timeout=chunk_timeout,
-        initial_timeout=initial_timeout,
     )
+    # An unpriced model would make the cost cap a no-op on a task that may
+    # run for hours, so stop before spending anything.
+    if cost_ceiling_usd > 0 and not client.can_price():
+        print(
+            f"[rho-agent] No price is known for {model!r}, so the cost ceiling cannot "
+            "be enforced. Set RHO_AGENT_PRICE_INPUT and RHO_AGENT_PRICE_OUTPUT "
+            "(USD per million tokens) or remove cost_ceiling_usd.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     # Build agent with unrestricted profile
     agent = Agent(
@@ -260,7 +265,6 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     tool_names = [h.name for h in agent.registry._handlers.values()]
     print(f"[rho-agent] Tools: {tool_names}", file=sys.stderr)
 
-    # Create session with LiteLLM client (multi-provider support in containers)
     # The trace is appended event by event, so a killed trial still has one.
     try:
         logs_dir.mkdir(parents=True, exist_ok=True)

@@ -907,24 +907,6 @@ async def test_summary_request_keeps_tools_but_forbids_calling_them() -> None:
     assert "## Tried and ruled out" in prompt.messages[-1].content
 
 
-def test_litellm_client_sends_tool_choice() -> None:
-    pytest.importorskip("litellm")  # optional dependency (the evals extra)
-    from rho_agent.client.litellm_client import LiteLLMClient
-    from rho_agent.client.model import Message, Prompt
-
-    client = LiteLLMClient(model="openai/test")
-    tools = [{"type": "function", "function": {"name": "t", "parameters": {}}}]
-    messages = [Message(role="user", content="hi")]
-
-    plain = client._build_kwargs(prompt=Prompt(system="s", messages=messages, tools=tools))
-    forced = client._build_kwargs(
-        prompt=Prompt(system="s", messages=messages, tools=tools, tool_choice="none")
-    )
-
-    assert "tool_choice" not in plain
-    assert forced["tool_choice"] == "none" and forced["tools"] == tools
-
-
 async def test_every_user_message_survives_compaction_verbatim() -> None:
     client = _ScriptedClient()
     session = await _session_with_history(

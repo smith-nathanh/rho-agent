@@ -10,6 +10,7 @@ import fcntl
 import json
 import time
 import uuid
+import warnings
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from types import TracebackType
@@ -116,6 +117,7 @@ class Session:
         # Hard caps for the whole session (all run() calls). None = no cap.
         self.max_cost_usd: float | None = getattr(config, "max_cost_usd", None)
         self.max_wall_seconds: float | None = getattr(config, "max_wall_seconds", None)
+        self._warned_unpriced = False
 
         self.max_call_seconds: float | None = getattr(config, "max_call_seconds", None)
 
@@ -325,6 +327,7 @@ class Session:
 
         if self._wall_start is None:
             self._wall_start = time.monotonic()
+        self._warn_if_cost_cap_cannot_work()
         # A previous run that was killed or interrupted may have left tool calls
         # without results; the API rejects such a history.
         self._state.close_pending_tool_calls(INTERRUPTED_TOOL_RESULT)
@@ -399,6 +402,21 @@ class Session:
         if self.max_wall_seconds is None or self._wall_start is None:
             return None
         return self.max_wall_seconds - (time.monotonic() - self._wall_start)
+
+    def _warn_if_cost_cap_cannot_work(self) -> None:
+        """Warn once when a cost cap is set but the client cannot price calls."""
+        if self.max_cost_usd is None or self._warned_unpriced:
+            return
+        can_price = getattr(self._client, "can_price", None)
+        if callable(can_price) and not can_price():
+            self._warned_unpriced = True
+            warnings.warn(
+                f"No price is known for model {self._agent.config.model!r}, so the "
+                f"${self.max_cost_usd:.2f} cost cap will never trigger. Install LiteLLM "
+                "(the evals extra) or set RHO_AGENT_PRICE_INPUT and RHO_AGENT_PRICE_OUTPUT.",
+                RuntimeWarning,
+                stacklevel=3,
+            )
 
     def _budget_exceeded(self) -> str | None:
         """Return a reason if a hard cap has been reached, else None."""

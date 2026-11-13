@@ -60,8 +60,8 @@ db = ["rho-agent[db-postgres,db-mysql,db-oracle,db-vertica]"]
 # Excel file support
 excel = ["openpyxl>=3.1.0"]
 
-# Eval dependencies (LiteLLM for multi-provider support and cost tracking)
-evals = ["litellm>=1.50.0"]
+# Eval dependencies (LiteLLM's price list, for cost)
+evals = ["litellm>=1.109.0"]
 
 # Harbor (Terminal-Bench harness). Harbor requires Python >=3.12.
 harbor = ["rho-agent[evals]", "harbor>=0.25.0; python_version >= '3.12'"]
