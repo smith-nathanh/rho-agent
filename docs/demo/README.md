@@ -7,7 +7,7 @@ docs/demo/record.sh cli       # docs/demo/cli.gif
 docs/demo/record.sh monitor   # docs/demo/monitor.gif
 ```
 
-You need `vhs`, `ffmpeg`, the project virtualenv (`uv sync --group dev`) and `OPENAI_API_KEY` in the environment or in `.env`. Each run makes a handful of model calls.
+You need `vhs`, `ffmpeg`, the project virtualenv (`uv sync --group dev`) and `RHO_AGENT_API_KEY` in the environment or in `.env`. Each run makes a handful of model calls.
 
 ## What the script does
 

@@ -1,8 +1,9 @@
-"""Chat Completions client for OpenAI-compatible servers other than OpenAI.
+"""Chat Completions client for OpenAI-compatible servers without a Responses API.
 
-``ModelClient`` talks to OpenAI through the Responses API. Most third-party
-servers (vLLM, Ollama, Cerebras, ...) only implement ``/v1/chat/completions``,
-so ``ModelClient`` hands its calls to this class when a custom base URL is set.
+``ModelClient`` calls ``/v1/responses`` first. Some servers (Gemini's
+OpenAI-compatible endpoint, Cerebras, llama.cpp, ...) only implement
+``/v1/chat/completions``; ``ModelClient`` hands its calls to this class when one
+of them answers 404 or 405, or when ``api="chat"`` is set.
 """
 
 from __future__ import annotations

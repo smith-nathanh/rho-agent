@@ -122,7 +122,7 @@ async def test_request_cancel_skips_finished_sessions(tmp_path: Path) -> None:
 
 
 def test_resume_clears_a_stale_cancel_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")  # resume builds a real client
+    monkeypatch.setenv("RHO_AGENT_API_KEY", "test-key")  # resume builds a real client
     store, session = _session(tmp_path)
     cancel_file = store.base_dir / session.id / "cancel"
     cancel_file.touch()
@@ -500,7 +500,7 @@ def test_directive_to_a_finished_session_says_when_it_will_be_read(tmp_path: Pat
 def _interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from rho_agent.cli.interactive import InteractiveSession
 
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")  # /resume builds a real client
+    monkeypatch.setenv("RHO_AGENT_API_KEY", "test-key")  # /resume builds a real client
     store, session = _session(tmp_path)
     repl = InteractiveSession(
         session=session,

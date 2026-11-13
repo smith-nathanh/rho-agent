@@ -6,9 +6,10 @@ import os
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from ..client.model import default_model
 from ..core.config import AgentConfig
 
-DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-6.1-terra")
+DEFAULT_MODEL = default_model()
 
 
 @dataclass

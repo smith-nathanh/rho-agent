@@ -46,7 +46,11 @@ def cli() -> None:
     if not args or args[0] not in subcommands:
         args = ["main", *args]
 
-    app(args=args, prog_name="rho-agent")
+    try:
+        app(args=args, prog_name="rho-agent")
+    except MissingApiKeyError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 __all__ = [

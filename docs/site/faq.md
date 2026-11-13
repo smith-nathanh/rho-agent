@@ -8,7 +8,7 @@ order: 13
 
 ### What models are supported?
 
-OpenAI's models, and any OpenAI-compatible API. Set `OPENAI_API_KEY` and optionally `OPENAI_BASE_URL` to point to your provider. The default model is `gpt-6.1-terra` (override with `OPENAI_MODEL` or `--model`).
+OpenAI's models, and any provider with an OpenAI-compatible API (OpenRouter, xAI, Groq, DeepSeek, Cerebras, vLLM, Ollama, ...). Set `RHO_AGENT_API_KEY` to the provider's key and `RHO_AGENT_BASE_URL` to its endpoint. The default model is `gpt-6.1-terra` (override with `RHO_AGENT_MODEL` or `--model`).
 
 ### Does the agent use reasoning with OpenAI's GPT-5.6 and GPT-6 models?
 
@@ -16,11 +16,11 @@ Yes. rho-agent calls OpenAI through the Responses API (`/v1/responses`), where t
 
 Requests are stateless (`store=false`): nothing is kept on OpenAI's side. The model's reasoning comes back encrypted, is saved with the assistant message in `trace.jsonl`, and is sent back on later requests, so a resumed session continues with its reasoning intact.
 
-### Which endpoint is called when I set `OPENAI_BASE_URL`?
+### Which endpoint is called when I set `RHO_AGENT_BASE_URL`?
 
-Chat Completions (`/v1/chat/completions`), because most OpenAI-compatible servers (vLLM, Ollama, Cerebras and others) implement nothing else. Without a base URL, or with one on an OpenAI or Azure OpenAI host, the Responses API is used.
+The Responses API (`/v1/responses`), the same as for OpenAI. OpenRouter, xAI, Groq, DeepSeek, vLLM and Ollama implement it. If the server answers `/v1/responses` with 404 or 405, which is what Gemini's OpenAI-compatible endpoint, Cerebras and llama.cpp do, rho-agent switches to Chat Completions (`/v1/chat/completions`) for the rest of the session. If a server rejects the `include` field (Groq does), rho-agent stops sending it.
 
-To override the choice, set `RHO_AGENT_API` to `responses` or `chat`, for example `RHO_AGENT_API=responses` for a gateway in front of OpenAI. On the Chat Completions path, OpenAI's GPT-5.6 and GPT-6 models refuse tool calls unless reasoning is off, so use the Responses path for them.
+To pin the endpoint, set `RHO_AGENT_API` to `responses` or `chat`; there is then no fallback. `RHO_AGENT_API=chat` skips the first failed request to a server you know has no Responses API. On the Chat Completions path, OpenAI's GPT-5.6 and GPT-6 models refuse tool calls unless reasoning is off, so use the Responses path for them.
 
 ### Do I need Docker?
 

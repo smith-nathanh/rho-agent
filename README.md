@@ -9,7 +9,7 @@ rho-agent runs AI agents that read code, run commands and edit files, each under
 
 ## Install
 
-You need Python 3.11 or newer, [uv](https://docs.astral.sh/uv/), and an OpenAI API key (or any OpenAI-compatible endpoint). rho-agent is not on PyPI yet, so install it from GitHub.
+You need Python 3.11 or newer, [uv](https://docs.astral.sh/uv/), and an API key from a model provider that offers an OpenAI-compatible API: OpenAI, OpenRouter, xAI, Groq, DeepSeek and many others. A server you run yourself (vLLM, Ollama) works too. rho-agent is not on PyPI yet, so install it from GitHub.
 
 For the command-line tool:
 
@@ -25,17 +25,41 @@ To use it as a library, add it to your project instead:
 uv add git+https://github.com/smith-nathanh/rho-agent
 ```
 
-Then give it a model key:
+Then tell it which provider to use. rho-agent reads three variables, and only these. It never picks up `OPENAI_API_KEY` or another key you set for a different tool.
+
+| Variable | What to put there |
+|---|---|
+| `RHO_AGENT_API_KEY` | The API key from your provider |
+| `RHO_AGENT_BASE_URL` | Your provider's endpoint. Leave it unset for OpenAI |
+| `RHO_AGENT_MODEL` | The model name as your provider spells it. Default: `gpt-6.1-terra` |
+
+For OpenAI:
 
 ```bash
-export OPENAI_API_KEY=your-key
-export OPENAI_MODEL=gpt-6.1-terra                 # optional, this is the default
-export OPENAI_BASE_URL=http://localhost:8000/v1   # optional, for any OpenAI-compatible endpoint
+export RHO_AGENT_API_KEY=sk-...
 ```
 
-A `.env` file in the directory you run from works too. See [Installation](docs/site/installation.md) for extras (database drivers, Daytona, evals) and the other install options.
+For another provider, set the endpoint and a model too. OpenRouter, for example:
 
-OpenAI models are called through the Responses API, so they reason between tool calls; `--reasoning-effort` (or `AgentConfig.reasoning_effort`) sets how much. With `OPENAI_BASE_URL` pointing at another server, rho-agent uses Chat Completions, which is what most of them implement. The [FAQ](docs/site/faq.md) has the details.
+```bash
+export RHO_AGENT_API_KEY=sk-or-...
+export RHO_AGENT_BASE_URL=https://openrouter.ai/api/v1
+export RHO_AGENT_MODEL=anthropic/claude-haiku-4.5
+```
+
+| Provider | `RHO_AGENT_BASE_URL` | Example `RHO_AGENT_MODEL` |
+|---|---|---|
+| OpenAI | leave unset | `gpt-6.1-terra` |
+| OpenRouter | `https://openrouter.ai/api/v1` | `anthropic/claude-haiku-4.5` |
+| xAI | `https://api.x.ai/v1` | `grok-4.7` |
+| Groq | `https://api.groq.com/openai/v1` | `openai/gpt-oss-120b` |
+| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
+| Cerebras | `https://api.cerebras.ai/v1` | `gpt-oss-120b` |
+| vLLM or Ollama on your machine | e.g. `http://localhost:8000/v1` | the model you serve (no key needed) |
+
+`--model` and `--base-url` on the command line override the variables for one run. A `.env` file in the directory you run from works too. See [Installation](docs/site/installation.md) for extras (database drivers, Daytona, evals) and the other install options.
+
+Models are called through the Responses API, so they reason between tool calls; `--reasoning-effort` (or `AgentConfig.reasoning_effort`) sets how much. That works with OpenAI and with other providers that implement Responses, such as OpenRouter, xAI, Groq and DeepSeek. If a server has no Responses endpoint (Gemini's OpenAI-compatible API, Cerebras, llama.cpp), rho-agent switches to Chat Completions on its own. The [FAQ](docs/site/faq.md) has the details.
 
 ## Quick start
 

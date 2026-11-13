@@ -75,7 +75,7 @@ rho-eval bird <data_file> <db_dir> [OPTIONS]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--model, -m` | `gpt-6.1-terra` | Model name |
-| `--base-url` | env `OPENAI_BASE_URL` | API endpoint |
+| `--base-url` | env `RHO_AGENT_BASE_URL` | API endpoint |
 | `--max-turns` | `20` | Max agent turns per task |
 | `--parallel, -p` | `1` | Concurrent tasks |
 | `--output, -o` | `results/<model>-bird/` | Output directory |
