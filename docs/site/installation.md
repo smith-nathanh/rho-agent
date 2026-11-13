@@ -46,6 +46,7 @@ If you need optional features, add extras to the dependency:
 ```bash
 uv add 'rho-agent[db] @ git+https://github.com/smith-nathanh/rho-agent'
 uv add 'rho-agent[daytona] @ git+https://github.com/smith-nathanh/rho-agent'
+uv add 'rho-agent[otel] @ git+https://github.com/smith-nathanh/rho-agent'   # OpenTelemetry export
 ```
 
 ## Install from source (development)
@@ -109,6 +110,17 @@ Every call's cost is recorded in the session's usage and trace:
 - **Any other server** has no known price. Set the `RHO_AGENT_PRICE_*` variables to price it yourself; they also override the table. Without them cost is reported as `0`, and a session with a cost cap warns that the cap cannot trigger.
 
 With OpenRouter, rho-agent also sends the session ID with every call (`x-session-id`), so OpenRouter's [Broadcast](https://openrouter.ai/docs/guides/features/broadcast) shows a whole session as one trace in tools such as LangSmith or Arize.
+
+### OpenTelemetry export
+
+| Variable | Default | Description |
+|---|---|---|
+| `RHO_AGENT_OTLP_ENDPOINT` | — | Send live OpenTelemetry spans to this OTLP/HTTP base URL |
+| `RHO_AGENT_OTLP_HEADERS` | — | Request headers, `key=value,key2=value2` |
+| `RHO_AGENT_OTLP_PROTOCOL` | `http/protobuf` | `http/protobuf` (needs the `otel` extra) or `http/json` |
+| `RHO_AGENT_OTLP_CONTENT` | `0` | `1` to include prompts, outputs and tool I/O |
+
+See [Observability — OpenTelemetry export](observability/#opentelemetry-export).
 
 ### Database connections
 

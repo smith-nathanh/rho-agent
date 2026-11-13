@@ -3084,6 +3084,8 @@ all = [
     { name = "harbor", marker = "python_full_version >= '3.12'" },
     { name = "mysql-connector-python" },
     { name = "openpyxl" },
+    { name = "opentelemetry-proto", version = "1.39.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "opentelemetry-proto", version = "1.45.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "oracledb" },
     { name = "psycopg", extra = ["binary"] },
     { name = "vertica-python" },
@@ -3115,6 +3117,10 @@ excel = [
 harbor = [
     { name = "harbor", marker = "python_full_version >= '3.12'" },
 ]
+otel = [
+    { name = "opentelemetry-proto", version = "1.39.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "opentelemetry-proto", version = "1.45.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -3133,18 +3139,19 @@ requires-dist = [
     { name = "mysql-connector-python", marker = "extra == 'db-mysql'", specifier = ">=8.0" },
     { name = "openai", specifier = ">=2.14.0" },
     { name = "openpyxl", marker = "extra == 'excel'", specifier = ">=3.1.0" },
+    { name = "opentelemetry-proto", marker = "extra == 'otel'", specifier = ">=1.30.0" },
     { name = "oracledb", marker = "extra == 'db-oracle'", specifier = ">=3.4.1" },
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'db-postgres'", specifier = ">=3.3.2" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "pyyaml", specifier = ">=6.0.2" },
-    { name = "rho-agent", extras = ["db", "excel", "daytona", "evals", "harbor"], marker = "extra == 'all'" },
+    { name = "rho-agent", extras = ["db", "excel", "daytona", "evals", "harbor", "otel"], marker = "extra == 'all'" },
     { name = "rho-agent", extras = ["db-postgres", "db-mysql", "db-oracle", "db-vertica"], marker = "extra == 'db'" },
     { name = "rich", specifier = ">=14.2.0" },
     { name = "typer", specifier = ">=0.21.0" },
     { name = "vertica-python", marker = "extra == 'db-vertica'", specifier = ">=1.4.0" },
 ]
-provides-extras = ["db-postgres", "db-mysql", "db-oracle", "db-vertica", "db", "excel", "evals", "harbor", "daytona", "all"]
+provides-extras = ["db-postgres", "db-mysql", "db-oracle", "db-vertica", "db", "excel", "evals", "harbor", "daytona", "otel", "all"]
 
 [package.metadata.requires-dev]
 dev = [

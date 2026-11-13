@@ -136,7 +136,7 @@ class AgentToolHandler(ToolHandler):
         if parent is None:
             child_session.approval_callback = self._approval_callback
             child_session.cancel_check = self._cancel_check
-        link_child(parent, child_session, self._tool_name, instruction)
+        link_child(parent, child_session, self._tool_name, instruction, invocation.call_id)
         if parent is not None and self._approval_callback is not None:
             child_session.approval_callback = self._approval_callback
 

@@ -256,6 +256,8 @@ With `--backend daytona`, the shell and file tools run in a [Daytona](docs/site/
 
 Every session writes a `trace.jsonl` of each model call, tool call and result. You can read it with `jq`, replay it in Python, or [export it](rho_agent/export/README.md) to Harbor's ATIF trajectory format. See [Observability](docs/site/observability.md).
 
+The same traces export as OpenTelemetry spans, following the GenAI semantic conventions, for tools such as Langfuse, Arize Phoenix, LangSmith or any OTLP collector. A run becomes an agent span with its model calls and tool calls under it, and child agents are nested under the tool call that started them. Message content is left out unless you ask for it. Send a finished session with `rho-agent export <session-id> --format otlp --endpoint <url>`, or set `RHO_AGENT_OTLP_ENDPOINT` to send spans while the agent runs. Protobuf transport needs the `otel` extra (`uv pip install -e ".[otel]"`). See [OpenTelemetry export](docs/site/observability.md#opentelemetry-export).
+
 `rho-eval` runs the agent against [BIRD-Bench](rho_agent/eval/birdbench/) (text-to-SQL) and [TerminalBench](rho_agent/eval/harbor/).
 
 ## Documentation
@@ -270,8 +272,8 @@ Every session writes a `trace.jsonl` of each model call, tool call and result. Y
 | [Tools](docs/site/tools.md) | Complete tool handler reference |
 | [Profiles](docs/site/profiles.md) | Permission profiles and custom YAML |
 | [Daytona](docs/site/daytona.md) | Remote sandbox execution via Daytona |
-| [Observability](docs/site/observability.md) | Session traces, offline inspection, and observers |
-| [Export](rho_agent/export/README.md) | Convert traces to ATIF for training data |
+| [Observability](docs/site/observability.md) | Session traces, offline inspection, observers, and OpenTelemetry export |
+| [Export](rho_agent/export/README.md) | Convert traces to ATIF for training data or OTLP for observability tools |
 | [Monitor](docs/site/monitor.md) | Watch, control, and steer running agents |
 | [Prompt files](docs/site/prompt-files.md) | Reusable prompts with variables |
 | [Continuum](docs/site/continuum.md) | Build a project from a requirements document across many sessions |

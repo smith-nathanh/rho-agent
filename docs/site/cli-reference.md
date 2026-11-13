@@ -115,7 +115,7 @@ Pass a session ID prefix to cancel a specific agent, or use `--all` to cancel ev
 
 ## `rho-agent export`
 
-Export a session trace as [ATIF](https://github.com/laude-institute/harbor) JSON (Agent Trajectory Interchange Format).
+Export a session trace as [ATIF](https://github.com/laude-institute/harbor) JSON (Agent Trajectory Interchange Format), or as OpenTelemetry spans (OTLP) for observability tools. See [Observability — OpenTelemetry export](observability.md#opentelemetry-export).
 
 ```bash
 rho-agent export <session-id> [OPTIONS]
@@ -125,6 +125,10 @@ rho-agent export <session-id> [OPTIONS]
 |---|---|
 | `--dir <dir>` | Sessions directory (default: `~/.config/rho-agent/sessions`) |
 | `--output / -o <path>` | Output file path (default: stdout) |
+| `--format / -f <atif\|otlp>` | Output format (default: `atif`) |
+| `--endpoint <url>` | `otlp` only: send the spans to this OTLP/HTTP base URL (`/v1/traces` is appended). Headers come from `RHO_AGENT_OTLP_HEADERS` |
+| `--protocol <http/protobuf\|http/json>` | `otlp` only: wire format for `--endpoint` (default: `http/protobuf`, needs the `otel` extra) |
+| `--include-content` | `otlp` only: include prompts, model output, and tool arguments and results |
 
 ### Examples
 
@@ -137,4 +141,10 @@ rho-agent export abc123 -d ~/.config/rho-agent/sessions -o trajectory.json
 
 # Pipe through jq for inspection
 rho-agent export abc123 -d ~/.config/rho-agent/sessions | python -m json.tool
+
+# OpenTelemetry spans as OTLP/JSON
+rho-agent export abc123 --format otlp -o spans.json
+
+# Send to a local Phoenix or OpenTelemetry Collector
+rho-agent export abc123 --format otlp --endpoint http://localhost:6006
 ```

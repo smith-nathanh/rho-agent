@@ -2,6 +2,9 @@
 
 Utilities for converting rho-agent session traces into external formats.
 
+- `atif.py`: ATIF trajectories for training data (below).
+- `otlp.py`: OpenTelemetry spans (OTLP) for observability tools, following the GenAI semantic conventions. `otlp_observer.py` sends the same spans live when `RHO_AGENT_OTLP_ENDPOINT` is set. See [Observability — OpenTelemetry export](../../docs/site/observability.md#opentelemetry-export).
+
 ## ATIF (Agent Trajectory Interchange Format)
 
 ATIF is a structured JSON schema for agent trajectories, designed for SFT/RL training data. It is defined and maintained by [Harbor](https://github.com/laude-institute/harbor).

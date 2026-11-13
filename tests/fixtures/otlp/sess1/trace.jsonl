@@ -1,0 +1,38 @@
+{"type": "run_start", "prompt": "Fix the failing test", "ts": "2026-02-21T10:00:00.000000Z"}
+{"type": "message", "role": "user", "content": "Fix the failing test", "ts": "2026-02-21T10:00:00.000100Z"}
+{"type": "llm_start", "model": "gpt-6.1-terra", "context_size": 100, "ts": "2026-02-21T10:00:00.100000Z"}
+{"type": "llm_error", "kind": "transient", "error": "503 upstream overloaded", "ts": "2026-02-21T10:00:00.500000Z"}
+{"type": "llm_start", "model": "gpt-6.1-terra", "context_size": 100, "ts": "2026-02-21T10:00:01.000000Z"}
+{"type": "llm_end", "model": "gpt-6.1-terra", "input_tokens": 200, "output_tokens": 20, "cache_read_tokens": 50, "reasoning_tokens": 5, "cost_usd": 0.002, "ts": "2026-02-21T10:00:02.000000Z"}
+{"type": "message", "role": "assistant", "content": null, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "bash", "arguments": "{\"command\": \"pytest\"}"}}], "ts": "2026-02-21T10:00:02.001000Z"}
+{"type": "tool_start", "tool_call_id": "call_1", "tool_name": "bash", "tool_args": {"command": "pytest"}, "ts": "2026-02-21T10:00:02.010000Z"}
+{"type": "message", "role": "tool", "tool_call_id": "call_1", "content": "1 failed: test_parse", "ts": "2026-02-21T10:00:03.000000Z"}
+{"type": "tool_end", "tool_call_id": "call_1", "tool_name": "bash", "success": false, "ts": "2026-02-21T10:00:03.001000Z"}
+{"type": "llm_start", "model": "gpt-6.1-terra", "context_size": 160, "ts": "2026-02-21T10:00:03.100000Z"}
+{"type": "llm_end", "model": "gpt-6.1-terra", "input_tokens": 260, "output_tokens": 40, "cache_read_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.003, "ts": "2026-02-21T10:00:04.000000Z"}
+{"type": "message", "role": "assistant", "content": "Delegating the investigation.", "tool_calls": [{"id": "call_2", "type": "function", "function": {"name": "delegate", "arguments": "{\"instruction\": \"Find why test_parse fails\"}"}}, {"id": "call_3", "type": "function", "function": {"name": "write", "arguments": "{\"path\": \"x.py\", \"content\": \"pass\"}"}}], "ts": "2026-02-21T10:00:04.001000Z"}
+{"type": "tool_start", "tool_call_id": "call_2", "tool_name": "delegate", "tool_args": {"instruction": "Find why test_parse fails"}, "ts": "2026-02-21T10:00:04.010000Z"}
+{"type": "child_start", "tool_name": "delegate", "tool_call_id": "call_2", "child_session_id": "c1", "trace_path": null, "instruction": "Find why test_parse fails", "ts": "2026-02-21T10:00:04.020000Z"}
+{"type": "llm_end", "model": "gpt-6.1-terra", "purpose": "child", "child_session_id": "c1", "input_tokens": 100, "output_tokens": 10, "cache_read_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.001, "ts": "2026-02-21T10:00:06.000000Z"}
+{"type": "child_end", "child_session_id": "c1", "status": "completed", "ts": "2026-02-21T10:00:06.000100Z"}
+{"type": "message", "role": "tool", "tool_call_id": "call_2", "content": "The parser drops the last token.", "ts": "2026-02-21T10:00:06.001000Z"}
+{"type": "tool_end", "tool_call_id": "call_2", "tool_name": "delegate", "success": true, "ts": "2026-02-21T10:00:06.002000Z"}
+{"type": "approval_requested", "request_id": "r1", "tool_name": "write", "tool_args": {"path": "x.py"}, "ts": "2026-02-21T10:00:06.100000Z"}
+{"type": "approval_resolved", "request_id": "r1", "tool_name": "write", "outcome": "denied", "ts": "2026-02-21T10:00:06.200000Z"}
+{"type": "tool_blocked", "tool_call_id": "call_3", "tool_name": "write", "tool_args": {"path": "x.py", "content": "pass"}, "ts": "2026-02-21T10:00:06.201000Z"}
+{"type": "message", "role": "tool", "tool_call_id": "call_3", "content": "Command rejected by user.", "ts": "2026-02-21T10:00:06.202000Z"}
+{"type": "llm_start", "model": "gpt-6.1-terra", "purpose": "compaction", "context_size": 5000, "ts": "2026-02-21T10:00:06.300000Z"}
+{"type": "llm_end", "model": "gpt-6.1-terra", "purpose": "compaction", "input_tokens": 5000, "output_tokens": 300, "cache_read_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.01, "ts": "2026-02-21T10:00:07.000000Z"}
+{"type": "history_replaced", "messages": [{"role": "user", "content": "Fix the failing test"}, {"role": "user", "content": "Summary: parser drops last token; write was denied."}], "ts": "2026-02-21T10:00:07.001000Z"}
+{"type": "compact", "method": "summary", "tokens_before": 5000, "tokens_after": 300, "trigger": "auto", "ts": "2026-02-21T10:00:07.002000Z"}
+{"type": "llm_start", "model": "gpt-6.1-terra", "context_size": 300, "ts": "2026-02-21T10:00:07.100000Z"}
+{"type": "llm_end", "model": "gpt-6.1-terra", "input_tokens": 300, "output_tokens": 30, "cache_read_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.001, "ts": "2026-02-21T10:00:08.000000Z"}
+{"type": "message", "role": "assistant", "content": "The parser drops the last token; fix needs write access.", "ts": "2026-02-21T10:00:08.001000Z"}
+{"type": "run_end", "status": "completed", "ts": "2026-02-21T10:00:08.002000Z"}
+{"type": "run_start", "prompt": "Also run lint", "ts": "2026-02-21T10:05:00.000000Z"}
+{"type": "message", "role": "user", "content": "Also run lint", "ts": "2026-02-21T10:05:00.000100Z"}
+{"type": "llm_start", "model": "gpt-6.1-terra", "context_size": 350, "ts": "2026-02-21T10:05:00.100000Z"}
+{"type": "llm_end", "model": "gpt-6.1-terra", "input_tokens": 350, "output_tokens": 15, "cache_read_tokens": 300, "reasoning_tokens": 0, "cost_usd": 0.001, "ts": "2026-02-21T10:05:01.000000Z"}
+{"type": "message", "role": "assistant", "content": null, "tool_calls": [{"id": "call_9", "type": "function", "function": {"name": "bash", "arguments": "{\"command\": \"ruff check .\"}"}}], "ts": "2026-02-21T10:05:01.001000Z"}
+{"type": "tool_start", "tool_call_id": "call_9", "tool_name": "bash", "tool_args": {"command": "ruff check ."}, "ts": "2026-02-21T10:05:01.010000Z"}
+{"type": "tool_end", "tool_ca
