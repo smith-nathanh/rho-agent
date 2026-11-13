@@ -12,7 +12,7 @@ not happen.
 | [E001](E001-smoke-litellm-client/) | 2026-11-11 | Smoke test, Sol, old LiteLLM client | Done | 1 | 0.20 | Passed |
 | [E002](E002-smoke-model-client/) | 2026-11-13 | Smoke test, Sol, ModelClient with reasoning carried | Done | 1 | 0.50 | Failed (one XSS case) |
 | [E003](E003-openrouter-api-checks/) | 2026-11-13 | Live API checks: OpenRouter reasoning replay, cost reporting | Done | 9 API calls | 0.003 | Reasoning replay and cost both work |
-| [E004](E004-pilot-tool-sets/) | 2026-11-13 | Pilot: bash + images vs full tool set, Sol | Ready, not run | 16 planned | at most 64 | — |
+| [E004](E004-pilot-tool-sets/) | 2026-11-13 | Pilot: bash + images vs full tool set, Sol | Running | 16 planned | at most 64 | — |
 | [E005](E005-full-terminal-bench-4.1/) | — | Full Terminal-Bench 4.1, Sol | Planned | 66 planned | at most 264 | — |
 
 **Spent so far: $6.10** (E000–E003). The machine-readable ledger is

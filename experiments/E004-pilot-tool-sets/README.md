@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| Status | Ready, not run |
-| Dates | planned 2026-11-13 |
+| Status | Running |
+| Dates | planned and started 2026-11-13 |
 | rho-agent commit | `1c528d9c82f999fa907285bdb7d0af119ac49f02` (`main` after smith-nathanh/rho-agent#31) |
 | Harbor version | 0.25.0 |
 | Dataset | `terminal-bench/terminal-bench` 4.1.0 |
@@ -57,8 +57,9 @@ difference in pass rate at this sample size.
   | `mvcc-lsm-compaction` | mid-length (4 h); navigating and editing a storage engine |
 
 - **Repetitions:** 2 attempts per task per arm, so 8 trials per arm, 16 in all.
-- **Execution:** run the arms one after the other, 2 trials at a time
-  (Docker Desktop has 7.7 GiB; some tasks ask for 4 GB each).
+- **Execution:** both arms run at the same time, 2 trials each (4 containers
+  at once; Docker Desktop has 23.4 GiB and some tasks ask for 4 GB), so both
+  arms see the same API conditions.
 
 ## Metrics
 
@@ -85,8 +86,9 @@ under roughly 20–30% on a single task can be run-to-run noise.
 ## Run
 
 ```bash
-uv run --env-file .env harbor run --config jobs/pilot-bash-image.yaml
-uv run --env-file .env harbor run --config jobs/pilot-full-tools.yaml
+# from the main checkout, both at once
+uv run --env-file .env harbor run --config jobs/pilot-bash-image.yaml &
+uv run --env-file .env harbor run --config jobs/pilot-full-tools.yaml &
 python3 experiments/tools/compare_trials.py jobs/pilot-bash-image jobs/pilot-full-tools --csv experiments/E004-pilot-tool-sets/trials.csv
 ```
 
