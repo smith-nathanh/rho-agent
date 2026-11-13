@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
-from .paths import is_path_sensitive
+from .paths import is_path_sensitive, resolve_path
 
 
 class WriteHandler(ToolHandler):
@@ -25,6 +24,7 @@ class WriteHandler(ToolHandler):
         self,
         create_only: bool = True,
         requires_approval: bool | None = None,
+        working_dir: str | None = None,
     ):
         """Initialize WriteHandler.
 
@@ -33,8 +33,11 @@ class WriteHandler(ToolHandler):
                         If False, allow overwriting existing files.
             requires_approval: Override whether approval is required.
                               Defaults to True for create_only, False otherwise.
+            working_dir: Directory relative paths are resolved against.
+                         Defaults to the process's current directory.
         """
         self._create_only = create_only
+        self._working_dir = working_dir
         self._requires_approval = (
             requires_approval if requires_approval is not None else create_only
         )
@@ -68,7 +71,7 @@ class WriteHandler(ToolHandler):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Absolute path where the file should be written",
+                    "description": "Path where the file should be written (relative paths are taken from the working directory)",
                 },
                 "content": {
                     "type": "string",
@@ -89,7 +92,7 @@ class WriteHandler(ToolHandler):
         if not content:
             return ToolOutput(content="No content provided", success=False)
 
-        path = Path(path_str).expanduser().resolve()
+        path = resolve_path(path_str, self._working_dir)
 
         # Safety checks for create_only mode
         if self._create_only:

@@ -43,7 +43,8 @@ class ToolFactory:
         """Create a configured tool registry.
 
         Args:
-            working_dir: Working directory for shell commands.
+            working_dir: Working directory for shell commands, and the base for
+                relative paths given to the file tools.
             env: Environment variables for interpolation. Defaults to os.environ.
             databases: Database configs (alias → {type, ...}). If None,
                 no database tools are registered.
@@ -53,11 +54,14 @@ class ToolFactory:
         """
         registry = ToolRegistry()
         env = env or dict(os.environ)
+        # File tools get the directory as configured: with none, they keep resolving
+        # relative paths against the process's current directory at call time.
+        file_dir = working_dir
         working_dir = working_dir or os.getcwd()
 
         # Register core tools (unless bash_only mode)
         if not self.profile.bash_only:
-            self._register_core_tools(registry)
+            self._register_core_tools(registry, file_dir)
 
         # Register bash tool (mode depends on profile)
         self._register_bash_tool(registry, working_dir)
@@ -66,11 +70,11 @@ class ToolFactory:
         if self.profile.view_image_enabled:
             from ..tools.handlers.view_image import ViewImageHandler
 
-            registry.register(ViewImageHandler())
+            registry.register(ViewImageHandler(working_dir=file_dir))
 
         # Register write/edit tools (if enabled and not bash_only)
         if not self.profile.bash_only:
-            self._register_write_tools(registry)
+            self._register_write_tools(registry, file_dir)
 
         # Register database tools unless bash_only mode
         if not self.profile.bash_only:
@@ -95,22 +99,24 @@ class ToolFactory:
             DelegateHandler(requires_approval=self.profile.requires_tool_approval("delegate"))
         )
 
-    def _register_core_tools(self, registry: ToolRegistry) -> None:
+    def _register_core_tools(self, registry: ToolRegistry, working_dir: str | None = None) -> None:
         """Register tools that are always available."""
         from ..tools.handlers.glob import GlobHandler
         from ..tools.handlers.grep import GrepHandler
         from ..tools.handlers.list import ListHandler
         from ..tools.handlers.read import ReadHandler
 
-        registry.register(ReadHandler(attach_images=self.profile.view_image_enabled))
-        registry.register(GlobHandler())
-        registry.register(GrepHandler())
-        registry.register(ListHandler())
+        registry.register(
+            ReadHandler(attach_images=self.profile.view_image_enabled, working_dir=working_dir)
+        )
+        registry.register(GlobHandler(working_dir=working_dir))
+        registry.register(GrepHandler(working_dir=working_dir))
+        registry.register(ListHandler(working_dir=working_dir))
 
         try:
             from ..tools.handlers.read_excel import ReadExcelHandler
 
-            registry.register(ReadExcelHandler())
+            registry.register(ReadExcelHandler(working_dir=working_dir))
         except ImportError:
             pass
 
@@ -130,7 +136,7 @@ class ToolFactory:
         )
         registry.register(handler)
 
-    def _register_write_tools(self, registry: ToolRegistry) -> None:
+    def _register_write_tools(self, registry: ToolRegistry, working_dir: str | None = None) -> None:
         """Register write and edit tools if enabled."""
         from ..tools.handlers.edit import EditHandler
         from ..tools.handlers.write import WriteHandler
@@ -147,13 +153,16 @@ class ToolFactory:
             WriteHandler(
                 create_only=create_only,
                 requires_approval=requires_write_approval,
+                working_dir=working_dir,
             )
         )
 
         # Edit tool only available in FULL mode
         if self.profile.file_write == FileWriteMode.FULL:
             requires_edit_approval = self.profile.requires_tool_approval("edit")
-            registry.register(EditHandler(requires_approval=requires_edit_approval))
+            registry.register(
+                EditHandler(requires_approval=requires_edit_approval, working_dir=working_dir)
+            )
 
     def _register_database_tools(
         self,

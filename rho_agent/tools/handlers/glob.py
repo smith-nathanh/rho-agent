@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
+from .paths import resolve_path
 
 DEFAULT_MAX_RESULTS = 100
 DEFAULT_TIMEOUT = 30  # seconds
@@ -19,7 +20,8 @@ class GlobHandler(ToolHandler):
     Standard agentic tool name: 'glob'
     """
 
-    def __init__(self, timeout: int = DEFAULT_TIMEOUT) -> None:
+    def __init__(self, timeout: int = DEFAULT_TIMEOUT, working_dir: str | None = None) -> None:
+        self._working_dir = working_dir
         self._timeout = timeout
         self._rg_path = shutil.which("rg")
 
@@ -74,7 +76,7 @@ class GlobHandler(ToolHandler):
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
 
-        path = Path(path_str).expanduser().resolve()
+        path = resolve_path(path_str, self._working_dir)
 
         if not path.exists():
             return ToolOutput(content=f"Directory not found: {path}", success=False)

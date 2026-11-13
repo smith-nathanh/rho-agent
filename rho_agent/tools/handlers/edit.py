@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
+from .paths import resolve_path
 
 
 class EditHandler(ToolHandler):
@@ -22,14 +22,17 @@ class EditHandler(ToolHandler):
     3. Indentation-flexible match (leading whitespace normalized)
     """
 
-    def __init__(self, requires_approval: bool = False) -> None:
+    def __init__(self, requires_approval: bool = False, working_dir: str | None = None) -> None:
         """Initialize EditHandler.
 
         Args:
             requires_approval: Whether this tool requires user approval.
                               Defaults to False (container provides sandbox).
+            working_dir: Directory relative paths are resolved against.
+                         Defaults to the process's current directory.
         """
         self._requires_approval = requires_approval
+        self._working_dir = working_dir
 
     @property
     def name(self) -> str:
@@ -83,7 +86,7 @@ class EditHandler(ToolHandler):
         if not old_string:
             return ToolOutput(content="No old_string provided", success=False)
 
-        path = Path(path_str).expanduser().resolve()
+        path = resolve_path(path_str, self._working_dir)
 
         if not path.exists():
             return ToolOutput(content=f"File not found: {path}", success=False)

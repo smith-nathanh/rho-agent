@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
+from .paths import resolve_path
 
 # Max lines to return by default to avoid overwhelming context
 DEFAULT_MAX_LINES = 500
@@ -83,7 +83,8 @@ class ReadHandler(ToolHandler):
     Standard agentic tool name: 'read'
     """
 
-    def __init__(self, attach_images: bool = True) -> None:
+    def __init__(self, attach_images: bool = True, working_dir: str | None = None) -> None:
+        self._working_dir = working_dir
         # False when the profile turns image viewing off (a model without vision).
         self._attach_images = attach_images
 
@@ -114,7 +115,7 @@ class ReadHandler(ToolHandler):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Absolute path to the file to read",
+                    "description": "Path to the file to read (relative paths are taken from the working directory)",
                 },
                 "start_line": {
                     "type": "integer",
@@ -137,7 +138,7 @@ class ReadHandler(ToolHandler):
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
 
-        path = Path(path_str).expanduser().resolve()
+        path = resolve_path(path_str, self._working_dir)
 
         if not path.exists():
             return ToolOutput(content=f"File not found: {path}", success=False)

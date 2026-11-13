@@ -14,6 +14,7 @@ except ImportError:
     OPENPYXL_AVAILABLE = False
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
+from .paths import resolve_path
 
 # Max rows to return by default
 DEFAULT_MAX_ROWS = 500
@@ -59,6 +60,9 @@ def format_cell_value(value: Any) -> str:
 
 class ReadExcelHandler(ToolHandler):
     """Read and inspect Excel files (.xlsx, .xls)."""
+
+    def __init__(self, working_dir: str | None = None) -> None:
+        self._working_dir = working_dir
 
     @property
     def is_enabled(self) -> bool:
@@ -127,7 +131,7 @@ class ReadExcelHandler(ToolHandler):
         if not action:
             return ToolOutput(content="No action provided", success=False)
 
-        path = Path(path_str).expanduser().resolve()
+        path = resolve_path(path_str, self._working_dir)
 
         if not path.exists():
             return ToolOutput(content=f"File not found: {path}", success=False)

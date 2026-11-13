@@ -110,9 +110,7 @@ class InteractiveSession:
             if self.setup_commands:
                 from .single import run_setup_commands
 
-                await run_setup_commands(
-                    self.session, self.setup_commands, self.working_dir
-                )
+                await run_setup_commands(self.session, self.setup_commands, self.working_dir)
 
             while True:
                 try:
@@ -376,7 +374,14 @@ class InteractiveSession:
                 return
             from ..tools.handlers.write import WriteHandler
 
-            self.session.registry.register(WriteHandler(create_only=True, requires_approval=True))
+            local = self.session.agent.config.backend == "local"
+            self.session.registry.register(
+                WriteHandler(
+                    create_only=True,
+                    requires_approval=True,
+                    working_dir=self.working_dir if local else None,
+                )
+            )
             console.print(
                 _markup(
                     "File write enabled for this session (create-only, approval required).",

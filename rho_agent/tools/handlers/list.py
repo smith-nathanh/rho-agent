@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
+from .paths import resolve_path
 
 # Max entries to return by default
 DEFAULT_MAX_ENTRIES = 200
@@ -19,6 +20,9 @@ class ListHandler(ToolHandler):
 
     Standard agentic tool name: 'list'
     """
+
+    def __init__(self, working_dir: str | None = None) -> None:
+        self._working_dir = working_dir
 
     @property
     def parallel_safe(self) -> bool:
@@ -39,7 +43,7 @@ class ListHandler(ToolHandler):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Absolute path to the directory to list",
+                    "description": "Path to the directory to list (relative paths are taken from the working directory)",
                 },
                 "show_hidden": {
                     "type": "boolean",
@@ -67,7 +71,7 @@ class ListHandler(ToolHandler):
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
 
-        path = Path(path_str).expanduser().resolve()
+        path = resolve_path(path_str, self._working_dir)
 
         if not path.exists():
             return ToolOutput(content=f"Directory not found: {path}", success=False)
