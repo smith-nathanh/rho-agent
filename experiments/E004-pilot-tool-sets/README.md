@@ -2,14 +2,14 @@
 
 | | |
 |---|---|
-| Status | Running |
-| Dates | planned and started 2026-11-13 |
+| Status | Done |
+| Dates | run 2026-11-13, 17:14–17:56 local (both arms at once) |
 | rho-agent commit | `1c528d9c82f999fa907285bdb7d0af119ac49f02` (`main` after smith-nathanh/rho-agent#31) |
 | Harbor version | 0.25.0 |
 | Dataset | `terminal-bench/terminal-bench` 4.1.0 |
 | Budget | worst case $64 (16 trials x $4 cap); expected $10–25 |
-| Cost | — |
-| Job output | `jobs/pilot-bash-image/` and `jobs/pilot-full-tools/` in the main checkout |
+| Cost | $4.36 ($2.15 arm A, $2.21 arm B) |
+| Job output | `jobs/pilot-bash-image/2026-11-13__17-13-52/` and `jobs/pilot-full-tools/2026-11-13__17-14-12/` in the main checkout |
 
 ## Question
 
@@ -94,13 +94,66 @@ python3 experiments/tools/compare_trials.py jobs/pilot-bash-image jobs/pilot-ful
 
 ## Results
 
-Not run yet.
+All 16 trials completed and were graded; none errored or hit a cap. Every
+trial ended with the agent confirming at the completion gate. The tools offered,
+read from each trace, matched the arm. Per-trial rows are in
+[`trials.csv`](trials.csv).
+
+### Per arm
+
+| Arm | Passed | Cost | Uncached input | Cached input | Output | Reasoning | Model calls | Tool calls | Agent minutes |
+|---|---|---|---|---|---|---|---|---|---|
+| A: bash + images | 1/8 | $2.15 | 28K | 506K | 16K | 7K | 22.1 | 20.1 | 5.8 |
+| B: full tools | 3/8 | $2.21 | 26K | 684K | 16K | 7K | 29.9 | 29.8 | 6.0 |
+
+Token and call figures are means per trial.
+
+### Per task (mean of 2 attempts)
+
+| Task | Arm | Passed | Cost | Model calls | Tools used (total over both attempts) |
+|---|---|---|---|---|---|
+| bun-sourcemap-leak | A | 0/2 | $0.10 | 13.0 | bash 22 |
+| | B | 0/2 | $0.11 | 15.0 | bash 18, write 6, edit 2 |
+| html-js-filter | A | 0/2 | $0.28 | 18.0 | bash 32 |
+| | B | 1/2 | $0.28 | 25.5 | bash 26, edit 14, write 6, read 1 |
+| mvcc-lsm-compaction | A | 0/2 | $0.08 | 10.5 | bash 17 |
+| | B | 1/2 | $0.09 | 14.5 | bash 15, edit 7, list 3, read 3, write 2 |
+| payments-pipeline-fix | A | 1/2 | $0.62 | 47.0 | bash 90 |
+| | B | 1/2 | $0.63 | 64.5 | bash 54, edit 53, read 12, write 12, list 4 |
+
+### What it shows
+
+- **Cost is the same.** $2.15 vs $2.21 overall (3% apart) and within a few
+  cents on every task. Uncached input, output and reasoning tokens are
+  essentially equal.
+- **Full tools take more, smaller steps.** About 35% more model calls and 48%
+  more tool calls, on every task. The extra calls re-read the conversation
+  from the prompt cache, which is why cached input is 35% higher; at $0.10 per
+  million cached tokens that barely moves the cost. Time is the same.
+- **With full tools, Sol uses `edit` and `write`, but still reads with bash.**
+  `read` was used 16 times against 113 bash calls in arm B, and `grep` and
+  `glob` never. So the expected saving from bounded file reads did not happen.
+- **Pass rate: 3/8 vs 1/8, not distinguishable.** Fisher's exact test gives
+  p = 0.57; the difference is two trials, on two tasks.
+- **Runs were short and failures often narrow.** Mean agent time was about 6
+  minutes against a 2-hour limit, on tasks rated at 45 minutes to 4 hours of
+  expert time. Both `bun-sourcemap-leak` failures in arm A met 35 of 37
+  criteria; the failed `mvcc-lsm-compaction` trial in arm B passed 11 of 15
+  tests. Sol at medium effort finishes quickly and confidently, sometimes too
+  soon.
 
 ## Cost
 
-Not run yet.
+$4.36 in all: arm A $2.1493, arm B $2.2060, from each job's `result.json`
+(which matches the sum over trials). Well under the $64 cap and the $10–25
+expected.
 
 ## Follow-ups
 
-The winning tool set (or the cheaper one, if pass rates look the same) goes
-into E005.
+- **Tool set for E005:** cost gives no reason to prefer either. Full tools is
+  the default users get and was directionally ahead on pass rate, so it is the
+  natural choice. Since a trial averaged $0.27, running E005 with both arms
+  (66 tasks each) is affordable and would answer the pass-rate question with
+  66 paired tasks instead of 4.
+- **Reasoning effort:** the quick, near-miss failures suggest testing `high`
+  effort, which may trade cost for more thorough verification.

@@ -5,3 +5,5 @@ E001,2026-11-11,smoke html-js-filter (LiteLLM client),openai/gpt-6.1-sol,1,0.203
 E002,2026-11-13,smoke html-js-filter (ModelClient),openai/gpt-6.1-sol,1,0.5010,jobs/rho-agent-smoke/2026-11-13__16-09-16/result.json
 E003,2026-11-13,OpenRouter reasoning replay test (7 calls),openai/gpt-6.1-sol via OpenRouter,7,0.0027,usage.cost reported by OpenRouter
 E003,2026-11-13,live cost check (OpenRouter + OpenAI),openai/gpt-6.1-sol,2,0.0002,usage.cost and built-in price table
+E004,2026-11-13,pilot arm A bash + images (8 trials),openai/gpt-6.1-sol,8,2.1493,jobs/pilot-bash-image/2026-11-13__17-13-52/result.json
+E004,2026-11-13,pilot arm B full tools (8 trials),openai/gpt-6.1-sol,8,2.2060,jobs/pilot-full-tools/2026-11-13__17-14-12/result.json

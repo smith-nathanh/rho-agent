@@ -12,10 +12,11 @@ not happen.
 | [E001](E001-smoke-litellm-client/) | 2026-11-11 | Smoke test, Sol, old LiteLLM client | Done | 1 | 0.20 | Passed |
 | [E002](E002-smoke-model-client/) | 2026-11-13 | Smoke test, Sol, ModelClient with reasoning carried | Done | 1 | 0.50 | Failed (one XSS case) |
 | [E003](E003-openrouter-api-checks/) | 2026-11-13 | Live API checks: OpenRouter reasoning replay, cost reporting | Done | 9 API calls | 0.003 | Reasoning replay and cost both work |
-| [E004](E004-pilot-tool-sets/) | 2026-11-13 | Pilot: bash + images vs full tool set, Sol | Running | 16 planned | at most 64 | — |
+| [E004](E004-pilot-tool-sets/) | 2026-11-13 | Pilot: bash + images vs full tool set, Sol | Done | 16 | 4.36 | Same cost; full tools 35% more calls; pass 3/8 vs 1/8 (not significant) |
 | [E005](E005-full-terminal-bench-4.1/) | — | Full Terminal-Bench 4.1, Sol | Planned | 66 planned | at most 264 | — |
 
-**Spent so far: $6.10** (E000–E003). The machine-readable ledger is
+**Spent so far: $10.45** (E000–E004): $5.39 in March 2026 (E000) and $5.06
+in November (E001–E004). The machine-readable ledger is
 [`ledger.csv`](ledger.csv).
 
 ## How to record an experiment
