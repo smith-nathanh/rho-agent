@@ -162,6 +162,9 @@ class Prompt:
     # "none" keeps the tool definitions in the request (so a cached prefix is
     # still reused) while forbidding the model from calling one.
     tool_choice: str | None = None
+    # The rho-agent session making the call. Sent to OpenRouter only, which
+    # groups calls with the same session ID into one trace.
+    session_id: str | None = None
 
 
 # --- Chat format -> Responses format ---------------------------------------
@@ -363,19 +366,48 @@ def _items_to_store(items: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
     return None
 
 
+def _field(obj: Any, name: str) -> Any:
+    """``obj.name`` or ``obj[name]``: extra fields the SDK keeps may be plain dicts."""
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
+
+
+def reported_cost(usage: Any) -> float | None:
+    """Cost in USD the server reported for a call, or None (OpenAI reports none).
+
+    OpenRouter puts the amount charged in ``usage.cost``. With your own provider
+    key (``is_byok``), that is only OpenRouter's fee; the provider's charge is
+    in ``cost_details.upstream_inference_cost`` and is added.
+    """
+    cost = _field(usage, "cost")
+    if not isinstance(cost, int | float) or isinstance(cost, bool):
+        return None
+    total = float(cost)
+    if _field(usage, "is_byok") is True:
+        upstream = _field(_field(usage, "cost_details"), "upstream_inference_cost")
+        if isinstance(upstream, int | float):
+            total += float(upstream)
+    return total
+
+
 def _usage(response: Any) -> dict[str, Any]:
     usage = getattr(response, "usage", None)
     if usage is None:
         return {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "reasoning_tokens": 0}
     input_details = getattr(usage, "input_tokens_details", None)
     output_details = getattr(usage, "output_tokens_details", None)
-    return {
+    result: dict[str, Any] = {
         "input_tokens": usage.input_tokens or 0,
         "output_tokens": usage.output_tokens or 0,
         "cached_tokens": getattr(input_details, "cached_tokens", 0) or 0,
         # Already counted in output_tokens.
         "reasoning_tokens": getattr(output_details, "reasoning_tokens", 0) or 0,
     }
+    cost = reported_cost(usage)
+    if cost is not None:
+        result["cost_usd"] = cost
+    return result
 
 
 def _stop_reason(response: Any) -> str | None:
@@ -413,6 +445,11 @@ def _requested_api(api: str | None) -> str | None:
     if api and api not in ("responses", "chat"):
         raise ValueError(f"api must be 'responses' or 'chat', got {api!r}")
     return api or None
+
+
+def _is_openrouter_host(base_url: str | None) -> bool:
+    host = (urlparse(base_url or "").hostname or "").lower()
+    return host == "openrouter.ai" or host.endswith(".openrouter.ai")
 
 
 def _is_openai_host(base_url: str | None) -> bool:
@@ -480,8 +517,10 @@ class ModelClient:
         self._model = model
         self._service_tier = service_tier
         self._streaming = streaming
-        # Explicit prices win; otherwise the environment, then LiteLLM's list.
+        # Explicit prices win; otherwise the environment, then the built-in table.
         self._prices = prices if prices is not None else prices_from_env()
+        # OpenRouter reports each call's cost and groups calls by session ID.
+        self._openrouter = _is_openrouter_host(self._base_url)
 
         self._send_include = True
         requested = _requested_api(api)
@@ -498,12 +537,12 @@ class ModelClient:
 
     def can_price(self) -> bool:
         """Whether calls to this model can be priced, so a cost cap can work."""
-        return can_price(self._model, self._prices)
+        return self._openrouter or can_price(self._model, self._prices)
 
     def _priced(self, usage: dict[str, Any]) -> dict[str, Any]:
         """``usage`` with ``cost_usd`` filled in from the token counts."""
-        if usage.get("cost_usd"):
-            return usage  # the server reported a cost itself
+        if "cost_usd" in usage:
+            return usage  # the server reported the cost itself
         if not (usage.get("input_tokens") or usage.get("output_tokens")):
             return {**usage, "cost_usd": 0.0}
         cost = call_cost(self._model, usage, service_tier=self._service_tier, prices=self._prices)
@@ -521,6 +560,7 @@ class ModelClient:
             temperature=self._temperature,
             reasoning_effort=self._reasoning_effort,
             response_format=self._response_format,
+            send_session_id=self._openrouter,
         )
         self._can_fall_back = False
 
@@ -559,6 +599,7 @@ class ModelClient:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any = None,
         structured: bool = True,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         """Keyword arguments for ``responses.create``."""
         kwargs: dict[str, Any] = {
@@ -584,6 +625,8 @@ class ModelClient:
             kwargs["service_tier"] = self._service_tier
         if structured and self._response_format:
             kwargs["text"] = {"format": to_response_text_format(self._response_format)}
+        if self._openrouter and session_id:
+            kwargs["extra_headers"] = {"x-session-id": session_id}
         return kwargs
 
     def _prompt_request(self, prompt: Prompt, *, structured: bool = True) -> dict[str, Any]:
@@ -593,6 +636,7 @@ class ModelClient:
             tools=prompt.tools,
             tool_choice=prompt.tool_choice,
             structured=structured,
+            session_id=prompt.session_id,
         )
 
     async def stream(self, prompt: Prompt) -> AsyncIterator[StreamEvent]:
@@ -734,7 +778,7 @@ class ModelClient:
             for item in response.output
             if getattr(item, "type", None) == "message" and _message_text(item)
         )
-        return text, {**_usage(response), "cost_usd": 0.0}
+        return text, _usage(response)
 
     async def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         """Non-streaming completion of chat-format messages: ``(content, usage_dict)``.

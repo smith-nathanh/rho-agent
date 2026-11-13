@@ -179,7 +179,7 @@ state.messages                        # Full message list (OpenAI chat format; s
 state.get_user_messages()             # Extract just the user prompts
 ```
 
-`cost_usd` is computed from token counts and a price for the model: LiteLLM's price list when the `evals` extra is installed, or flat prices you give. Without either it stays `0`, and `max_cost_usd` cannot stop a session (it warns when the session starts):
+`cost_usd` is the cost OpenRouter reports for each call, or, for OpenAI, token counts priced from rho-agent's built-in table of OpenAI models. For any other model give flat prices; without a price it stays `0`, and `max_cost_usd` cannot stop a session (it warns when the session starts):
 
 ```python
 from rho_agent.client.model import ModelClient

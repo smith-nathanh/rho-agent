@@ -1,37 +1,39 @@
-"""Dollar cost of a model call, computed from its token counts.
+"""Dollar cost of a model call.
 
-Providers report tokens, not dollars, so cost is tokens times price. Prices
-come from, in order:
+OpenAI reports tokens, not dollars, so cost is tokens times price. OpenRouter
+reports the cost of each call itself, and ``ModelClient`` uses that when it is
+there. Otherwise prices come from, in order:
 
 1. An explicit ``Prices`` (``ModelClient(prices=...)``), or the
    ``RHO_AGENT_PRICE_INPUT``, ``RHO_AGENT_PRICE_CACHED_INPUT`` and
    ``RHO_AGENT_PRICE_OUTPUT`` environment variables, in USD per million tokens.
-2. LiteLLM's price list, when LiteLLM is installed (the ``evals`` extra). It
-   knows cached-input prices, long-context price tiers and the flex and
-   priority service tiers. Only the list bundled with the installed LiteLLM
-   is used; nothing is fetched over the network.
+2. The built-in OpenAI price table, ``openai_prices.json``. It has standard,
+   flex and priority prices and the higher prices for long prompts, and is
+   regenerated from LiteLLM's price list with ``scripts/update_prices.py``.
 
 With neither, the cost of a call is unknown and reported as 0.
 """
 
 from __future__ import annotations
 
+import json
 import os
-import warnings
 from dataclasses import dataclass
+from functools import cache
+from importlib.resources import files
 from typing import Any
 
 PRICE_INPUT_ENV = "RHO_AGENT_PRICE_INPUT"
 PRICE_CACHED_INPUT_ENV = "RHO_AGENT_PRICE_CACHED_INPUT"
 PRICE_OUTPUT_ENV = "RHO_AGENT_PRICE_OUTPUT"
 
-# Service tiers LiteLLM prices separately; anything else is billed as standard.
-_PRICED_SERVICE_TIERS = frozenset({"flex", "priority"})
+# Service tiers priced separately; anything else ("auto", "default") is standard.
+_SERVICE_TIERS = frozenset({"flex", "priority"})
 
 
 @dataclass(frozen=True)
 class Prices:
-    """Flat prices in USD per million tokens. No long-context tiers."""
+    """Flat prices in USD per million tokens."""
 
     input: float
     output: float
@@ -69,54 +71,29 @@ def prices_from_env() -> Prices | None:
         raise ValueError(f"Prices must be numbers (USD per million tokens): {e}") from e
 
 
-_litellm: Any = None
-_litellm_loaded = False
+@cache
+def _openai_table() -> dict[str, Any]:
+    text = files("rho_agent.client").joinpath("openai_prices.json").read_text(encoding="utf-8")
+    return json.loads(text)["models"]
 
 
-def _load_litellm() -> Any:
-    """Import LiteLLM once, using its bundled price list. None if not installed."""
-    global _litellm, _litellm_loaded
-    if not _litellm_loaded:
-        _litellm_loaded = True
-        # Without this, importing LiteLLM fetches the latest price list from
-        # GitHub. The bundled one keeps cost reproducible for a given install.
-        os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                import litellm
-        except ImportError:
-            litellm = None
-        else:
-            # Otherwise it prints a provider list for every unknown model.
-            litellm.suppress_debug_info = True
-        _litellm = litellm
-    return _litellm
+def table_prices(
+    model: str, input_tokens: int = 0, service_tier: str | None = None
+) -> Prices | None:
+    """Prices for an OpenAI model from the built-in table, or None if it is not listed.
 
-
-def litellm_cost(
-    model: str, usage: dict[str, Any], service_tier: str | None = None
-) -> float | None:
-    """Cost from LiteLLM's price list, or None if LiteLLM or the model is unknown."""
-    litellm = _load_litellm()
-    if litellm is None:
+    A prompt longer than the model's long-context threshold is billed at the
+    long-context prices for the whole call, input and output.
+    """
+    entry = _openai_table().get(model.removeprefix("openai/"))
+    if entry is None:
         return None
-    kwargs: dict[str, Any] = {
-        "model": model,
-        # LiteLLM counts cached tokens inside prompt_tokens, as the API does.
-        "prompt_tokens": int(usage.get("input_tokens") or 0),
-        "completion_tokens": int(usage.get("output_tokens") or 0),
-        "cache_read_input_tokens": int(usage.get("cached_tokens") or 0),
-    }
-    if service_tier in _PRICED_SERVICE_TIERS:
-        kwargs["service_tier"] = service_tier
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            input_cost, output_cost = litellm.cost_per_token(**kwargs)
-    except Exception:
-        return None
-    return float(input_cost) + float(output_cost)
+    tier = service_tier if service_tier in _SERVICE_TIERS else "standard"
+    prices = entry.get(tier) or entry["standard"]
+    long_context = entry.get("long_context")
+    if long_context and input_tokens > long_context["above_tokens"]:
+        prices = long_context.get(tier) or long_context["standard"]
+    return Prices(**prices)
 
 
 def call_cost(
@@ -127,12 +104,12 @@ def call_cost(
     prices: Prices | None = None,
 ) -> float | None:
     """Cost of one call in USD, or None when no price is known for ``model``."""
-    if prices is not None:
-        return prices.cost(usage)
-    return litellm_cost(model, usage, service_tier)
+    if prices is None:
+        input_tokens = int(usage.get("input_tokens") or 0)
+        prices = table_prices(model, input_tokens, service_tier)
+    return None if prices is None else prices.cost(usage)
 
 
 def can_price(model: str, prices: Prices | None = None) -> bool:
     """Whether a price is known for ``model``."""
-    probe = {"input_tokens": 1_000, "output_tokens": 1_000}
-    return call_cost(model, probe, prices=prices) is not None
+    return prices is not None or table_prices(model) is not None

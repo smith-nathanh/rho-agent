@@ -102,11 +102,13 @@ rho-agent reads only these three for the model connection. `OPENAI_API_KEY`, `OP
 
 ### Cost
 
-Providers report tokens, not dollars, so rho-agent computes each call's cost from its token counts. With the `evals` extra installed, prices come from LiteLLM's price list, which covers cached input, long-context price tiers and the flex and priority service tiers; the list bundled with the installed LiteLLM is used and nothing is fetched. The `RHO_AGENT_PRICE_*` variables override it with flat prices. With neither, cost is reported as `0`, and a session with a cost cap warns that the cap cannot trigger.
+Every call's cost is recorded in the session's usage and trace:
 
-```bash
-uv tool install 'rho-agent[evals] @ git+https://github.com/smith-nathanh/rho-agent'
-```
+- **OpenRouter** reports the cost of each call itself, and rho-agent uses that figure.
+- **OpenAI** reports only tokens, so rho-agent prices them from a built-in table of OpenAI models. The table has cached-input prices, the higher prices for prompts over a model's long-context threshold, and the flex and priority service tiers. It is regenerated from LiteLLM's public price list with `python scripts/update_prices.py`; nothing is fetched at runtime.
+- **Any other server** has no known price. Set the `RHO_AGENT_PRICE_*` variables to price it yourself; they also override the table. Without them cost is reported as `0`, and a session with a cost cap warns that the cap cannot trigger.
+
+With OpenRouter, rho-agent also sends the session ID with every call (`x-session-id`), so OpenRouter's [Broadcast](https://openrouter.ai/docs/guides/features/broadcast) shows a whole session as one trace in tools such as LangSmith or Arize.
 
 ### Database connections
 
