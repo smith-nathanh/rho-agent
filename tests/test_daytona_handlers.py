@@ -569,3 +569,55 @@ class TestDaytonaBackendRouting:
             _, kwargs = mock_reg.call_args
             assert kwargs["backend"] is backend
             assert agent.sandbox_manager is mock_manager
+
+
+# ---------------------------------------------------------------------------
+# Relative paths resolve against the sandbox working directory
+# ---------------------------------------------------------------------------
+
+
+class TestRelativePaths:
+    @pytest.fixture
+    def manager(self, sandbox):
+        mgr = SandboxManager(working_dir="/workspace/proj")
+        mgr._sandbox = sandbox
+        return mgr
+
+    def test_resolve_path(self, manager):
+        assert manager.resolve_path("src/a.py") == "/workspace/proj/src/a.py"
+        assert manager.resolve_path(".") == "/workspace/proj"
+        assert manager.resolve_path("../other/a.py") == "/workspace/other/a.py"
+        assert manager.resolve_path("/etc/hosts") == "/etc/hosts"
+        assert manager.resolve_path("~/notes.txt") == "~/notes.txt"
+
+    async def test_write(self, manager, sandbox):
+        result = await DaytonaWriteHandler(manager).handle(
+            _invocation("write", path="src/a.py", content="x = 1\n")
+        )
+        assert result.success is True
+        assert sandbox.fs.upload_file.call_args.args[1] == "/workspace/proj/src/a.py"
+        assert "/workspace/proj/src" in sandbox.process.exec.call_args.args[0]
+
+    async def test_edit(self, manager, sandbox):
+        sandbox.fs.download_file.return_value = b"x = 1\n"
+        result = await DaytonaEditHandler(manager).handle(
+            _invocation("edit", path="a.py", old_string="x = 1", new_string="x = 2")
+        )
+        assert result.success is True
+        sandbox.fs.download_file.assert_called_once_with("/workspace/proj/a.py")
+        assert sandbox.fs.upload_file.call_args.args[1] == "/workspace/proj/a.py"
+
+    async def test_read(self, manager, sandbox):
+        sandbox.process.exec.return_value = _make_exec_response("one\n1", 0)
+        result = await DaytonaReadHandler(manager).handle(_invocation("read", path="a.txt"))
+        assert result.success is True
+        assert "'/workspace/proj/a.txt'" in sandbox.process.exec.call_args.args[0]
+
+    async def test_list_glob_grep(self, manager, sandbox):
+        sandbox.process.exec.return_value = _make_exec_response("", 0)
+        await DaytonaListHandler(manager).handle(_invocation("list", path="."))
+        assert "'/workspace/proj'" in sandbox.process.exec.call_args.args[0]
+        await DaytonaGlobHandler(manager).handle(_invocation("glob", pattern="*.py", path="src"))
+        assert "'/workspace/proj/src'" in sandbox.process.exec.call_args.args[0]
+        await DaytonaGrepHandler(manager).handle(_invocation("grep", pattern="x", path="src"))
+        assert any("/workspace/proj/src" in c.args[0] for c in sandbox.process.exec.call_args_list)

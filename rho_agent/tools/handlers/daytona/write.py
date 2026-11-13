@@ -36,7 +36,7 @@ class DaytonaWriteHandler(ToolHandler):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Absolute path where the file should be written",
+                    "description": "Path where the file should be written (relative paths are taken from the working directory)",
                 },
                 "content": {
                     "type": "string",
@@ -53,6 +53,7 @@ class DaytonaWriteHandler(ToolHandler):
 
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
+        path_str = self._manager.resolve_path(path_str)
 
         if not content:
             return ToolOutput(content="No content provided", success=False)

@@ -40,7 +40,7 @@ class DaytonaListHandler(ToolHandler):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Absolute path to the directory to list",
+                    "description": "Path to the directory to list (relative paths are taken from the working directory)",
                 },
                 "show_hidden": {
                     "type": "boolean",
@@ -67,6 +67,7 @@ class DaytonaListHandler(ToolHandler):
 
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
+        path_str = self._manager.resolve_path(path_str)
 
         try:
             sandbox = await self._manager.get_sandbox()

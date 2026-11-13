@@ -36,6 +36,7 @@ class DaytonaViewImageHandler(ToolHandler):
         path_str = invocation.arguments.get("path", "")
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
+        path_str = self._manager.resolve_path(path_str)
         try:
             sandbox = await self._manager.get_sandbox()
             data = await sandbox.fs.download_file(path_str)
