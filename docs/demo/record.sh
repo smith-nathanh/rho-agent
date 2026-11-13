@@ -39,6 +39,13 @@ touch "$demo_home/.rho-agent-demo"
 demo_home="$(cd "$demo_home" && pwd -P)"  # the real path, so projects show as ~/proj/...
 cp -R docs/demo/projects/. "$demo_home/proj/"
 cp docs/demo/careful.yaml "$demo_home/careful.yaml"
+# Each sample project is its own git repository, as a real project would be:
+# agents usually look at `git status` first.
+for project in "$demo_home"/proj/*/; do
+  git -C "$project" init -q
+  git -C "$project" add -A
+  git -C "$project" -c user.name=demo -c user.email=demo@example.com commit -q -m "Initial commit"
+done
 
 # The tapes switch HOME to this directory inside the recorded shell.
 export DEMO_HOME="$demo_home"
@@ -79,7 +86,8 @@ case "${1:-}" in
 total. Reproduce it with the tests, fix invoice.py, and run the tests again."
     agent api-server "Review this service before release. Use the delegate tool to run two \
 reviews in parallel: one of auth.py for security problems, and one of whether the tests \
-cover every route in routes.py (that reviewer should run the test suite). Then summarise."
+cover every route in routes.py (that reviewer should run the test suite). Start both \
+reviews in one step, before doing anything else yourself. Then summarise."
 
     sessions="$demo_home/.config/rho-agent/sessions"
     session_for() {  # session_for <project> -> session ID

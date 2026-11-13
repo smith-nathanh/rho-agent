@@ -39,6 +39,7 @@ class TokenStatus:
         self.total_input_tokens = input_tokens
         self.total_output_tokens = output_tokens
         self.total_cached_tokens = 0
+        self.total_reasoning_tokens = 0
 
     def update(self, usage: dict[str, int] | None) -> None:
         """Update counters from a turn usage dict."""
@@ -48,6 +49,9 @@ class TokenStatus:
         self.total_input_tokens = usage.get("total_input_tokens", self.total_input_tokens)
         self.total_output_tokens = usage.get("total_output_tokens", self.total_output_tokens)
         self.total_cached_tokens = usage.get("total_cached_tokens", self.total_cached_tokens)
+        self.total_reasoning_tokens = usage.get(
+            "total_reasoning_tokens", self.total_reasoning_tokens
+        )
 
     @property
     def cache_hit_rate(self) -> float:
@@ -59,11 +63,15 @@ class TokenStatus:
     def render(self) -> str:
         """Render token metrics as a compact status-bar string."""
         cache_pct = f" cache:{self.cache_hit_rate:.0%}" if self.total_cached_tokens else ""
+        # Reasoning tokens are part of the output count; shown when there are any.
+        reasoning = (
+            f" ({self.total_reasoning_tokens} reasoning)" if self.total_reasoning_tokens else ""
+        )
         return (
             f"context:{self.context_size}"
             f"{cache_pct}, "
             f"session: {self.total_input_tokens} in | "
-            f"{self.total_output_tokens} out"
+            f"{self.total_output_tokens} out{reasoning}"
         )
 
 
@@ -72,6 +80,7 @@ def _sync_token_status_from_state(token_status: TokenStatus, state: Any) -> None
     token_status.total_input_tokens = state.usage.get("input_tokens", 0)
     token_status.total_output_tokens = state.usage.get("output_tokens", 0)
     token_status.total_cached_tokens = state.usage.get("cached_tokens", 0)
+    token_status.total_reasoning_tokens = state.usage.get("reasoning_tokens", 0)
 
 
 def _format_token_count(tokens: int) -> str:

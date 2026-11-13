@@ -201,8 +201,12 @@ def handle_event(
             if total_cached and total_in:
                 cache_str = f", cache: {total_cached / total_in:.0%}"
             cost_str = f", cost: ${total_cost:.4f}" if total_cost else ""
+            # Reasoning tokens are part of the output count; shown when there are any.
+            total_reasoning = usage.get("total_reasoning_tokens", 0)
+            reasoning_str = f" ({total_reasoning} reasoning)" if total_reasoning else ""
             print(
-                f"[context: {context_size}{cache_str}, session: {total_in} in | {total_out} out{cost_str}]"
+                f"[context: {context_size}{cache_str}, session: {total_in} in | "
+                f"{total_out} out{reasoning_str}{cost_str}]"
             )
 
     elif event.type == "error":
