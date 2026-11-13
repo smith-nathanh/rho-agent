@@ -6,7 +6,7 @@ order: 2
 
 ## Prerequisites
 
-- Python 3.13+
+- Python 3.11+
 - `uv` (recommended)
 - An OpenAI-compatible API key (set `OPENAI_API_KEY`)
 
@@ -15,7 +15,7 @@ order: 2
 CLI install (recommended):
 
 ```bash
-uv tool install rho-agent
+uv tool install git+https://github.com/smith-nathanh/rho-agent
 ```
 
 Convenience installer:
@@ -27,7 +27,7 @@ curl -fsSL https://rho-agent.dev/install.sh | bash
 Python SDK / runtime install (in your project directory):
 
 ```bash
-uv add rho-agent
+uv add git+https://github.com/smith-nathanh/rho-agent
 ```
 
 Local development install:
@@ -41,7 +41,7 @@ uv tool install .
 
 This makes `rho-agent` available as a global command. If you skip `uv tool install`, prefix the commands below with `uv run`.
 
-Use `uv add rho-agent` when you want to import `rho_agent` in your own Python project. `uv tool install` is for CLI commands on your `PATH`.
+Use `uv add git+https://github.com/smith-nathanh/rho-agent` when you want to import `rho_agent` in your own Python project. `uv tool install` is for CLI commands on your `PATH`.
 
 ## Start an interactive session
 
@@ -99,8 +99,8 @@ rho-agent main "list all tables and describe their schemas"
 
 SQLite works out of the box.
 
-- CLI install: `uv tool install 'rho-agent[db]'`
-- SDK/project install: `uv add 'rho-agent[db]'`
+- CLI install: `uv tool install 'rho-agent[db] @ git+https://github.com/smith-nathanh/rho-agent'`
+- SDK/project install: `uv add 'rho-agent[db] @ git+https://github.com/smith-nathanh/rho-agent'`
 
 See [Tools](tools/) for configuration details.
 
@@ -110,7 +110,7 @@ Use the Daytona backend to execute shell and file tools in a remote cloud sandbo
 
 ```bash
 # CLI install
-uv tool install 'rho-agent[daytona]'
+uv tool install 'rho-agent[daytona] @ git+https://github.com/smith-nathanh/rho-agent'
 export DAYTONA_API_KEY=your-key
 rho-agent main --backend daytona --profile developer "explore the filesystem and install Python 3.13"
 ```
@@ -118,7 +118,7 @@ rho-agent main --backend daytona --profile developer "explore the filesystem and
 For SDK/project usage, install the extra in your project:
 
 ```bash
-uv add 'rho-agent[daytona]'
+uv add 'rho-agent[daytona] @ git+https://github.com/smith-nathanh/rho-agent'
 ```
 
 A sandbox is provisioned on the first tool call and automatically cleaned up when the session ends.

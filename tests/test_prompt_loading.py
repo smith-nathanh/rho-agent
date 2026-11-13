@@ -91,3 +91,17 @@ def test_eval_reviewer_prompt_loads_and_renders():
     assert [var.name for var in prompt.variables] == ["task_instruction", "agent_trace"]
     assert "Fix the failing test" in system
     assert "REVISION_NEEDED:" in system
+
+
+def test_default_prompt_resolves_without_vars(tmp_path, monkeypatch) -> None:
+    """A config with no system prompt works from Python, as it does from the CLI."""
+    from rho_agent.core.config import AgentConfig
+
+    monkeypatch.setenv("HOME", str(tmp_path))  # no user default.md
+
+    prompt = AgentConfig(profile="developer", working_dir="/srv/app").resolve_system_prompt()
+    assert "/srv/app" in prompt
+    assert "{{" not in prompt
+
+    custom = AgentConfig(profile="developer", vars={"working_dir": "/elsewhere"})
+    assert "/elsewhere" in custom.resolve_system_prompt()

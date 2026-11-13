@@ -11,14 +11,14 @@ The API lets you create and run agents from code. The core pattern is: configure
 Use a project dependency install (not `uv tool install`) so `import rho_agent` works in your code:
 
 ```bash
-uv add rho-agent
+uv add git+https://github.com/smith-nathanh/rho-agent
 ```
 
 Optional extras:
 
 ```bash
-uv add 'rho-agent[db]'
-uv add 'rho-agent[daytona]'
+uv add 'rho-agent[db] @ git+https://github.com/smith-nathanh/rho-agent'
+uv add 'rho-agent[daytona] @ git+https://github.com/smith-nathanh/rho-agent'
 ```
 
 ## Basic usage

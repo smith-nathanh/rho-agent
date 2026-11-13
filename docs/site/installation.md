@@ -12,7 +12,7 @@ order: 3
 ## Install the CLI (recommended for command-line use)
 
 ```bash
-uv tool install rho-agent
+uv tool install git+https://github.com/smith-nathanh/rho-agent
 ```
 
 `uv tool install` installs the `rho-agent` and `rho-eval` commands in an isolated tool environment and adds them to your `PATH`.
@@ -38,14 +38,14 @@ For maintainers cutting a release: the installer looks for GitHub release assets
 Install inside your project directory so `import rho_agent` works in your app code:
 
 ```bash
-uv add rho-agent
+uv add git+https://github.com/smith-nathanh/rho-agent
 ```
 
 If you need optional features, add extras to the dependency:
 
 ```bash
-uv add 'rho-agent[db]'
-uv add 'rho-agent[daytona]'
+uv add 'rho-agent[db] @ git+https://github.com/smith-nathanh/rho-agent'
+uv add 'rho-agent[daytona] @ git+https://github.com/smith-nathanh/rho-agent'
 ```
 
 ## Install from source (development)
@@ -107,8 +107,8 @@ Database tools are configured via a YAML config file, not environment variables.
 
 Required for `--backend daytona`.
 
-- CLI install: `uv tool install 'rho-agent[daytona]'`
-- SDK/project install: `uv add 'rho-agent[daytona]'`
+- CLI install: `uv tool install 'rho-agent[daytona] @ git+https://github.com/smith-nathanh/rho-agent'`
+- SDK/project install: `uv add 'rho-agent[daytona] @ git+https://github.com/smith-nathanh/rho-agent'`
 
 See the [Daytona](daytona/) guide for configuration and environment variables.
 

@@ -11,7 +11,7 @@ The Daytona backend routes shell and file tool execution to a remote cloud sandb
 Install the SDK extra and set your API key:
 
 ```bash
-uv tool install 'rho-agent[daytona]'
+uv tool install 'rho-agent[daytona] @ git+https://github.com/smith-nathanh/rho-agent'
 export DAYTONA_API_KEY=your-key
 ```
 
