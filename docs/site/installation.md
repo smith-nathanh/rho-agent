@@ -73,18 +73,20 @@ rho-agent --help
 
 ## Environment variables
 
-### Required
+### Model provider
 
-| Variable | Description |
-|---|---|
-| `OPENAI_API_KEY` | API key for the model provider |
+rho-agent reads only these three for the model connection. `OPENAI_API_KEY`, `OPENAI_BASE_URL` and `OPENAI_MODEL` are ignored, so a key set for another tool is never sent anywhere by accident.
+
+| Variable | Default | Description |
+|---|---|---|
+| `RHO_AGENT_API_KEY` | — | API key from your provider. Required, except for a server of your own that needs none |
+| `RHO_AGENT_BASE_URL` | OpenAI | Your provider's OpenAI-compatible endpoint, e.g. `https://openrouter.ai/api/v1` |
+| `RHO_AGENT_MODEL` | `gpt-6.1-terra` | Default model, as your provider names it |
 
 ### Optional
 
 | Variable | Default | Description |
 |---|---|---|
-| `OPENAI_BASE_URL` | OpenAI default | API endpoint override (for compatible providers) |
-| `OPENAI_MODEL` | `gpt-6.1-terra` | Default model |
 | `RHO_AGENT_PROFILE` | `readonly` | Default permission profile |
 | `RHO_AGENT_BACKEND` | `local` | Agent backend — `local` or `daytona` |
 | `RHO_AGENT_SERVICE_TIER` | — | API service tier (e.g. `flex`) |

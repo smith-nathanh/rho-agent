@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
+from ..client.model import MissingApiKeyError
+
+__all__ = [
+    "CliUsageError",
+    "InvalidModeError",
+    "InvalidProfileError",
+    "MissingApiKeyError",
+    "PromptLoadError",
+]
+
 
 class CliUsageError(ValueError):
     """Base class for user-facing CLI configuration and usage errors."""
-
-
-class MissingApiKeyError(CliUsageError):
-    """Raised when API credentials are required but missing."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            "Missing API key. Set OPENAI_API_KEY, or pass --base-url to an endpoint "
-            "that does not require OpenAI credentials."
-        )
 
 
 class InvalidProfileError(CliUsageError):

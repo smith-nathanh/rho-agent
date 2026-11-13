@@ -186,7 +186,7 @@ async def test_resume_rebuilds_usage_and_run_count(tmp_path: Path) -> None:
 async def test_resume_with_model_override_keeps_the_saved_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")  # resume builds a real client
+    monkeypatch.setenv("RHO_AGENT_API_KEY", "test-key")  # resume builds a real client
     store = SessionStore(tmp_path / "sessions")
     saved = AgentConfig(
         system_prompt="You are the saved agent.",
@@ -280,7 +280,7 @@ def test_resume_cli_applies_flags_given_on_the_command_line(
 
     from rho_agent.cli import main_cmd
 
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("RHO_AGENT_API_KEY", "test-key")
     monkeypatch.setattr(main_cmd, "SESSIONS_DIR", tmp_path / "sessions")
     store = SessionStore(tmp_path / "sessions")
     saved = AgentConfig(

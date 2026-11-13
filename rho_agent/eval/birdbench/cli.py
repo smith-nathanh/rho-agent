@@ -15,6 +15,7 @@ import typer
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
+from ...client.model import BASE_URL_ENV, default_model
 from .config import EvalAbortedError, EvalConfig
 from .output import (
     create_run_dir,
@@ -41,11 +42,11 @@ def bird(
     model: Annotated[
         str,
         typer.Option("--model", "-m", help="Model to use"),
-    ] = os.getenv("OPENAI_MODEL", "gpt-6.1-terra"),
+    ] = default_model(),
     base_url: Annotated[
         str | None,
         typer.Option("--base-url", help="API base URL"),
-    ] = os.getenv("OPENAI_BASE_URL"),
+    ] = os.getenv(BASE_URL_ENV),
     max_turns: Annotated[
         int,
         typer.Option("--max-turns", help="Maximum turns per task"),

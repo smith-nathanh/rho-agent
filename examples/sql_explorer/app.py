@@ -18,7 +18,7 @@ Features:
     - SQL Editor: Write and execute your own SQL queries
 
 Environment:
-    Requires OPENAI_API_KEY (or OPENAI_BASE_URL for alternative providers)
+    Requires RHO_AGENT_API_KEY (and RHO_AGENT_BASE_URL for providers other than OpenAI)
     set in .env or environment.
 """
 

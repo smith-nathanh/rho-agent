@@ -60,7 +60,7 @@ async def run_agent_with_tools(
 
 
 if __name__ == "__main__":
-    load_dotenv()  # Load OPENAI_API_KEY from .env
+    load_dotenv()  # Load RHO_AGENT_API_KEY from .env
 
     target_dir = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
     task = (

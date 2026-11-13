@@ -7,10 +7,11 @@ A Streamlit web app demonstrating rho-agent's database exploration capabilities.
 Requires an OpenAI-compatible API key. Create a `.env` file in the **project root** (not in this directory):
 
 ```bash
-OPENAI_API_KEY=sk-...
+RHO_AGENT_API_KEY=sk-...
 
-# Optional: alternative provider
-OPENAI_BASE_URL=https://api.together.xyz/v1
+# Optional: a provider other than OpenAI
+RHO_AGENT_BASE_URL=https://openrouter.ai/api/v1
+RHO_AGENT_MODEL=anthropic/claude-haiku-4.5
 ```
 
 Install the `dashboard` extra for Streamlit:

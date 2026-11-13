@@ -12,6 +12,7 @@ from openai import APIStatusError
 
 from rho_agent.client.model import (
     Message,
+    MissingApiKeyError,
     ModelCallError,
     ModelClient,
     Prompt,
@@ -42,8 +43,8 @@ TOOLS = [
 
 @pytest.fixture(autouse=True)
 def _openai_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-    monkeypatch.delenv("RHO_AGENT_API", raising=False)
+    for name in ("RHO_AGENT_BASE_URL", "RHO_AGENT_API_KEY", "RHO_AGENT_MODEL", "RHO_AGENT_API"):
+        monkeypatch.delenv(name, raising=False)
 
 
 # ---------------------------------------------------------------------------
@@ -590,9 +591,10 @@ async def test_reasoning_items_go_back_on_the_next_request_and_after_resume(
         (None, None, "responses"),
         ("https://api.openai.com/v1", None, "responses"),
         ("https://example.openai.azure.com/openai/v1", None, "responses"),
-        ("http://localhost:8000/v1", None, "chat"),
-        ("https://api.cerebras.ai/v1", None, "chat"),
+        ("http://localhost:8000/v1", None, "responses"),
+        ("https://openrouter.ai/api/v1", None, "responses"),
         ("https://gateway.example.com/v1", "responses", "responses"),
+        ("http://localhost:8000/v1", "chat", "chat"),
         (None, "chat", "chat"),
     ],
 )
@@ -603,18 +605,124 @@ def test_endpoint_choice(base_url: str | None, api: str | None, expected: str) -
 
 
 def test_endpoint_choice_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:8000/v1")
-    assert ModelClient(model="m", api_key="test-key").api == "chat"
-
-    monkeypatch.setenv("RHO_AGENT_API", "responses")
+    monkeypatch.setenv("RHO_AGENT_BASE_URL", "http://localhost:8000/v1")
     assert ModelClient(model="m", api_key="test-key").api == "responses"
+
+    monkeypatch.setenv("RHO_AGENT_API", "chat")
+    assert ModelClient(model="m", api_key="test-key").api == "chat"
 
     with pytest.raises(ValueError, match="api must be"):
         ModelClient(model="m", api_key="test-key", api="completions")
 
 
-async def test_custom_base_url_uses_chat_completions() -> None:
-    client = ModelClient(model="gpt-oss-120b", base_url="http://localhost:8000/v1", api_key="k")
+def _chat_reply(text: str) -> NS:
+    """A non-streaming Chat Completions response."""
+    return NS(
+        choices=[NS(message=NS(content=text, tool_calls=None), finish_reason="stop")],
+        usage=NS(prompt_tokens=9, completion_tokens=4, prompt_tokens_details=None),
+    )
+
+
+def _with_chat(client: ModelClient, responses: _FakeResponses, *replies: Any) -> AsyncMock:
+    """Give ``client`` a fake Chat Completions endpoint next to its Responses one."""
+    create = AsyncMock(side_effect=list(replies))
+    client._client = NS(responses=responses, chat=NS(completions=NS(create=create)))
+    return create
+
+
+async def test_missing_responses_endpoint_falls_back_to_chat_for_good() -> None:
+    client, responses = _client(
+        _StatusError(404, "Not Found"), base_url="https://api.cerebras.ai/v1"
+    )
+    create = _with_chat(client, responses, _chat_reply("first"), _chat_reply("second"))
+
+    text, usage = await client.complete_prompt(_prompt())
+    again, _ = await client.complete_prompt(_prompt())
+
+    assert (text, again) == ("first", "second")
+    assert usage["input_tokens"] == 9
+    assert client.api == "chat"
+    assert len(responses.requests) == 1  # /v1/responses is not tried again
+    assert create.call_args.kwargs["messages"][0] == {"role": "system", "content": "sys"}
+
+
+class _ChatStream(_FakeStream):
+    async def __aenter__(self) -> _ChatStream:
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        return None
+
+
+def _chat_stream(text: str) -> _ChatStream:
+    return _ChatStream(
+        [
+            NS(
+                choices=[NS(delta=NS(content=text, tool_calls=None), finish_reason="stop")],
+                usage=None,
+            ),
+            NS(
+                choices=[],
+                usage=NS(prompt_tokens=9, completion_tokens=4, prompt_tokens_details=None),
+            ),
+        ]
+    )
+
+
+@pytest.mark.parametrize(("status", "streaming"), [(404, True), (405, True), (404, False)])
+async def test_streaming_falls_back_to_chat(status: int, streaming: bool) -> None:
+    client, responses = _client(
+        _StatusError(status, "nope"), base_url="http://localhost:8000/v1", streaming=streaming
+    )
+    _with_chat(client, responses, _chat_stream("hi"))
+
+    events = await _collect(client, _prompt())
+
+    assert client.api == "chat"
+    assert [e.type for e in events] == ["text", "done"]
+    assert events[0].content == "hi" and events[1].usage["input_tokens"] == 9
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "status"),
+    [
+        ({}, 404),  # OpenAI itself: a 404 means a bad model, not a missing endpoint
+        ({"base_url": "http://localhost:8000/v1", "api": "responses"}, 404),  # pinned
+        ({"base_url": "http://localhost:8000/v1"}, 400),  # a bad request, not a missing endpoint
+    ],
+)
+async def test_other_failures_do_not_fall_back(kwargs: dict[str, Any], status: int) -> None:
+    client, _ = _client(_StatusError(status, "nope"), **kwargs)
+
+    [event] = await _collect(client, _prompt())
+
+    assert event.type == "error" and f"API error {status}" in event.content
+    assert client.api == "responses"
+
+
+async def test_include_is_dropped_when_the_server_rejects_it() -> None:
+    rejected = _StatusError(400, "Error code: 400 - Field 'include' is not supported")
+    client, responses = _client(
+        rejected,
+        [_text_delta("hi"), _item_done(_message("hi")), _completed()],
+        [_text_delta("again"), _item_done(_message("again")), _completed()],
+        base_url="https://api.groq.com/openai/v1",
+    )
+
+    first = await _collect(client, _prompt())
+    second = await _collect(client, _prompt())
+
+    assert first[0].content == "hi" and second[0].content == "again"
+    assert "include" in responses.requests[0]
+    assert "include" not in responses.requests[1]
+    assert "include" not in responses.requests[2]  # not sent again
+    assert client.api == "responses"
+
+
+async def test_chat_completions_client() -> None:
+    client = ModelClient(
+        model="gpt-oss-120b", base_url="http://localhost:8000/v1", api_key="k", api="chat"
+    )
 
     def delta(**kwargs: Any) -> NS:
         return NS(content=None, tool_calls=None, **kwargs)
@@ -637,13 +745,6 @@ async def test_custom_base_url_uses_chat_completions() -> None:
         ),
     ]
 
-    class _ChatStream(_FakeStream):
-        async def __aenter__(self) -> _ChatStream:
-            return self
-
-        async def __aexit__(self, *exc: Any) -> None:
-            return None
-
     create = AsyncMock(return_value=_ChatStream(chunks))
     client._chat._client = NS(chat=NS(completions=NS(create=create)))
     history = Message(
@@ -665,3 +766,42 @@ async def test_custom_base_url_uses_chat_completions() -> None:
         {"role": "system", "content": "sys"},
         {"role": "assistant", "content": "earlier"},
     ]
+
+
+# ---------------------------------------------------------------------------
+# Connection settings from the environment
+# ---------------------------------------------------------------------------
+
+
+def test_only_rho_agent_variables_are_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-meant-for-another-tool")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://elsewhere.example.com/v1")
+
+    with pytest.raises(MissingApiKeyError, match="RHO_AGENT_API_KEY"):
+        ModelClient(model="m")
+
+    monkeypatch.setenv("RHO_AGENT_API_KEY", "rho-key")
+    client = ModelClient(model="m")
+    assert client._client.api_key == "rho-key"
+    assert str(client._client.base_url).rstrip("/") == "https://api.openai.com/v1"
+
+    monkeypatch.setenv("RHO_AGENT_BASE_URL", "https://openrouter.ai/api/v1")
+    client = ModelClient(model="m")
+    assert str(client._client.base_url).rstrip("/") == "https://openrouter.ai/api/v1"
+    assert client._can_fall_back
+
+
+def test_a_server_of_your_own_needs_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-meant-for-another-tool")
+
+    client = ModelClient(model="m", base_url="http://localhost:8000/v1")
+
+    assert client._client.api_key == "none"
+
+
+def test_default_model_comes_from_rho_agent_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_MODEL", "not-this-one")
+    assert AgentConfig().model == "gpt-6.1-terra"
+
+    monkeypatch.setenv("RHO_AGENT_MODEL", "anthropic/claude-haiku-4.5")
+    assert AgentConfig().model == "anthropic/claude-haiku-4.5"

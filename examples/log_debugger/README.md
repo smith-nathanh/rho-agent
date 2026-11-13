@@ -15,16 +15,17 @@ Dispatches read-only debug agents in parallel across multiple working directorie
 Requires an OpenAI-compatible API key. Set it via environment variable or `.env` file in the project root:
 
 ```bash
-export OPENAI_API_KEY=sk-...
+export RHO_AGENT_API_KEY=sk-...
 # or
-echo 'OPENAI_API_KEY=sk-...' >> .env
+echo 'RHO_AGENT_API_KEY=sk-...' >> .env
 ```
 
-To use a non-OpenAI provider, set `OPENAI_BASE_URL` as well:
+To use a provider other than OpenAI, set its endpoint and a model as well:
 
 ```bash
-export OPENAI_BASE_URL=https://api.together.xyz/v1
-export OPENAI_API_KEY=your-key
+export RHO_AGENT_BASE_URL=https://openrouter.ai/api/v1
+export RHO_AGENT_API_KEY=your-key
+export RHO_AGENT_MODEL=anthropic/claude-haiku-4.5
 ```
 
 ## Usage

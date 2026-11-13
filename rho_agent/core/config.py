@@ -9,6 +9,8 @@ from typing import Any
 
 import yaml
 
+from ..client.model import BASE_URL_ENV, default_model
+
 
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
@@ -57,13 +59,13 @@ class AgentConfig:
 
     system_prompt: str = ""
     vars: dict[str, str] = field(default_factory=dict)
-    model: str = field(default_factory=lambda: os.getenv("OPENAI_MODEL", "gpt-6.1-terra"))
+    model: str = field(default_factory=default_model)
     profile: str = field(default_factory=lambda: os.getenv("RHO_AGENT_PROFILE", "readonly"))
     backend: str | Any = field(
         default_factory=lambda: os.getenv("RHO_AGENT_BACKEND", "local")
     )  # str | DaytonaBackend
     working_dir: str | None = None
-    base_url: str | None = field(default_factory=lambda: os.getenv("OPENAI_BASE_URL"))
+    base_url: str | None = field(default_factory=lambda: os.getenv(BASE_URL_ENV))
     service_tier: str | None = field(default_factory=lambda: os.getenv("RHO_AGENT_SERVICE_TIER"))
     reasoning_effort: str | None = field(
         default_factory=lambda: os.getenv("RHO_AGENT_REASONING_EFFORT")

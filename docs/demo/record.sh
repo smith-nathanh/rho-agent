@@ -5,7 +5,7 @@
 #   docs/demo/record.sh monitor   control plane (docs/demo/monitor.gif)
 #
 # Needs vhs (https://github.com/charmbracelet/vhs), ffmpeg, a project virtualenv
-# (uv sync --group dev) and OPENAI_API_KEY in the environment or in .env.
+# (uv sync --group dev) and RHO_AGENT_API_KEY in the environment or in .env.
 # Everything runs in a throwaway home directory (/tmp/rho-agent-demo unless
 # DEMO_HOME is set), so your own sessions and config never appear in a recording.
 set -euo pipefail
@@ -13,7 +13,7 @@ set -euo pipefail
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$repo"
 if [[ -f .env ]]; then set -a; . ./.env; set +a; fi
-: "${OPENAI_API_KEY:?set OPENAI_API_KEY or add it to .env}"
+: "${RHO_AGENT_API_KEY:?set RHO_AGENT_API_KEY or add it to .env}"
 
 # The agents work on copies of the sample projects, never in this repository.
 # Remember its state so a stray write is caught when the recording ends.

@@ -79,7 +79,7 @@ class AgentConfig:
 | `profile` | `str \| PermissionProfile \| None` | `None` | Permission profile name, object, or path to YAML |
 | `backend` | `str \| DaytonaBackend` | `"local"` | Execution backend: `"local"`, `"daytona"`, or a `DaytonaBackend` instance |
 | `working_dir` | `str \| None` | `None` | Working directory for tool execution |
-| `base_url` | `str \| None` | `None` | Custom API base URL. When set to a non-OpenAI host, Chat Completions is used instead of the Responses API (see [Model client](#model-client)) |
+| `base_url` | `str \| None` | `None` | Custom API base URL. The Responses API is used there too, with a fallback to Chat Completions if the server lacks it (see [Model client](#model-client)) |
 | `service_tier` | `str \| None` | `None` | API service tier |
 | `reasoning_effort` | `str \| None` | `None` | Reasoning effort (`none`, `low`, `medium`, `high`, ...; model-specific). `None` uses the model's default |
 | `response_format` | `dict \| None` | `None` | Structured output format specification |
@@ -123,7 +123,7 @@ client = agent.create_client()
 
 ### Model client
 
-`agent.create_client()` returns a `ModelClient`, which talks to OpenAI through the Responses API (`/v1/responses`). Reasoning and function tools work together there, including on models such as `gpt-6.1-sol` that do not accept tools on Chat Completions.
+`agent.create_client()` returns a `ModelClient`, which calls the Responses API (`/v1/responses`). Reasoning and function tools work together there, including on models such as `gpt-6.1-sol` that do not accept tools on Chat Completions.
 
 ```python
 from rho_agent.client.model import ModelClient
@@ -131,12 +131,12 @@ from rho_agent.client.model import ModelClient
 client = ModelClient(model="gpt-6.1-terra", reasoning_effort="low")
 client.api            # "responses"
 
-# A custom base URL on a non-OpenAI host uses Chat Completions instead
-local = ModelClient(model="gpt-oss-120b", base_url="http://localhost:8000/v1")
-local.api             # "chat"
+# Other servers start on Responses too. One that answers /v1/responses
+# with 404 or 405 is switched to Chat Completions, and client.api becomes "chat".
+router = ModelClient(model="anthropic/claude-haiku-4.5", base_url="https://openrouter.ai/api/v1")
 
-# Override the choice, e.g. for a gateway in front of OpenAI
-ModelClient(model="gpt-6.1-terra", base_url="https://gateway.example.com/v1", api="responses")
+# Pin the endpoint, with no fallback
+local = ModelClient(model="gpt-oss-120b", base_url="http://localhost:8080/v1", api="chat")
 ```
 
 | Argument | Description |
@@ -144,7 +144,7 @@ ModelClient(model="gpt-6.1-terra", base_url="https://gateway.example.com/v1", ap
 | `reasoning_effort` | Sent as `reasoning.effort`. When set, `temperature` is not sent |
 | `service_tier` | Passed through (`"flex"` also raises the request timeout to 15 minutes) |
 | `response_format` | A Chat Completions style `response_format`; converted to the Responses `text.format` |
-| `api` | `"responses"` or `"chat"`. Default: Responses, unless a base URL (argument or `OPENAI_BASE_URL`) points at a non-OpenAI host. The `RHO_AGENT_API` environment variable sets the same thing |
+| `api` | `"responses"` or `"chat"` pins the endpoint. Default: Responses, falling back to Chat Completions if a non-OpenAI server answers `/v1/responses` with 404 or 405. The `RHO_AGENT_API` environment variable sets the same thing |
 | `streaming` | `False` makes one non-streaming request per model call, for accounts or gateways that cannot stream a model |
 
 Requests are stateless (`store=False`, no `previous_response_id`): the full history is sent each time, so compaction, retries and resuming from `trace.jsonl` need nothing kept on OpenAI's side. The session still works with chat-format messages and tool definitions; `ModelClient` converts them for each request.

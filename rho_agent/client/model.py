@@ -1,4 +1,4 @@
-"""Model client for OpenAI, built on the Responses API.
+"""Model client built on the Responses API.
 
 Conversation history is kept in chat format (``Prompt.messages``) and converted
 to Responses input items for each request. Requests are stateless
@@ -6,8 +6,8 @@ to Responses input items for each request. Requests are stateless
 on the assistant message and sent back on the next request, so the trace file
 alone is enough to continue a session.
 
-Servers other than OpenAI are served by ``ChatCompletionsClient``; see
-``ModelClient`` for how the endpoint is chosen.
+Servers without a Responses endpoint are served by ``ChatCompletionsClient``;
+see ``ModelClient`` for how the endpoint is chosen.
 """
 
 from __future__ import annotations
@@ -20,6 +20,31 @@ from typing import Any
 from urllib.parse import urlparse
 
 from openai import APIStatusError, AsyncOpenAI
+
+# The only environment variables rho-agent reads for the model connection.
+# OPENAI_API_KEY and OPENAI_BASE_URL are deliberately ignored, so a key set
+# for another tool is never sent anywhere by accident.
+API_KEY_ENV = "RHO_AGENT_API_KEY"
+BASE_URL_ENV = "RHO_AGENT_BASE_URL"
+MODEL_ENV = "RHO_AGENT_MODEL"
+DEFAULT_MODEL = "gpt-6.1-terra"
+OPENAI_ENDPOINT = "https://api.openai.com/v1"
+
+
+def default_model() -> str:
+    """``RHO_AGENT_MODEL``, or the built-in default."""
+    return os.getenv(MODEL_ENV) or DEFAULT_MODEL
+
+
+class MissingApiKeyError(RuntimeError):
+    """No API key was given for a server that needs one."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            f"Missing API key. Set {API_KEY_ENV} to your provider's key "
+            f"(and {BASE_URL_ENV} to its endpoint if it is not OpenAI)."
+        )
+
 
 CONTEXT_OVERFLOW_MARKERS = (
     "context_length_exceeded",
@@ -375,32 +400,38 @@ def _response_error(code: str | None, message: str | None) -> StreamEvent:
 _ZERO_USAGE = {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0}
 
 
-def _uses_chat_completions(base_url: str | None, api: str | None) -> bool:
-    """Whether to call chat completions instead of Responses."""
+# Statuses a server without a Responses endpoint answers ``/v1/responses`` with.
+_NO_ENDPOINT_STATUSES = frozenset({404, 405})
+
+
+def _requested_api(api: str | None) -> str | None:
+    """The endpoint pinned by ``api`` or ``RHO_AGENT_API``, if any."""
     api = api or os.getenv("RHO_AGENT_API")
-    if api:
-        if api not in ("responses", "chat"):
-            raise ValueError(f"api must be 'responses' or 'chat', got {api!r}")
-        return api == "chat"
-    base_url = base_url or os.getenv("OPENAI_BASE_URL")
+    if api and api not in ("responses", "chat"):
+        raise ValueError(f"api must be 'responses' or 'chat', got {api!r}")
+    return api or None
+
+
+def _is_openai_host(base_url: str | None) -> bool:
+    """Whether requests go to OpenAI itself (no base URL, OpenAI or Azure OpenAI)."""
     if not base_url:
-        return False
+        return True
     host = (urlparse(base_url).hostname or "").lower()
-    return not (host == "openai.com" or host.endswith((".openai.com", ".openai.azure.com")))
+    return host == "openai.com" or host.endswith((".openai.com", ".openai.azure.com"))
 
 
 class ModelClient:
-    """Streaming model client for OpenAI, using the Responses API.
+    """Streaming model client built on the Responses API.
 
     Which endpoint is called:
 
-    - No ``base_url`` (and no ``OPENAI_BASE_URL``), or one on an OpenAI host:
-      ``/v1/responses``.
-    - Any other ``base_url``: ``/v1/chat/completions``, because most
-      OpenAI-compatible servers implement nothing else.
+    - ``/v1/responses`` by default, on OpenAI and on any other base URL.
+    - If a server other than OpenAI answers ``/v1/responses`` with 404 or 405,
+      the client switches to ``/v1/chat/completions`` for that call and every
+      later one. Servers such as Gemini's OpenAI-compatible endpoint, Cerebras
+      and llama.cpp only implement Chat Completions.
     - ``api="responses"`` or ``api="chat"`` (or the ``RHO_AGENT_API``
-      environment variable) overrides the choice, for example for a gateway
-      in front of OpenAI.
+      environment variable) pins the endpoint, with no fallback.
 
     Responses requests are stateless (``store=False``). The reasoning items a
     model returns come back on the ``done`` event as ``response_items``; the
@@ -410,7 +441,7 @@ class ModelClient:
 
     def __init__(
         self,
-        model: str = "gpt-6.1-terra",
+        model: str = DEFAULT_MODEL,
         base_url: str | None = None,
         api_key: str | None = None,
         timeout: float | None = None,
@@ -427,35 +458,79 @@ class ModelClient:
         # For flex processing, use longer timeout (15 min) per OpenAI docs
         if timeout is None:
             timeout = 900.0 if service_tier == "flex" else 60.0
+        self._base_url = base_url or os.getenv(BASE_URL_ENV) or ""
+        api_key = api_key or os.getenv(API_KEY_ENV)
+        if not api_key:
+            if not self._base_url:
+                raise MissingApiKeyError()
+            # A server of your own (vLLM, Ollama, ...) may need no key at all.
+            api_key = "none"
+        # Both are always passed, so the SDK never falls back to OPENAI_API_KEY
+        # or OPENAI_BASE_URL from the environment.
         self._client = AsyncOpenAI(
-            base_url=base_url,
+            base_url=self._base_url or OPENAI_ENDPOINT,
             api_key=api_key,
             timeout=timeout,
             max_retries=8,
         )
         self._model = model
         self._service_tier = service_tier
-        self._base_url = base_url or ""
         self._streaming = streaming
 
+        self._send_include = True
+        requested = _requested_api(api)
         self._chat: Any | None = None
-        if _uses_chat_completions(base_url, api):
-            from .chat_completions import ChatCompletionsClient
-
-            self._chat = ChatCompletionsClient(
-                self._client,
-                model,
-                base_url=self._base_url or os.getenv("OPENAI_BASE_URL", ""),
-                service_tier=service_tier,
-                temperature=temperature,
-                reasoning_effort=reasoning_effort,
-                response_format=response_format,
-            )
+        # Only a non-OpenAI server with no pinned endpoint may lack /v1/responses.
+        self._can_fall_back = requested is None and not _is_openai_host(self._base_url)
+        if requested == "chat":
+            self._use_chat()
 
     @property
     def api(self) -> str:
         """The endpoint in use: ``"responses"`` or ``"chat"``."""
         return "chat" if self._chat is not None else "responses"
+
+    def _use_chat(self) -> None:
+        """Send this and every later call to Chat Completions."""
+        from .chat_completions import ChatCompletionsClient
+
+        self._chat = ChatCompletionsClient(
+            self._client,
+            self._model,
+            base_url=self._base_url,
+            service_tier=self._service_tier,
+            temperature=self._temperature,
+            reasoning_effort=self._reasoning_effort,
+            response_format=self._response_format,
+        )
+        self._can_fall_back = False
+
+    def _fall_back(self, exc: BaseException) -> bool:
+        """Switch to Chat Completions if ``exc`` says the server has no Responses API."""
+        if not self._can_fall_back:
+            return False
+        if getattr(exc, "status_code", None) not in _NO_ENDPOINT_STATUSES:
+            return False
+        self._use_chat()
+        return True
+
+    async def _create(self, **kwargs: Any) -> Any:
+        """Call ``responses.create``, dropping ``include`` if the server rejects it.
+
+        Some servers (Groq, for one) implement Responses but not ``include``.
+        Without it, reasoning comes back unencrypted or not at all, and the
+        session still works.
+        """
+        if not self._send_include:
+            kwargs.pop("include", None)
+        try:
+            return await self._client.responses.create(**kwargs)
+        except APIStatusError as e:
+            if "include" not in kwargs or e.status_code != 400 or "'include'" not in str(e):
+                raise
+            self._send_include = False
+            kwargs.pop("include")
+            return await self._client.responses.create(**kwargs)
 
     def _request(
         self,
@@ -518,7 +593,14 @@ class ModelClient:
         text_item_id: str | None = None
 
         try:
-            stream = await self._client.responses.create(**kwargs)
+            try:
+                stream = await self._create(**kwargs)
+            except APIStatusError as e:
+                if not self._fall_back(e):
+                    raise
+                async for event in self._chat.stream(prompt):
+                    yield event
+                return
             try:
                 async for event in stream:
                     kind = event.type
@@ -572,8 +654,12 @@ class ModelClient:
         stream a model.
         """
         try:
-            response = await self._client.responses.create(**self._prompt_request(prompt))
+            response = await self._create(**self._prompt_request(prompt))
         except APIStatusError as e:
+            if self._fall_back(e):
+                async for event in self._chat.stream(prompt):
+                    yield event
+                return
             yield StreamEvent(
                 type="error",
                 content=f"API error {e.status_code} (after retries): {e.message}",
@@ -611,7 +697,7 @@ class ModelClient:
 
     async def _create_text(self, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """Run one non-streaming request and return ``(text, usage)``."""
-        response = await self._client.responses.create(**kwargs)
+        response = await self._create(**kwargs)
         error = getattr(response, "error", None)
         if error is not None:
             failure = _response_error(getattr(error, "code", None), getattr(error, "message", None))
@@ -645,6 +731,8 @@ class ModelClient:
         try:
             return await self._create_text(self._request(to_response_input(history)))
         except APIStatusError as e:
+            if self._fall_back(e):
+                return await self._chat.complete(messages)
             return f"API error {e.status_code} (after retries): {e.message}", dict(_ZERO_USAGE)
         except Exception as e:
             return f"Error: {e}", dict(_ZERO_USAGE)
@@ -668,6 +756,8 @@ class ModelClient:
         except ModelCallError:
             raise
         except APIStatusError as e:
+            if self._fall_back(e):
+                return await self._chat.complete_prompt(prompt)
             raise ModelCallError(
                 f"API error {e.status_code} (after retries): {e.message}", classify_error(e)
             ) from e

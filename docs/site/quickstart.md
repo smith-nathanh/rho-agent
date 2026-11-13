@@ -8,7 +8,7 @@ order: 2
 
 - Python 3.11+
 - `uv` (recommended)
-- An OpenAI-compatible API key (set `OPENAI_API_KEY`)
+- An API key from a provider with an OpenAI-compatible API (set `RHO_AGENT_API_KEY`, plus `RHO_AGENT_BASE_URL` for a provider other than OpenAI; see the [README](https://github.com/smith-nathanh/rho-agent#install) for examples)
 
 ## Install
 
@@ -46,7 +46,7 @@ Use `uv add git+https://github.com/smith-nathanh/rho-agent` when you want to imp
 ## Start an interactive session
 
 ```bash
-export OPENAI_API_KEY=sk-...
+export RHO_AGENT_API_KEY=sk-...
 rho-agent main
 ```
 

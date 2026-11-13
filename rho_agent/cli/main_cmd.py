@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from ..client.model import BASE_URL_ENV, default_model
 from ..core import Agent, AgentConfig, Session, SessionStore
 from ..core.approvals import ApprovalQueue
 from ..permissions import ShellMode
@@ -28,7 +29,6 @@ from ..permissions.factory import load_profile
 from .errors import (
     InvalidModeError,
     InvalidProfileError,
-    MissingApiKeyError,
     PromptLoadError,
 )
 from .events import ApprovalHandler, announce_queued_approval
@@ -104,9 +104,7 @@ def _resolve_daytona_config(
                 df_path = project_root / df_path
             df_path = df_path.resolve()
             if not df_path.exists():
-                console.print(
-                    _markup(f"Dockerfile not found: {df_path}", THEME.error)
-                )
+                console.print(_markup(f"Dockerfile not found: {df_path}", THEME.error))
                 raise typer.Exit(1)
             from daytona import Image
 
@@ -313,11 +311,11 @@ def main(
     model: Annotated[
         str,
         typer.Option("--model", "-m", help="Model to use"),
-    ] = os.getenv("OPENAI_MODEL", "gpt-6.1-terra"),
+    ] = default_model(),
     base_url: Annotated[
         str | None,
         typer.Option("--base-url", help="API base URL for OpenAI-compatible endpoints"),
-    ] = os.getenv("OPENAI_BASE_URL"),
+    ] = os.getenv(BASE_URL_ENV),
     reasoning_effort: Annotated[
         str | None,
         typer.Option("--reasoning-effort", help="Reasoning effort: low, medium, high"),
@@ -468,9 +466,7 @@ def main(
             backend = "daytona"  # --dockerfile/--snapshot implies daytona
 
         if dockerfile and snapshot:
-            console.print(
-                _markup("Cannot use both --dockerfile and --snapshot", THEME.error)
-            )
+            console.print(_markup("Cannot use both --dockerfile and --snapshot", THEME.error))
             raise typer.Exit(1)
 
         daytona_backend, upload_mappings, working_dir, setup_commands = _resolve_daytona_config(
@@ -604,7 +600,7 @@ def main(
     elif config_file:
         # Load from config file with CLI overrides
         agent_config = AgentConfig.from_file(config_file)
-        if model != os.getenv("OPENAI_MODEL", "gpt-6.1-terra"):
+        if model != default_model():
             agent_config.model = model
         if profile:
             agent_config.profile = profile
@@ -703,10 +699,6 @@ def main(
         _register_delegate(agent, session)
     else:
         agent.registry.unregister("delegate")
-
-    if not agent.config.base_url and not os.getenv("OPENAI_API_KEY"):
-        console.print(_markup(str(MissingApiKeyError()), THEME.error))
-        raise typer.Exit(1)
 
     # Determine the prompt to run
     run_prompt_text = (
