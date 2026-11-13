@@ -276,6 +276,29 @@ def _write(path: Path, events: list[dict[str, Any]]) -> None:
     path.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
 
 
+def test_unknown_cost_is_left_out_not_reported_as_zero(tmp_path: Path) -> None:
+    # rho records cost_usd 0 for a model it has no price for; a backend with its
+    # own price table must not be told the call was free.
+    ts = "2026-02-21T10:00:0{}Z".format
+    _write(
+        tmp_path / "trace.jsonl",
+        [
+            {"type": "run_start", "prompt": "p", "ts": ts(0)},
+            {"type": "llm_start", "model": "m", "ts": ts(1)},
+            {"type": "llm_end", "model": "m", "input_tokens": 5, "cost_usd": 0.0, "ts": ts(2)},
+            {"type": "run_end", "status": "completed", "ts": ts(3)},
+        ],
+    )
+    spans = trace_to_spans(tmp_path / "trace.jsonl", session_id="free")
+    for span in spans:
+        attrs = _attrs(span)
+        assert not {"gen_ai.usage.cost", "rho_agent.cost_usd", "rho_agent.usage.cost_usd"} & set(
+            attrs
+        )
+    chat = next(s for s in spans if s["name"] == "chat m")
+    assert _attrs(chat)["gen_ai.usage.input_tokens"] == 5
+
+
 def test_older_traces_without_call_ids_or_compaction_start(tmp_path: Path) -> None:
     ts = "2026-02-21T10:00:0{}Z".format
     _write(

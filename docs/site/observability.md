@@ -187,8 +187,8 @@ Spans follow the [OpenTelemetry GenAI semantic conventions](https://github.com/o
 
   Cancelled, `max_turns` and `budget_exceeded` runs are deliberate stops. They keep an UNSET status, and `rho_agent.run.status` says why the run stopped.
 - **Compaction** calls are `chat` spans with `rho_agent.purpose = compaction`. Model calls after a compaction carry `gen_ai.conversation.compacted = true`. Approvals, compactions and completion-gate rounds are span events on the run span.
-- **Usage totals** for a run (children and compaction included) are on the run span as `rho_agent.usage.*`, not `gen_ai.usage.*`. Backends that add up `gen_ai.usage` over a trace therefore do not count tokens twice. Cost is the custom attribute `rho_agent.cost_usd`. The same value is also written as `gen_ai.usage.cost`, which is not in the conventions but is the attribute Langfuse reads.
-- **IDs are deterministic.** Trace and span IDs are derived from the session ID, run number and tool call ID. Exporting a session twice, or exporting it after the live exporter has sent it, gives the same IDs.
+- **Usage totals** for a run (children and compaction included) are on the run span as `rho_agent.usage.*`, not `gen_ai.usage.*`. Backends that add up `gen_ai.usage` over a trace therefore do not count tokens twice. Cost is the custom attribute `rho_agent.cost_usd`. The same value is also written as `gen_ai.usage.cost`, which is not in the conventions but is the attribute Langfuse reads. When rho-agent has no price for the model (it records `cost_usd: 0`), both are left out, so a backend with its own price table, such as Langfuse, computes the cost instead of showing $0.
+- **IDs are deterministic.** Trace and span IDs are derived from the session ID, run number and tool call ID. Exporting a session twice, or exporting it after the live exporter has sent it, gives the same IDs. Whether a backend merges a second copy depends on the backend: Phoenix ignores spans it already has, but Langfuse v4 stores both copies. Send each session once, either live or with `rho-agent export`.
 
 ### Message content
 
@@ -231,6 +231,8 @@ Set `RHO_AGENT_OTLP_ENDPOINT` and every session, child sessions included, sends 
 
 A background thread sends queued spans every two seconds and at the end of each run, so a slow or unreachable collector never blocks the agent. If an export fails, the error is logged once and those spans are dropped. When the process exits, pending spans are flushed for up to five seconds.
 
+A run's `invoke_agent` span is sent when the run ends. If the process is killed mid-run, the model and tool calls that finished were already sent, but the run span never is, so they appear without their parent. `rho-agent export --format otlp --endpoint ...` sends the run (marked `unfinished`) afterwards, with the caveat about backends that store duplicates.
+
 | Variable | Default | Description |
 |---|---|---|
 | `RHO_AGENT_OTLP_ENDPOINT` | — | Base OTLP/HTTP URL; setting it turns live export on |
@@ -247,7 +249,7 @@ Only `RHO_AGENT_*` variables are read. The standard `OTEL_EXPORTER_OTLP_*` varia
 | [Arize Phoenix](https://github.com/Arize-ai/phoenix) 21.1 (Docker) | **Tested** (offline and live, `http/protobuf`) | `http://localhost:6006`. Phoenix maps the GenAI attributes to its agent, LLM and tool span kinds, token counts, input/output messages and tool parameters. It rejects `http/json` with a 415 |
 | [OpenTelemetry Collector](https://github.com/open-telemetry/opentelemetry-collector) 0.165 | **Tested** (`http/protobuf` and `http/json`) | `http://localhost:4318`; forward to any backend the Collector supports |
 | [LangSmith](https://docs.langchain.com/langsmith/trace-with-opentelemetry) | Not tested | `https://api.smith.langchain.com/otel` with headers `x-api-key=<key>,Langsmith-Project=<project>`. According to its docs, LangSmith reads the current `gen_ai.*` names (messages, cache and reasoning tokens) without OpenLLMetry names, and it maps no cost attribute |
-| [Langfuse](https://langfuse.com/integrations/native/opentelemetry) | Not tested | `https://cloud.langfuse.com/api/public/otel` with header `Authorization=Basic%20<base64 public:secret>` |
+| [Langfuse](https://langfuse.com/integrations/native/opentelemetry) 4.80 (self-hosted, Docker) | **Tested** (offline and live, `http/protobuf`, including a real model session with two parallel child agents) | `https://cloud.langfuse.com/api/public/otel` (or your host's `/api/public/otel`) with headers `Authorization=Basic%20<base64 public:secret>,x-langfuse-ingestion-version=4`. Runs become AGENT observations, model calls GENERATION and tool calls TOOL. Child agents nest under their tool call, and runs group into sessions by `session.id`. Inputs and outputs, tokens (cached and reasoning split out), cost and tool errors all map. Langfuse Cloud itself was not tested |
 | Arize AX, ClickHouse ClickStack, Datadog, other OTLP intakes | Not tested | Use the vendor's OTLP/HTTP trace endpoint, or put an OpenTelemetry Collector in front of it |
 
 A backend that ignores GenAI attributes still shows the span tree, timings and errors.

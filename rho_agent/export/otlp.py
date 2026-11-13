@@ -428,6 +428,8 @@ class SessionSpanBuilder:
         # Run totals (children included) go under rho_agent.*, not gen_ai.usage.*,
         # so backends that sum gen_ai.usage over a trace do not count them twice.
         for key, value in self._run_usage.items():
+            if key == "cost_usd" and not value:
+                continue  # no price known, not free
             run.attrs[f"rho_agent.usage.{key}"] = value
         if self.include_content and self._run_last_text:
             run.attrs["gen_ai.output.messages"] = [
@@ -528,11 +530,14 @@ class SessionSpanBuilder:
             {
                 "gen_ai.usage.input_tokens": usage["input_tokens"],
                 "gen_ai.usage.output_tokens": usage["output_tokens"],
-                "rho_agent.cost_usd": usage["cost_usd"],
-                # Not in the semconv registry; read by Langfuse and OpenLLMetry.
-                "gen_ai.usage.cost": usage["cost_usd"],
             }
         )
+        # rho records 0 when it has no price for the model. Leave cost out then,
+        # so a backend with its own price table (Langfuse) does not show $0.
+        if usage["cost_usd"]:
+            chat.attrs["rho_agent.cost_usd"] = usage["cost_usd"]
+            # Not in the semconv registry; read by Langfuse and OpenLLMetry.
+            chat.attrs["gen_ai.usage.cost"] = usage["cost_usd"]
         if usage["cache_read_tokens"]:
             chat.attrs["gen_ai.usage.cache_read.input_tokens"] = usage["cache_read_tokens"]
         if usage["reasoning_tokens"]:
