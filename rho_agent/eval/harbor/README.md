@@ -15,10 +15,10 @@ uv pip install -e ".[harbor]"
 1. **Push the code you want evaluated.** The container installs rho-agent from
    git (`install_source: git`, `version: <branch, tag or commit>`) or from PyPI.
    A local, unpushed branch cannot be installed.
-2. **Export the provider key** for the model, e.g. `OPENAI_API_KEY`. Harbor
-   passes it into the container as `RHO_AGENT_API_KEY`, with the endpoint as
-   `RHO_AGENT_BASE_URL` when the provider is not OpenAI. Anthropic models go
-   through Anthropic's OpenAI-compatible endpoint (Chat Completions).
+2. **Export the provider key** for the model: `OPENAI_API_KEY` for
+   `openai/...` models, `OPENROUTER_API_KEY` for `openrouter/...` models.
+   Harbor passes it into the container as `RHO_AGENT_API_KEY`, with the
+   endpoint as `RHO_AGENT_BASE_URL`.
 3. **Validate without running anything:**
 
    ```bash
@@ -82,10 +82,10 @@ A capped run exits normally, so the verifier still grades whatever exists.
 The worst case for a job is `cost_ceiling_usd` x tasks x `n_attempts`.
 Terminal-Bench 4.x allows each task up to 8 hours, so always set a ceiling.
 
-Cost is computed from token counts with the price list bundled with the
-LiteLLM version installed in the container, including cached input, the
-long-context price tier and flex pricing. For a model that list doesn't know,
-set `RHO_AGENT_PRICE_INPUT`, `RHO_AGENT_PRICE_CACHED_INPUT` and
+Through OpenRouter, cost is what OpenRouter reports for each call. For OpenAI
+models it is token counts priced from rho-agent's built-in OpenAI table, which
+includes cached input, the long-context price tier and flex pricing. For any
+other model, set `RHO_AGENT_PRICE_INPUT`, `RHO_AGENT_PRICE_CACHED_INPUT` and
 `RHO_AGENT_PRICE_OUTPUT` (USD per million tokens) under the agent's `env` in the
 job config. With a ceiling set and no price known, the runner exits before
 making any model call rather than run uncapped.

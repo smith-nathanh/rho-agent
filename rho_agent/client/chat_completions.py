@@ -20,7 +20,26 @@ from .model import (
     ToolCall,
     classify_error,
     parse_tool_arguments,
+    reported_cost,
 )
+
+
+def _usage(usage: Any) -> dict[str, Any]:
+    """Token counts from a Chat Completions usage object, plus any reported cost."""
+    if usage is None:
+        return {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0}
+    prompt_details = getattr(usage, "prompt_tokens_details", None)
+    completion_details = getattr(usage, "completion_tokens_details", None)
+    result: dict[str, Any] = {
+        "input_tokens": usage.prompt_tokens or 0,
+        "output_tokens": usage.completion_tokens or 0,
+        "cached_tokens": getattr(prompt_details, "cached_tokens", 0) or 0,
+        "reasoning_tokens": getattr(completion_details, "reasoning_tokens", 0) or 0,
+    }
+    cost = reported_cost(usage)
+    if cost is not None:
+        result["cost_usd"] = cost
+    return result
 
 
 class ChatCompletionsClient:
@@ -36,8 +55,11 @@ class ChatCompletionsClient:
         temperature: float | None = None,
         reasoning_effort: str | None = None,
         response_format: dict[str, Any] | None = None,
+        send_session_id: bool = False,
     ) -> None:
         self._client = client
+        # OpenRouter groups calls carrying the same session ID into one trace.
+        self._send_session_id = send_session_id
         self._model = model
         self._service_tier = service_tier
         self._temperature = temperature
@@ -45,6 +67,10 @@ class ChatCompletionsClient:
         self._response_format = response_format
         # Cerebras doesn't support streaming with tool calling
         self._use_nonstreaming_tools = "cerebras" in base_url.lower()
+
+    def _session_headers(self, kwargs: dict[str, Any], prompt: Prompt) -> None:
+        if self._send_session_id and prompt.session_id:
+            kwargs["extra_headers"] = {"x-session-id": prompt.session_id}
 
     def _build_messages(self, prompt: Prompt) -> list[dict[str, Any]]:
         """Build messages list from prompt."""
@@ -92,6 +118,7 @@ class ChatCompletionsClient:
 
         if self._response_format:
             kwargs["response_format"] = self._response_format
+        self._session_headers(kwargs, prompt)
 
         try:
             # Track tool calls being built
@@ -102,18 +129,7 @@ class ChatCompletionsClient:
                     if not chunk.choices:
                         # Usage info comes in final chunk with no choices
                         if chunk.usage:
-                            cached = 0
-                            details = getattr(chunk.usage, "prompt_tokens_details", None)
-                            if details:
-                                cached = getattr(details, "cached_tokens", 0) or 0
-                            yield StreamEvent(
-                                type="done",
-                                usage={
-                                    "input_tokens": chunk.usage.prompt_tokens,
-                                    "output_tokens": chunk.usage.completion_tokens,
-                                    "cached_tokens": cached,
-                                },
-                            )
+                            yield StreamEvent(type="done", usage=_usage(chunk.usage))
                         continue
 
                     choice = chunk.choices[0]
@@ -192,6 +208,7 @@ class ChatCompletionsClient:
 
         if self._response_format:
             kwargs["response_format"] = self._response_format
+        self._session_headers(kwargs, prompt)
 
         try:
             response = await self._client.chat.completions.create(**kwargs)
@@ -216,18 +233,7 @@ class ChatCompletionsClient:
                         ),
                     )
 
-            # Emit done with usage
-            cached = 0
-            if response.usage:
-                details = getattr(response.usage, "prompt_tokens_details", None)
-                if details:
-                    cached = getattr(details, "cached_tokens", 0) or 0
-            usage = {
-                "input_tokens": response.usage.prompt_tokens if response.usage else 0,
-                "output_tokens": response.usage.completion_tokens if response.usage else 0,
-                "cached_tokens": cached,
-            }
-            yield StreamEvent(type="done", usage=usage)
+            yield StreamEvent(type="done", usage=_usage(response.usage))
 
         except APIStatusError as e:
             yield StreamEvent(
@@ -258,18 +264,7 @@ class ChatCompletionsClient:
 
             response = await self._client.chat.completions.create(**kwargs)
             content = response.choices[0].message.content or ""
-            cached = 0
-            if response.usage:
-                details = getattr(response.usage, "prompt_tokens_details", None)
-                if details:
-                    cached = getattr(details, "cached_tokens", 0) or 0
-            usage = {
-                "input_tokens": response.usage.prompt_tokens if response.usage else 0,
-                "output_tokens": response.usage.completion_tokens if response.usage else 0,
-                "cached_tokens": cached,
-                "cost_usd": 0.0,
-            }
-            return content, usage
+            return content, _usage(response.usage)
         except APIStatusError as e:
             return (
                 f"API error {e.status_code} (after retries): {e.message}",
@@ -311,6 +306,7 @@ class ChatCompletionsClient:
                     kwargs["tool_choice"] = prompt.tool_choice
             if self._service_tier:
                 kwargs["service_tier"] = self._service_tier
+            self._session_headers(kwargs, prompt)
 
             response = await self._client.chat.completions.create(**kwargs)
         except APIStatusError as e:
@@ -321,15 +317,4 @@ class ChatCompletionsClient:
             raise ModelCallError(str(e), classify_error(e)) from e
 
         content = response.choices[0].message.content or ""
-        cached = 0
-        if response.usage:
-            details = getattr(response.usage, "prompt_tokens_details", None)
-            if details:
-                cached = getattr(details, "cached_tokens", 0) or 0
-        usage = {
-            "input_tokens": response.usage.prompt_tokens if response.usage else 0,
-            "output_tokens": response.usage.completion_tokens if response.usage else 0,
-            "cached_tokens": cached,
-            "cost_usd": 0.0,
-        }
-        return content, usage
+        return content, _usage(response.usage)

@@ -54,8 +54,8 @@ def _openai_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
         "RHO_AGENT_PRICE_OUTPUT",
     ):
         monkeypatch.delenv(name, raising=False)
-    # No price list, so usage is exactly what the fake server reported.
-    monkeypatch.setattr(pricing, "_load_litellm", lambda: None)
+    # No price table, so usage is exactly what the fake server reported.
+    monkeypatch.setattr(pricing, "table_prices", lambda *args, **kwargs: None)
 
 
 # ---------------------------------------------------------------------------

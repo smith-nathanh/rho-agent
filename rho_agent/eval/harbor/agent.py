@@ -120,9 +120,6 @@ class RhoAgentOptions(InstalledAgentOptions):
     )
 
 
-_ANTHROPIC_OPENAI_URL = "https://api.anthropic.com/v1"
-
-
 def _require_key(connection, agent_name: str) -> None:
     """A provider's public endpoint needs a key; a server you name may not."""
     if not connection.user_supplied_base_url:
@@ -154,12 +151,7 @@ class RhoAgent(BaseInstalledAgent):
         ),
         api_key_destination_names={"default": "RHO_AGENT_API_KEY"},
         base_url_destination_names={"default": "RHO_AGENT_BASE_URL"},
-        # Anthropic's OpenAI-compatible endpoint. It has no Responses API, so
-        # ModelClient falls back to Chat Completions there.
-        base_url_overrides={
-            ("anthropic", ModelApiFormat.OPENAI_RESPONSES): _ANTHROPIC_OPENAI_URL,
-            ("anthropic", ModelApiFormat.OPENAI_CHAT_COMPLETIONS): _ANTHROPIC_OPENAI_URL,
-        },
+        # Pass the provider's endpoint (e.g. OpenRouter's) to the container.
         inject_default_base_url=True,
     )
 
@@ -195,9 +187,9 @@ class RhoAgent(BaseInstalledAgent):
         """The requirement passed to ``uv pip install``."""
         if self.options.install_source == "git":
             ref = f"@{self._version}" if self._version else ""
-            return f"rho-agent[evals] @ git+{self.options.repo_url}{ref}"
+            return f"rho-agent @ git+{self.options.repo_url}{ref}"
         pin = f"=={self._version}" if self._version else ""
-        return f"rho-agent[evals]{pin}"
+        return f"rho-agent{pin}"
 
     @override
     async def install(self, environment: BaseEnvironment) -> None:

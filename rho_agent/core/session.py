@@ -412,8 +412,8 @@ class Session:
             self._warned_unpriced = True
             warnings.warn(
                 f"No price is known for model {self._agent.config.model!r}, so the "
-                f"${self.max_cost_usd:.2f} cost cap will never trigger. Install LiteLLM "
-                "(the evals extra) or set RHO_AGENT_PRICE_INPUT and RHO_AGENT_PRICE_OUTPUT.",
+                f"${self.max_cost_usd:.2f} cost cap will never trigger. Set "
+                "RHO_AGENT_PRICE_INPUT and RHO_AGENT_PRICE_OUTPUT (USD per million tokens).",
                 RuntimeWarning,
                 stacklevel=3,
             )
@@ -557,6 +557,7 @@ class Session:
                 system=self._agent.system_prompt,
                 messages=self._to_messages(self._state.get_messages()),
                 tools=self._registry.get_specs(),
+                session_id=self.id,
             )
 
             # Model call, retried on transient errors.
@@ -1246,6 +1247,7 @@ class Session:
             # reused, but the model may not call one instead of summarising.
             tools=self._registry.get_specs(),
             tool_choice="none",
+            session_id=self.id,
         )
 
         def failed(error: str) -> CompactResult:

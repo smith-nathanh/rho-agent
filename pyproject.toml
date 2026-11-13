@@ -60,11 +60,12 @@ db = ["rho-agent[db-postgres,db-mysql,db-oracle,db-vertica]"]
 # Excel file support
 excel = ["openpyxl>=3.1.0"]
 
-# Eval dependencies (LiteLLM's price list, for cost)
-evals = ["litellm>=1.109.0"]
+# Evals need nothing beyond the base install. Kept so existing install
+# commands that name it keep working.
+evals = []
 
 # Harbor (Terminal-Bench harness). Harbor requires Python >=3.12.
-harbor = ["rho-agent[evals]", "harbor>=0.25.0; python_version >= '3.12'"]
+harbor = ["harbor>=0.25.0; python_version >= '3.12'"]
 
 # Optional: Daytona cloud sandbox integration
 daytona = ["daytona>=0.200.0"]

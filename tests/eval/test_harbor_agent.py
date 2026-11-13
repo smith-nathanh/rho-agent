@@ -45,9 +45,9 @@ def _api_key(monkeypatch: pytest.MonkeyPatch) -> None:
         "RHO_AGENT_BASE_URL",
         "OPENAI_BASE_URL",
         "OPENAI_API_BASE",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_API_BASE",
+        "OPENROUTER_API_KEY",
+        "OPENROUTER_BASE_URL",
+        "OPENROUTER_API_BASE",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -80,10 +80,10 @@ def test_options_are_validated_and_coerced_from_strings(tmp_path: Path) -> None:
 
 
 def test_package_spec_for_pypi_and_git(tmp_path: Path) -> None:
-    assert _agent(tmp_path)._package_spec() == "rho-agent[evals]"
-    assert _agent(tmp_path, version="0.2.0")._package_spec() == "rho-agent[evals]==0.2.0"
+    assert _agent(tmp_path)._package_spec() == "rho-agent"
+    assert _agent(tmp_path, version="0.2.0")._package_spec() == "rho-agent==0.2.0"
     git = _agent(tmp_path, install_source="git", version="abc123", repo_url="https://x/y.git")
-    assert git._package_spec() == "rho-agent[evals] @ git+https://x/y.git@abc123"
+    assert git._package_spec() == "rho-agent @ git+https://x/y.git@abc123"
 
 
 async def test_install_builds_a_private_virtualenv(tmp_path: Path) -> None:
@@ -93,7 +93,7 @@ async def test_install_builds_a_private_virtualenv(tmp_path: Path) -> None:
     install = env.calls[-1]["command"]
     assert "uv python install 3.12" in install
     assert 'uv venv --python 3.12 "$HOME/.rho-agent/venv"' in install
-    assert "rho-agent[evals] @ git+" in install and "@main" in install
+    assert "rho-agent @ git+" in install and "@main" in install
     assert "import rho_agent.eval.harbor.runner" in install
     assert env.calls[-1].get("user") is None  # runs as the agent user, not root
 
@@ -181,15 +181,14 @@ def test_bad_compaction_settings_are_rejected(tmp_path: Path, kwargs: dict[str, 
         _agent(tmp_path, **kwargs)
 
 
-def test_non_openai_models_get_their_own_credentials(
+def test_openrouter_models_get_openrouters_key_and_endpoint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
-    env = _agent(tmp_path, model_name="anthropic/claude-opus-5-5")._runner_env()
-    assert env["RHO_AGENT_API_KEY"] == "sk-ant-test-not-real"
-    # Anthropic's OpenAI-compatible endpoint, which ModelClient can call.
-    assert env["RHO_AGENT_BASE_URL"] == "https://api.anthropic.com/v1"
-    assert env["RHO_AGENT_MODEL"] == "claude-opus-5-5"
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-not-real")
+    env = _agent(tmp_path, model_name="openrouter/openai/gpt-6.1-sol")._runner_env()
+    assert env["RHO_AGENT_API_KEY"] == "sk-or-test-not-real"
+    assert env["RHO_AGENT_BASE_URL"] == "https://openrouter.ai/api/v1"
+    assert env["RHO_AGENT_MODEL"] == "openai/gpt-6.1-sol"  # OpenRouter's name for it
 
 
 def test_a_server_you_name_needs_no_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
