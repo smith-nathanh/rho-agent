@@ -411,16 +411,17 @@ class InteractiveSession:
         target = raw.strip()
         if not target:
             return None
+        # A full ID wins over a list number: IDs are hex, and about one in
+        # forty has no letters in it.
+        for s in sessions:
+            if s.id == target:
+                return s.id
         if target.isdigit():
             idx = int(target)
             if 1 <= idx <= len(sessions):
                 return sessions[idx - 1].id
-            return None
         if target.lower() == "latest":
             return sessions[0].id if sessions else None
-        for s in sessions:
-            if s.id == target:
-                return s.id
         matches = [s.id for s in sessions if s.id.startswith(target)]
         if len(matches) == 1:
             return matches[0]
