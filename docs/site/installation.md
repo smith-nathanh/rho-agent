@@ -46,6 +46,7 @@ If you need optional features, add extras to the dependency:
 ```bash
 uv add 'rho-agent[db] @ git+https://github.com/smith-nathanh/rho-agent'
 uv add 'rho-agent[daytona] @ git+https://github.com/smith-nathanh/rho-agent'
+uv add 'rho-agent[otel] @ git+https://github.com/smith-nathanh/rho-agent'   # OpenTelemetry export
 ```
 
 ## Install from source (development)
@@ -96,6 +97,17 @@ rho-agent reads only these three for the model connection. `OPENAI_API_KEY`, `OP
 | `RHO_AGENT_AUTO_COMPACT` | `1` | Set to `0` to turn automatic compaction off |
 | `RHO_AGENT_PROJECT_INSTRUCTIONS` | `1` | Set to `0` to stop reading `AGENTS.md` / `CLAUDE.md` |
 | `RHO_AGENT_SKILLS` | `1` | Set to `0` to stop listing `SKILL.md` skills |
+
+### OpenTelemetry export
+
+| Variable | Default | Description |
+|---|---|---|
+| `RHO_AGENT_OTLP_ENDPOINT` | — | Send live OpenTelemetry spans to this OTLP/HTTP base URL |
+| `RHO_AGENT_OTLP_HEADERS` | — | Request headers, `key=value,key2=value2` |
+| `RHO_AGENT_OTLP_PROTOCOL` | `http/protobuf` | `http/protobuf` (needs the `otel` extra) or `http/json` |
+| `RHO_AGENT_OTLP_CONTENT` | `0` | `1` to include prompts, outputs and tool I/O |
+
+See [Observability — OpenTelemetry export](observability/#opentelemetry-export).
 
 ### Database connections
 

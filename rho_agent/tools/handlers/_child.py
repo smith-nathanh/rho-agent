@@ -76,11 +76,22 @@ def child_session_kwargs(
     return kwargs
 
 
-def link_child(parent: Any | None, child: Any, tool_name: str, instruction: str) -> None:
-    """Apply the parent's controls and remaining budget to a child session."""
+def link_child(
+    parent: Any | None,
+    child: Any,
+    tool_name: str,
+    instruction: str,
+    tool_call_id: str | None = None,
+) -> None:
+    """Apply the parent's controls and remaining budget to a child session.
+
+    ``tool_call_id`` is the parent's tool call that spawned the child; it is
+    recorded in the trace so exporters can nest the child under that call.
+    """
     if parent is None:
         return
     child.parent = parent
+    child.spawn_tool_call_id = tool_call_id
     callback = parent.approval_callback
     if isinstance(callback, ApprovalQueue):
         callback = callback.for_session(child)  # file requests under the child's ID
@@ -100,6 +111,7 @@ def link_child(parent: Any | None, child: Any, tool_name: str, instruction: str)
         {
             "type": "child_start",
             "tool_name": tool_name,
+            "tool_call_id": tool_call_id,
             "child_session_id": child.id,
             "trace_path": str(child.state.trace_path) if child.state.trace_path else None,
             "instruction": preview,

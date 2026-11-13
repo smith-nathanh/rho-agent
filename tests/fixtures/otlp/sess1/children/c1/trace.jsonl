@@ -1,0 +1,6 @@
+{"type": "run_start", "prompt": "Find why test_parse fails", "ts": "2026-02-21T10:00:04.030000Z"}
+{"type": "message", "role": "user", "content": "Find why test_parse fails", "ts": "2026-02-21T10:00:04.030100Z"}
+{"type": "llm_start", "model": "gpt-6.1-terra", "context_size": 20, "ts": "2026-02-21T10:00:04.040000Z"}
+{"type": "llm_end", "model": "gpt-6.1-terra", "input_tokens": 100, "output_tokens": 10, "cache_read_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.001, "ts": "2026-02-21T10:00:05.900000Z"}
+{"type": "message", "role": "assistant", "content": "The parser drops the last token.", "ts": "2026-02-21T10:00:05.901000Z"}
+{"type": "run_end", "status": "completed", "ts": "2026-02-21T10:00:05.950000Z"}

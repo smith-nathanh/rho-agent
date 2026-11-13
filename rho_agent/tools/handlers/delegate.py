@@ -149,7 +149,7 @@ class DelegateHandler(ToolHandler):
         if parent is None:
             child_session.approval_callback = self._parent_approval_callback
             child_session.cancel_check = self._parent_cancel_check
-        link_child(parent, child_session, self.name, instruction)
+        link_child(parent, child_session, self.name, instruction, invocation.call_id)
 
         started = monotonic()
         status = "error"

@@ -99,6 +99,8 @@ class Session:
         # Set on a child session spawned by a tool (delegate); pause and
         # cancel requests on the parent then apply to the child as well.
         self.parent: Session | None = None
+        # The parent's tool call that spawned this child session, if any.
+        self.spawn_tool_call_id: str | None = None
 
         # Execution-time settings (set by callers before run())
         self.approval_callback: ApprovalCallback | None = None
@@ -322,6 +324,10 @@ class Session:
         # built, the trace must not keep a run_start and user message for a run
         # that never reached the model.
         _ = self._agent.system_prompt
+        # Live OTLP export when RHO_AGENT_OTLP_ENDPOINT is set.
+        from ..export.otlp_observer import maybe_attach_otlp_observer
+
+        maybe_attach_otlp_observer(self)
 
         if self._wall_start is None:
             self._wall_start = time.monotonic()
@@ -1243,6 +1249,14 @@ class Session:
                 error=error,
             )
 
+        self._state._emit(
+            {
+                "type": "llm_start",
+                "model": self._agent.config.model,
+                "purpose": "compaction",
+                "context_size": tokens_before,
+            }
+        )
         try:
             summary, usage = await self._client.complete_prompt(prompt)
         except ModelCallError as e:

@@ -69,8 +69,11 @@ harbor = ["rho-agent[evals]", "harbor>=0.25.0; python_version >= '3.12'"]
 # Optional: Daytona cloud sandbox integration
 daytona = ["daytona>=0.200.0"]
 
+# OpenTelemetry trace export over OTLP/HTTP protobuf (http/json needs nothing)
+otel = ["opentelemetry-proto>=1.30.0"]
+
 # Everything
-all = ["rho-agent[db,excel,daytona,evals,harbor]"]
+all = ["rho-agent[db,excel,daytona,evals,harbor,otel]"]
 
 [dependency-groups]
 dev = [
