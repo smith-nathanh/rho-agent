@@ -45,7 +45,7 @@ class DaytonaReadHandler(ToolHandler):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Absolute path to the file to read",
+                    "description": "Path to the file to read (relative paths are taken from the working directory)",
                 },
                 "start_line": {
                     "type": "integer",
@@ -67,6 +67,7 @@ class DaytonaReadHandler(ToolHandler):
 
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
+        path_str = self._manager.resolve_path(path_str)
 
         # Check for binary files
         suffix = PurePosixPath(path_str).suffix.lower()

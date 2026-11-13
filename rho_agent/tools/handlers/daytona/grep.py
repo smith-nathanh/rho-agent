@@ -83,6 +83,7 @@ class DaytonaGrepHandler(ToolHandler):
             return ToolOutput(content="No pattern provided", success=False)
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
+        path_str = self._manager.resolve_path(path_str)
 
         try:
             sandbox = await self._manager.get_sandbox()

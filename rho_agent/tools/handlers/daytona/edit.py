@@ -70,6 +70,7 @@ class DaytonaEditHandler(ToolHandler):
 
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
+        path_str = self._manager.resolve_path(path_str)
         if not old_string:
             return ToolOutput(content="No old_string provided", success=False)
 

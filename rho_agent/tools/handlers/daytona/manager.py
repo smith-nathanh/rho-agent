@@ -7,6 +7,7 @@ and tears it down on session close.
 from __future__ import annotations
 
 import asyncio
+import posixpath
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
@@ -46,6 +47,16 @@ class SandboxManager:
     @property
     def working_dir(self) -> str:
         return self._working_dir
+
+    def resolve_path(self, path: str) -> str:
+        """Resolve a tool path argument inside the sandbox.
+
+        A relative path is taken from the working directory, the one bash runs
+        in. Absolute paths and ``~`` paths are returned as given.
+        """
+        if path.startswith(("/", "~")):
+            return path
+        return posixpath.normpath(posixpath.join(self._working_dir, path))
 
     @property
     def env_vars(self) -> dict[str, str]:
