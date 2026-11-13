@@ -1,0 +1,39 @@
+# Pilot: bash plus images vs the full default tool set, GPT-6.1 Sol.
+# Arm A: bash plus image viewing (bash, view_image).
+# The two pilot configs differ only in the tool settings below.
+#
+# 4 tasks x 2 attempts = 8 trials. Worst case 8 x $4 = $32 for this arm.
+#
+#   uv run --env-file .env harbor run --config jobs/pilot-bash-image.yaml
+
+jobs_dir: ./jobs/pilot-bash-image
+n_attempts: 2
+n_concurrent_trials: 2            # Docker has 7.7 GiB; some tasks ask for 4 GB each
+
+environment:
+  type: docker
+  delete: true
+
+agents:
+  - import_path: rho_agent.eval.harbor.agent:RhoAgent
+    model_name: openai/gpt-6.1-sol
+    kwargs:
+      install_source: git
+      version: 1c528d9c82f999fa907285bdb7d0af119ac49f02  # main on 2026-11-13 (PR #31)
+      bash_only: true              # bash ...
+      view_image: true             # ... plus image viewing
+      reasoning_effort: medium
+      enable_confirm_done: true    # completion gate
+      confirm_done_max: 3
+      cost_ceiling_usd: 4.0        # per trial
+      max_wall_seconds: 7200       # 2h per trial; both arms get the same limit
+      max_call_seconds: 1200
+
+datasets:
+  - name: terminal-bench/terminal-bench
+    version: "4.1.0"
+    task_names:
+      - terminal-bench/html-js-filter
+      - terminal-bench/bun-sourcemap-leak
+      - terminal-bench/payments-pipeline-fix
+      - terminal-bench/mvcc-lsm-compaction

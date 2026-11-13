@@ -1,0 +1,7 @@
+id,date,description,model,trials,cost_usd,source
+E000,2026-03-17,hello-world check (2 runs),openai/gpt-5.2,2,0.0137,jobs/rho-agent-terminal-bench/2026-03-17__16-36-06 and __16-40-40 result.json
+E000,2026-03-17,Terminal-Bench 2.0 sample bash only,openai/gpt-5.4,8,5.3759,jobs/rho-agent-terminal-bench/2026-03-17__16-51-13 result.json
+E001,2026-11-11,smoke html-js-filter (LiteLLM client),openai/gpt-6.1-sol,1,0.2037,jobs/rho-agent-smoke/2026-11-11__16-05-40/result.json
+E002,2026-11-13,smoke html-js-filter (ModelClient),openai/gpt-6.1-sol,1,0.5010,jobs/rho-agent-smoke/2026-11-13__16-09-16/result.json
+E003,2026-11-13,OpenRouter reasoning replay test (7 calls),openai/gpt-6.1-sol via OpenRouter,7,0.0027,usage.cost reported by OpenRouter
+E003,2026-11-13,live cost check (OpenRouter + OpenAI),openai/gpt-6.1-sol,2,0.0002,usage.cost and built-in price table
