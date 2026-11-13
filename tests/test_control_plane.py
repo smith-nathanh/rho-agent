@@ -565,3 +565,36 @@ async def test_resume_command_continues_as_the_resumed_session(
     assert len(repl.session.state.messages) == 2
     assert not (store.base_dir / fresh_id).exists()  # the unused session is dropped
     assert [info.id for info in store.list()] == [earlier.id]
+
+
+@pytest.mark.asyncio
+async def test_resume_command_accepts_an_id_made_only_of_digits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Session IDs are hex, so some are all digits and look like a list number."""
+    store, _, repl = _interactive(tmp_path, monkeypatch)
+    earlier = store.create_session(_agent(tmp_path), session_id="40718253")
+    earlier._client = _Client(_text("an answer"))
+    await earlier.run("an earlier question")
+
+    repl._handle_resume("/resume 40718253")
+
+    assert repl.session.id == "40718253"
+
+
+def test_resume_id_resolution_order() -> None:
+    from types import SimpleNamespace
+
+    from rho_agent.cli.interactive import InteractiveSession
+
+    sessions = [SimpleNamespace(id=i) for i in ("ab12cd34", "20000000", "2f000000")]
+    resolve = InteractiveSession._resolve_resume_id
+
+    assert resolve("20000000", sessions) == "20000000"  # a full ID, not a number
+    assert resolve("3", sessions) == "2f000000"  # a number in the list
+    assert resolve("latest", sessions) == "ab12cd34"
+    assert resolve("ab", sessions) == "ab12cd34"  # a unique prefix
+    assert resolve("200", sessions) == "20000000"  # digits past the list: a prefix
+    assert resolve("2", sessions) == "20000000"  # a number wins over a prefix
+    assert resolve("9", sessions) is None
+    assert resolve("", sessions) is None
