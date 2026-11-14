@@ -1,0 +1,39 @@
+# E006: E004's full-tools arm at max reasoning effort, GPT-6.1 Sol.
+# Only reasoning_effort and the limits below differ from pilot-full-tools.yaml.
+#
+# 4 tasks x 2 attempts = 8 trials. Worst case 8 x $10 = $80.
+#
+#   uv run --env-file .env harbor run --config jobs/pilot-max-effort.yaml
+
+jobs_dir: ./jobs/pilot-max-effort
+n_attempts: 2
+n_concurrent_trials: 4            # Docker has 23.4 GiB
+
+environment:
+  type: docker
+  delete: true
+
+agents:
+  - import_path: rho_agent.eval.harbor.agent:RhoAgent
+    model_name: openai/gpt-6.1-sol
+    env:
+      RHO_AGENT_REQUEST_TIMEOUT: "1800"   # wait up to 30 min for the next bytes (default 600)
+    kwargs:
+      install_source: git
+      version: 1c528d9c82f999fa907285bdb7d0af119ac49f02  # same commit as E004
+      bash_only: false             # full default tool set
+      reasoning_effort: max        # E004: medium
+      enable_confirm_done: true
+      confirm_done_max: 3
+      cost_ceiling_usd: 10.0       # E004: 4.0
+      max_wall_seconds: 14400      # 4h; E004: 2h. Tasks allow 8h.
+      max_call_seconds: 3600       # E004: 1200
+
+datasets:
+  - name: terminal-bench/terminal-bench
+    version: "4.1.0"
+    task_names:
+      - terminal-bench/html-js-filter
+      - terminal-bench/bun-sourcemap-leak
+      - terminal-bench/payments-pipeline-fix
+      - terminal-bench/mvcc-lsm-compaction
