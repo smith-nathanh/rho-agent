@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Planned; waits on E004 |
+| Status | Planned; waits on E006 |
 | rho-agent commit | to be pinned before running |
 | Dataset | `terminal-bench/terminal-bench` 4.1.0, all 66 tasks |
 | Budget | worst case $264 (66 x $4 cap, one attempt); expected well below |
@@ -27,7 +27,8 @@ cost per task?
 
 ## Open decisions
 
-- Reasoning effort.
+- Reasoning effort. The Terminal-Bench 4.1 leaderboard runs GPT-6.1 Sol at
+  max; [E006](../E006-pilot-max-effort/) measures what max costs and changes.
 - Whether to exclude tasks that are unreliable under Docker on an ARM Mac
   (`qemu-*` in earlier versions).
 - Whether to raise Docker Desktop's memory limit so more trials can run at once.
