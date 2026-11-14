@@ -29,6 +29,7 @@ from .formatting import (
     _is_interactive_terminal,
     _markup,
     _sync_token_status_from_state,
+    access_summary,
 )
 from .single import upload_to_sandbox
 from .state import CONFIG_DIR, HISTORY_FILE, RENDER_MARKDOWN, console
@@ -42,7 +43,6 @@ class InteractiveSession:
         self,
         session: Session,
         approval_handler: ApprovalHandler,
-        mode_name: str,
         working_dir: str,
         session_store: SessionStore,
         upload_mappings: list[tuple[str, str]] | None = None,
@@ -50,7 +50,6 @@ class InteractiveSession:
     ) -> None:
         self.session = session
         self.approval_handler = approval_handler
-        self.mode_name = mode_name
         self.working_dir = working_dir
         self.session_store = session_store
         self.upload_mappings = upload_mappings or []
@@ -61,6 +60,8 @@ class InteractiveSession:
             output_tokens=session.state.usage.get("output_tokens", 0),
         )
         self.interactive_tty = _is_interactive_terminal()
+        # Told to the model with the next message, e.g. after /access changes.
+        self._pending_note: str | None = None
 
     async def run(self) -> None:
         """Run the interactive REPL loop until exit or error."""
@@ -93,7 +94,7 @@ class InteractiveSession:
         console.print(
             Panel(
                 f"[bold]{_markup('ρ rho-agent', THEME.primary)}[/bold] v{version}\n"
-                f"Mode: {_markup(self.mode_name, THEME.accent)}\n"
+                f"{_markup(access_summary(self.session.agent), THEME.accent)}\n"
                 f"Model: {_markup(self.session.agent.config.model, THEME.accent)}\n"
                 "Enter to send, Esc+Enter for newline, Ctrl+C to cancel.\n"
                 "Type [bold]/help[/bold] for commands, [bold]exit[/bold] to quit.",
@@ -144,8 +145,8 @@ class InteractiveSession:
                     if user_input.startswith("/download"):
                         await self._handle_download(user_input)
                         continue
-                    if user_input.startswith("/write"):
-                        self._handle_file_write_toggle(user_input)
+                    if user_input.startswith("/access"):
+                        self._handle_access(user_input)
                         continue
                     if user_input.startswith("/resume"):
                         self._handle_resume(user_input)
@@ -297,6 +298,9 @@ class InteractiveSession:
                     pending_text_chunks=pending_text_chunks,
                 )
 
+            if self._pending_note:
+                user_input = f"{self._pending_note}\n\n{user_input}"
+                self._pending_note = None
             await self.session.run(user_input, on_event=on_event)
 
             if status_ctx:
@@ -324,85 +328,82 @@ class InteractiveSession:
         except Exception as exc:
             console.print(_markup(f"Download failed: {exc}", THEME.error))
 
-    def _handle_file_write_toggle(self, cmd: str) -> None:
-        """Toggle the create-only write tool in readonly mode."""
-        if self.mode_name != "readonly":
-            console.print(
-                _markup(
-                    "File write toggling is only available in readonly mode.",
-                    THEME.warning,
-                )
-            )
-            return
-
-        parts = cmd.split()
-        has_write = "write" in self.session.registry
-
+    def _handle_access(self, cmd: str) -> None:
+        """``/access`` shows access; ``/access <level>`` changes it;
+        ``/access revoke <path>`` removes a grant."""
+        parts = cmd.split(maxsplit=2)
+        session = self.session
+        agent = session.agent
         if len(parts) == 1:
-            if has_write:
-                console.print(
-                    _markup(
-                        "File write is ON (create-only, approval required).",
-                        THEME.success,
-                    )
-                )
+            self._show_access()
+            return
+        if parts[1] == "revoke":
+            if len(parts) < 3:
+                console.print(_markup("Usage: /access revoke <path>", THEME.warning))
                 return
+            target = str(Path(parts[2]).expanduser().resolve())
+            if session.revoke_access(target) or session.revoke_access(parts[2]):
+                console.print(_markup(f"Revoked access to {parts[2]}.", THEME.success))
+                self._pending_note = f"[The user revoked your access to {parts[2]}.]"
+            else:
+                console.print(_markup(f"No grant for {parts[2]}.", THEME.warning))
+            return
+        if agent.config.backend != "local":
+            console.print(_markup("Access is fixed for remote backends.", THEME.warning))
+            return
+
+        from ..sandbox import AccessLevel, SandboxUnavailableError
+        from .main_cmd import _default_prompt_for
+
+        try:
+            level = AccessLevel(parts[1])
+        except ValueError:
             console.print(
                 _markup(
-                    "Enable file write for exports? \\[y/N]:",
+                    "Usage: /access [read-only|workspace|full] or /access revoke <path>",
                     THEME.warning,
-                ),
-                end=" ",
-            )
-            try:
-                response = input().strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                response = "n"
-            target = "on" if response in ("y", "yes") else "status"
-        else:
-            target = parts[1].lower()
-
-        if target in ("status",):
-            status = "ON" if has_write else "OFF"
-            color = THEME.success if has_write else THEME.muted
-            console.print(_markup(f"File write is {status}.", color))
-            return
-
-        if target in ("on", "enable"):
-            if has_write:
-                console.print(_markup("File write is already ON.", THEME.muted))
-                return
-            from ..tools.handlers.write import WriteHandler
-
-            local = self.session.agent.config.backend == "local"
-            self.session.registry.register(
-                WriteHandler(
-                    create_only=True,
-                    requires_approval=True,
-                    working_dir=self.working_dir if local else None,
-                )
-            )
-            console.print(
-                _markup(
-                    "File write enabled for this session (create-only, approval required).",
-                    THEME.success,
                 )
             )
             return
-
-        if target in ("off", "disable"):
-            if not has_write:
-                console.print(_markup("File write is already OFF.", THEME.muted))
-                return
-            self.session.registry.unregister("write")
-            console.print(_markup("File write disabled for this session.", THEME.warning))
+        config = agent.config
+        previous = config.access
+        if level == previous.level:
+            console.print(_markup(f"Access is already {level.value}.", THEME.muted))
             return
+        default_prompt = _default_prompt_for(config)
+        config.access = previous.with_level(level)
+        try:
+            agent._registry = agent._build_registry()
+        except SandboxUnavailableError as exc:
+            config.access = previous
+            console.print(_markup(str(exc), THEME.error))
+            return
+        session._registry = agent.registry
+        if config.system_prompt and config.system_prompt == default_prompt:
+            config.system_prompt = _default_prompt_for(config) or config.system_prompt
+            agent._system_prompt = None
+        self._pending_note = (
+            f"[The user changed your access to {level.value}. Tools and limits have "
+            "changed accordingly.]"
+        )
+        console.print(_markup(access_summary(agent), THEME.success))
 
+    def _show_access(self) -> None:
+        session = self.session
+        agent = session.agent
+        console.print(_markup(access_summary(agent), THEME.accent))
+        sandbox = agent.registry.sandbox
+        if sandbox is not None:
+            policy = sandbox.with_grants(session.access_grants).policy
+            console.print(_markup(policy.describe(), THEME.muted))
+        if session.access_grants:
+            console.print("Granted this session:")
+            for grant in session.access_grants:
+                kind = "write" if grant.write else "read"
+                console.print(f"  {kind:5} {grant.path}")
+            console.print(_markup("Remove one with /access revoke <path>.", THEME.muted))
         console.print(
-            _markup(
-                "Usage: /write [on|off|status]",
-                THEME.warning,
-            )
+            _markup("Change level with /access read-only | workspace | full.", THEME.muted)
         )
 
     @staticmethod
@@ -507,12 +508,13 @@ class InteractiveSession:
             return
 
         # Continue as the resumed session: its history, ID and directory. The
-        # agent (tools, profile, model) stays the one this process started with.
+        # agent (tools, access, model) stays the one this process started with.
         previous_dir = self.session._session_dir
         self.session._state = resumed.state
         self.session._client = resumed.agent.create_client()
         self.session._id = resumed.id
         self.session._session_dir = resumed._session_dir
+        self.session.access_grants = list(resumed.access_grants)
         if previous_dir is not None and previous_dir != resumed._session_dir:
             if (previous_dir / "trace.jsonl").exists():
                 update_meta(previous_dir, status="completed")
@@ -536,7 +538,6 @@ class InteractiveSession:
 async def run_interactive(
     session: Session,
     approval_handler: ApprovalHandler,
-    mode_name: str,
     working_dir: str,
     session_store: SessionStore,
     *,
@@ -547,7 +548,6 @@ async def run_interactive(
     interactive = InteractiveSession(
         session=session,
         approval_handler=approval_handler,
-        mode_name=mode_name,
         working_dir=working_dir,
         session_store=session_store,
         upload_mappings=upload_mappings,

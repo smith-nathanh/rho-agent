@@ -49,7 +49,7 @@ Each session directory at `~/.config/rho-agent/sessions/<session_id>/` contains:
 
 | File | Purpose |
 |---|---|
-| `config.yaml` | AgentConfig snapshot (model, profile, system prompt, etc.) |
+| `config.yaml` | AgentConfig snapshot (model, access, system prompt, etc.) |
 | `trace.jsonl` | Append-only event log — source of truth for the session |
 | `meta.json` | Registry record for the session (see below) |
 | `cancel` | Sentinel file — presence cancels the current run, then it is removed |
@@ -67,7 +67,7 @@ Each session directory at `~/.config/rho-agent/sessions/<session_id>/` contains:
 | `id`, `parent_session_id` | Session ID, and the spawning session's ID for a child |
 | `status` | See the [status table](monitor/#ps--list-sessions) |
 | `waiting_on` | Tool name while `status` is `waiting_approval` |
-| `model`, `profile` | Agent configuration |
+| `model`, `access` | Agent configuration |
 | `cwd` | Working directory — the project the session belongs to |
 | `pid`, `host`, `user` | Process, machine and account running the session |
 | `started_at`, `last_activity` | ISO timestamps |
@@ -130,7 +130,7 @@ class MetricsCollector:
         elif event["type"] == "tool_end":
             print(f"Tool {event['tool_name']} {'ok' if event.get('success') else 'failed'}")
 
-agent = Agent(AgentConfig(profile="developer"))
+agent = Agent(AgentConfig())
 session = Session(agent)
 session.state.add_observer(MetricsCollector())
 

@@ -88,7 +88,7 @@ rho-agent reads only these three for the model connection. `OPENAI_API_KEY`, `OP
 
 | Variable | Default | Description |
 |---|---|---|
-| `RHO_AGENT_PROFILE` | `readonly` | Default permission profile |
+| `RHO_AGENT_ACCESS` | `workspace` | Default access level: `read-only`, `workspace` or `full` |
 | `RHO_AGENT_BACKEND` | `local` | Agent backend — `local` or `daytona` |
 | `RHO_AGENT_SERVICE_TIER` | — | API service tier (e.g. `flex`) |
 | `RHO_AGENT_REASONING_EFFORT` | — | Reasoning effort level. See the [FAQ](faq/) for the limits with current OpenAI models |

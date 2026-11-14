@@ -82,7 +82,7 @@ def get_session() -> Session:
     if session is None:
         config = AgentConfig(
             system_prompt=SYSTEM_PROMPT,
-            profile="readonly",
+            access="read-only",
             working_dir=str(Path(__file__).parent),
         )
         agent = Agent(config)

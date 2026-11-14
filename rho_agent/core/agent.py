@@ -6,7 +6,6 @@ Immutable once a Session starts.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from ..client.model import ModelClient
@@ -27,7 +26,7 @@ class Agent:
 
     Usage::
 
-        agent = Agent(AgentConfig(profile="developer"))
+        agent = Agent(AgentConfig(access="read-only"))
         agent.registry.clear()
         agent.registry.register(MyCustomHandler())
         session = Session(agent)  # registry frozen from here
@@ -40,41 +39,57 @@ class Agent:
         self._system_prompt: str | None = None  # lazily resolved
 
     def _build_registry(self) -> ToolRegistry:
-        """Build tool registry from the config's profile."""
-        from ..permissions.factory import ToolFactory, load_profile
-
-        profile = load_profile(self._config.profile)
+        """Build the tool registry from the config's access level and tools."""
         backend = self._config.backend
 
         # DaytonaBackend instance or "daytona" string
         if not isinstance(backend, str) or backend == "daytona":
-            return self._build_daytona_registry(profile)
+            return self._build_daytona_registry()
 
-        factory = ToolFactory(profile)
-        return factory.create_registry(
-            working_dir=self._config.working_dir,
-            databases=self._config.databases,
+        from ..tools.factory import build_registry
+
+        config = self._config
+        return build_registry(
+            config.access,
+            working_dir=config.working_dir,
+            tools=config.tools,
+            databases=config.databases,
+            parallel_bash=config.parallel_bash,
         )
 
-    def _build_daytona_registry(self, profile: Any) -> ToolRegistry:
-        """Build registry with Daytona remote handlers for shell/file tools."""
-        from ..permissions.factory import ToolFactory
+    def _build_daytona_registry(self) -> ToolRegistry:
+        """Remote handlers for shell and file tools; the remote VM is the boundary."""
+        from ..sandbox import Access
+        from ..tools.factory import build_registry
         from ..tools.handlers.daytona import DaytonaBackend, register_daytona_tools
 
+        config = self._config
         registry = ToolRegistry()
-        working_dir = self._config.working_dir or profile.shell_working_dir or "/home/daytona"
-        backend = self._config.backend if isinstance(self._config.backend, DaytonaBackend) else None
+        working_dir = config.working_dir or "/home/daytona"
+        backend = config.backend if isinstance(config.backend, DaytonaBackend) else None
+        wanted = None if config.tools is None else set(config.tools)
         self._sandbox_manager = register_daytona_tools(
-            registry, working_dir, backend=backend, view_image=profile.view_image_enabled
+            registry,
+            working_dir,
+            backend=backend,
+            view_image=wanted is None or "view_image" in wanted,
         )
+        if wanted is not None:
+            for name in list(registry._handlers):
+                if name not in wanted:
+                    registry.unregister(name)
 
-        # Database tools still use the local factory path
-        factory = ToolFactory(profile)
-        factory._register_database_tools(
-            registry, dict(os.environ), databases=self._config.databases
+        # Database and delegate tools run locally. Full access: no local sandbox,
+        # and only these tools are taken from the local registry.
+        local_names = {"delegate", "sqlite", "postgres", "mysql", "oracle", "vertica"}
+        local = build_registry(
+            Access(level="full") if config.access.sandboxed else config.access,
+            working_dir=None,
+            tools=sorted(local_names & wanted) if wanted is not None else sorted(local_names),
+            databases=config.databases,
         )
-        factory.register_delegate_tool(registry)
-
+        for handler in local._handlers.values():
+            registry.register(handler)
         return registry
 
     @property

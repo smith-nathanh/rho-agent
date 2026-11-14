@@ -4,7 +4,7 @@ description: Run agent tools in a remote Daytona cloud sandbox.
 order: 10
 ---
 
-The Daytona backend routes shell and file tool execution to a remote cloud sandbox managed by [Daytona](https://daytona.io). The agent process stays on your machine — only tool calls run remotely. Any permission profile can be combined with `--backend daytona`.
+The Daytona backend routes shell and file tool execution to a remote cloud sandbox managed by [Daytona](https://daytona.io). The agent process stays on your machine — only tool calls run remotely. The remote VM is the boundary, so the agent has `full` access inside it.
 
 ## Setup
 
@@ -19,17 +19,17 @@ export DAYTONA_API_KEY=your-key
 
 ```bash
 # One-shot task in a sandbox
-rho-agent main --backend daytona --profile developer "set up a Python project and run the tests"
+rho-agent main --backend daytona "set up a Python project and run the tests"
 
 # Interactive session
-rho-agent main --backend daytona --profile developer
+rho-agent main --backend daytona
 ```
 
 You can also set the backend via environment variable:
 
 ```bash
 export RHO_AGENT_BACKEND=daytona
-rho-agent main --profile developer
+rho-agent main
 ```
 
 ### Uploading files
@@ -38,13 +38,12 @@ Use `--upload` to stage local files into the sandbox before the agent starts. Th
 
 ```bash
 # Upload a project directory
-rho-agent main --backend daytona --upload ./my-project:/work/my-project --profile developer
+rho-agent main --backend daytona --upload ./my-project:/work/my-project
 
 # Multiple uploads
 rho-agent main --backend daytona \
   --upload ./data:/work/data \
-  --upload ./config.yaml:/work/config.yaml \
-  --profile developer
+  --upload ./config.yaml:/work/config.yaml
 ```
 
 ## Project configuration (`.rho-agent.toml`)
@@ -55,7 +54,7 @@ When `--backend daytona` is used and a `.rho-agent.toml` is found, the CLI autom
 
 ```bash
 # With a .rho-agent.toml in the project root, just run:
-rho-agent main --backend daytona --profile developer "run the tests"
+rho-agent main --backend daytona "run the tests"
 ```
 
 ### Full schema
@@ -119,13 +118,13 @@ CLI flags override `.rho-agent.toml` values:
 
 ```bash
 # Override the image
-rho-agent main --backend daytona --dockerfile ./Dockerfile.dev --profile developer
+rho-agent main --backend daytona --dockerfile ./Dockerfile.dev
 
 # Override uploads (disables auto-upload of project root)
-rho-agent main --backend daytona --upload ./data:/work/data --profile developer
+rho-agent main --backend daytona --upload ./data:/work/data
 
 # Override working directory
-rho-agent main --backend daytona --working-dir /home/daytona/myapp/backend --profile developer
+rho-agent main --backend daytona --working-dir /home/daytona/myapp/backend
 ```
 
 ### Auto-upload behavior
@@ -144,7 +143,6 @@ from rho_agent import Agent, AgentConfig, Session
 config = AgentConfig(
     system_prompt="You are a deployment assistant.",
     backend="daytona",
-    profile="developer",
 )
 
 async with Session(Agent(config)) as session:
@@ -169,7 +167,7 @@ backend = DaytonaBackend(
     env_vars={"MY_API_KEY": "...", "NODE_ENV": "development"},
 )
 
-async with Session(Agent(AgentConfig(profile="developer", backend=backend))) as s:
+async with Session(Agent(AgentConfig(backend=backend))) as s:
     result = await s.run(prompt="Set up the project")
     print(result.text)
 ```
@@ -196,7 +194,7 @@ backend = DaytonaBackend(image=image, env_vars={"MY_KEY": "..."})
 Use `get_sandbox()` to access the Daytona filesystem API directly:
 
 ```python
-async with Session(Agent(AgentConfig(profile="developer", backend=backend))) as s:
+async with Session(Agent(AgentConfig(backend=backend))) as s:
     sandbox = await s.get_sandbox()
 
     # Upload a local file into the sandbox

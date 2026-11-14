@@ -1,290 +1,67 @@
-"""Bash execution handler with configurable restrictions."""
+"""Bash execution handler, optionally inside the OS sandbox."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import os
-import re
-import shlex
 import signal
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ...core.truncate import APPROX_BYTES_PER_TOKEN, MAX_OUTPUT_TOKENS
 from ..base import ToolHandler, ToolInvocation, ToolOutput
+from .paths import sandbox_for
+
+if TYPE_CHECKING:
+    from ...sandbox import Sandbox
 
 # Output kept inline before the rest is left in a file. Slightly under the
 # session-level truncation limit so the JSON wrapper is never cut.
 MAX_INLINE_OUTPUT_TOKENS = MAX_OUTPUT_TOKENS - 500
 
-DEFAULT_TIMEOUT_RESTRICTED = 120  # seconds
-DEFAULT_TIMEOUT_UNRESTRICTED = 300  # 5 minutes for complex builds
-
-# Allowlist of safe read-only commands (used in RESTRICTED mode)
-ALLOWED_COMMANDS = {
-    # File inspection
-    "cat",
-    "head",
-    "tail",
-    "less",
-    "more",
-    # Search
-    "grep",
-    "rg",
-    "ag",
-    "ack",
-    "find",
-    "locate",
-    "which",
-    "whereis",
-    # Directory listing
-    "ls",
-    "tree",
-    "du",
-    "df",
-    # File info
-    "file",
-    "stat",
-    "wc",
-    "md5",
-    "sha256sum",
-    "shasum",
-    # Text processing (read-only)
-    "awk",
-    "sed",  # Note: sed -i is blocked by pipe check
-    "cut",
-    "sort",
-    "uniq",
-    "tr",
-    "column",
-    "fmt",
-    "fold",
-    "nl",
-    "pr",
-    "expand",
-    "unexpand",
-    # JSON/YAML/XML
-    "jq",
-    "yq",
-    "xmllint",
-    # Archive inspection (read-only)
-    "tar",  # listing only, extraction blocked by write check
-    "unzip",  # -l listing only
-    "zipinfo",
-    "zcat",
-    "zless",
-    "zgrep",
-    "gzip",  # -l listing
-    "gunzip",  # to stdout only
-    # System info
-    "pwd",
-    "whoami",
-    "hostname",
-    "uname",
-    "env",
-    "printenv",
-    "date",
-    "uptime",
-    "ps",
-    "top",
-    "free",
-    # Networking (read-only)
-    "ping",
-    "curl",
-    "wget",
-    "dig",
-    "nslookup",
-    "host",
-    "netstat",
-    "ss",
-    # Git (read-only)
-    "git",
-    # Misc
-    "echo",
-    "printf",
-    "diff",
-    "cmp",
-    "comm",
-    "hexdump",
-    "xxd",
-    "od",
-    "strings",
-}
-
-# Patterns that indicate write operations (blocked in RESTRICTED mode)
-DANGEROUS_SUBSTRINGS = [
-    ">>",  # Redirect (append)
-    ">",  # Redirect (overwrite)
-]
-
-DANGEROUS_COMMAND_WORDS = {
-    "rm",
-    "rmdir",
-    "mv",
-    "cp",
-    "chmod",
-    "chown",
-    "chgrp",
-    "mkdir",
-    "touch",
-    "truncate",
-    "shred",
-    "dd",
-    "mkfs",
-    "mount",
-    "umount",
-    "kill",
-    "pkill",
-    "killall",
-    "reboot",
-    "shutdown",
-    "halt",
-    "poweroff",
-    "systemctl",
-    "service",
-    "apt",
-    "yum",
-    "dnf",
-    "brew",
-    "pip",
-    "npm",
-    "yarn",
-    "cargo",
-    "sudo",
-    "su",
-    "doas",
-}
-
-
-def _strip_heredoc_bodies(command: str) -> str:
-    """Remove heredoc body text so safety checks only inspect executed shell syntax."""
-    lines = command.splitlines()
-    if not lines:
-        return command
-
-    result: list[str] = []
-    active_delimiter: str | None = None
-
-    for line in lines:
-        if active_delimiter is not None:
-            if line.strip() == active_delimiter:
-                active_delimiter = None
-            continue
-
-        result.append(line)
-        match = re.search(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1", line)
-        if match:
-            active_delimiter = match.group(2)
-
-    return "\n".join(result)
-
-
-def _contains_dangerous_word(command: str) -> str | None:
-    """Return first dangerous command word matched as a standalone token."""
-    lowered = command.lower()
-    for word in sorted(DANGEROUS_COMMAND_WORDS, key=len, reverse=True):
-        pattern = rf"(^|[\s;&|()]){re.escape(word)}(?=$|[\s;&|()])"
-        if re.search(pattern, lowered):
-            return word
-    return None
-
-
-def extract_base_command(command: str) -> str | None:
-    """Extract the base command from a shell command string."""
-    # Handle pipes - check first command
-    if "|" in command:
-        command = command.split("|")[0].strip()
-
-    # Handle command chaining - check first command
-    for sep in ["&&", ";", "||"]:
-        if sep in command:
-            command = command.split(sep)[0].strip()
-
-    # Handle env vars at start (VAR=value cmd)
-    parts = command.split()
-    for _i, part in enumerate(parts):
-        if "=" not in part:
-            return part
-
-    return parts[0] if parts else None
-
-
-def is_command_allowed(command: str) -> tuple[bool, str]:
-    """Check if a command is allowed in RESTRICTED mode. Returns (allowed, reason)."""
-    command_for_checks = _strip_heredoc_bodies(command)
-
-    # Check for dangerous patterns first
-    for pattern in DANGEROUS_SUBSTRINGS:
-        if pattern in command_for_checks:
-            return False, f"Command contains dangerous pattern: {pattern}"
-
-    dangerous_word = _contains_dangerous_word(command_for_checks)
-    if dangerous_word:
-        return False, f"Command contains dangerous pattern: {dangerous_word}"
-
-    # Extract base command
-    base_cmd = extract_base_command(command_for_checks)
-    if not base_cmd:
-        return False, "Could not parse command"
-
-    # Check allowlist
-    if base_cmd not in ALLOWED_COMMANDS:
-        return False, f"Command '{base_cmd}' is not in the allowlist"
-
-    return True, ""
+DEFAULT_TIMEOUT = 300  # seconds
 
 
 class BashHandler(ToolHandler):
-    """Execute shell commands with configurable restrictions.
+    """Execute shell commands. Standard agentic tool name: 'bash'.
 
-    Standard agentic tool name: 'bash'
-
-    Modes:
-    - RESTRICTED: Only allowlisted commands, dangerous patterns blocked
-    - UNRESTRICTED: Any command allowed (container provides sandbox)
+    With a sandbox, every command (and everything it starts) runs inside it,
+    with the calling session's access grants applied. The model may ask to run
+    one command outside the sandbox (``unsandboxed``); the user must approve
+    each such command.
 
     Each command runs in its own process group with output captured to a file:
     - a timeout or cancel kills the whole group, not only the shell;
     - the call returns when the shell exits, even if it left children running;
     - output too large to return inline stays in the file and its path is given.
 
-    In unrestricted mode ``run_in_background`` starts a command and returns at
-    once with its PID and log path, which the model manages with ordinary
-    commands (``tail``, ``kill -0``, ``kill``).
+    ``run_in_background`` starts a command and returns at once with its PID
+    and log path, which the model manages with ordinary commands (``tail``,
+    ``kill -0``, ``kill``).
     """
 
     def __init__(
         self,
-        restricted: bool = True,
         working_dir: str | None = None,
         timeout: int | None = None,
-        requires_approval: bool | None = None,
         allow_parallel: bool = False,
+        sandbox: Sandbox | None = None,
     ):
-        """Initialize BashHandler.
-
-        Args:
-            restricted: If True, use command allowlist (default). If False, allow all commands.
-            working_dir: Default working directory for commands.
-            timeout: Command timeout in seconds. Defaults to 120s (restricted) or 300s (unrestricted).
-            requires_approval: Override whether approval is required. Defaults to True for restricted,
-                              False for unrestricted.
-            allow_parallel: If True, several bash calls in one model turn may run concurrently.
         """
-        self._restricted = restricted
+        Args:
+            working_dir: Default working directory for commands.
+            timeout: Default command timeout in seconds (300).
+            allow_parallel: If True, several bash calls in one model turn may run concurrently.
+            sandbox: Run commands inside this OS sandbox. None runs them with
+                the user's own permissions.
+        """
         self._working_dir = working_dir or os.getcwd()
-        self._timeout = timeout or (
-            DEFAULT_TIMEOUT_RESTRICTED if restricted else DEFAULT_TIMEOUT_UNRESTRICTED
-        )
-        # Default approval: not required for restricted (allowlist protects),
-        # required for unrestricted outside sandboxes (but factory overrides for unrestricted profile)
-        self._requires_approval = (
-            requires_approval if requires_approval is not None else (not restricted)
-        )
+        self._timeout = timeout or DEFAULT_TIMEOUT
         self._allow_parallel = allow_parallel
+        self._sandbox = sandbox
         self._output_dir: Path | None = None
         self._output_seq = 0
 
@@ -293,29 +70,29 @@ class BashHandler(ToolHandler):
         return "bash"
 
     @property
-    def requires_approval(self) -> bool:
-        return self._requires_approval
-
-    @property
     def parallel_safe(self) -> bool:
         return self._allow_parallel
 
     @property
     def description(self) -> str:
-        if self._restricted:
-            return (
-                "Execute a shell command to inspect files, logs, or system state. "
-                "Use this for text-based inspection with tools like grep, cat, head, "
-                "tail, find, jq, yq, etc. Commands are read-only."
+        description = (
+            "Execute a bash command. Use for running programs, installing packages, "
+            "building code, file operations, and any other shell tasks. "
+            "For anything that may run longer than the timeout (training, long builds, "
+            "servers), set run_in_background: the call returns at once with a PID and a "
+            "log file, which you then check with tail and kill -0."
+        )
+        if self._sandbox is not None:
+            policy = self._sandbox.policy
+            description += (
+                f" Commands run in a sandbox ({policy.level.value} access): writes outside "
+                "the allowed directories fail"
+                + ("" if policy.network else " and network access is blocked")
+                + ". To get a directory added, use request_access. Set unsandboxed only "
+                "for a command that cannot work in the sandbox at all (for example a "
+                "system package install); the user must approve it."
             )
-        else:
-            return (
-                "Execute a bash command. Use for running programs, installing packages, "
-                "building code, file operations, and any other shell tasks. "
-                "For anything that may run longer than the timeout (training, long builds, "
-                "servers), set run_in_background: the call returns at once with a PID and a "
-                "log file, which you then check with tail and kill -0."
-            )
+        return description
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -332,15 +109,27 @@ class BashHandler(ToolHandler):
                 "type": "integer",
                 "description": f"Timeout in seconds (default: {self._timeout})",
             },
-        }
-        if not self._restricted:
-            properties["run_in_background"] = {
+            "run_in_background": {
                 "type": "boolean",
                 "description": (
                     "Start the command and return immediately with its PID and log file. "
                     "The timeout does not apply. The exit code is appended to the log "
                     "when the command finishes."
                 ),
+            },
+        }
+        if self._sandbox is not None:
+            properties["unsandboxed"] = {
+                "type": "boolean",
+                "description": (
+                    "Run this one command outside the sandbox. Needs the user's approval; "
+                    "give the reason in `reason`. Prefer request_access when a directory "
+                    "is all you need."
+                ),
+            }
+            properties["reason"] = {
+                "type": "string",
+                "description": "With unsandboxed: one sentence, shown to the user.",
             }
         return {
             "type": "object",
@@ -426,21 +215,35 @@ class BashHandler(ToolHandler):
             path.unlink(missing_ok=True)
         return text, truncated
 
+    async def _spawn(
+        self, command: str, working_dir: str, stdout: Any, sandbox: Sandbox | None
+    ) -> asyncio.subprocess.Process:
+        """Start ``command`` in its own session, inside ``sandbox`` if there is one.
+
+        stderr goes to the same place as stdout.
+        """
+        common: dict[str, Any] = {
+            "stdin": asyncio.subprocess.DEVNULL,
+            "stdout": stdout,
+            "stderr": asyncio.subprocess.STDOUT,
+            "cwd": working_dir,
+            "start_new_session": True,
+        }
+        if sandbox is None:
+            return await asyncio.create_subprocess_shell(command, **common)
+        argv = sandbox.wrap(["/bin/sh", "-c", command])
+        return await asyncio.create_subprocess_exec(*argv, env=sandbox.env(), **common)
+
     async def _start_background(
-        self, command: str, working_dir: str, start_time: float
+        self, command: str, working_dir: str, start_time: float, sandbox: Sandbox | None
     ) -> ToolOutput:
         """Start a command detached from this call and return its PID and log path."""
         log_path = self._new_output_path("bg")
-        quoted_log = shlex.quote(str(log_path))
-        wrapped = f'( {command}\n) > {quoted_log} 2>&1; echo "[exit code: $?]" >> {quoted_log}'
-        process = await asyncio.create_subprocess_shell(
-            wrapped,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-            cwd=working_dir,
-            start_new_session=True,
-        )
+        # The log is opened here and handed over as stdout, so a sandboxed
+        # command needs no write access to its location.
+        wrapped = f'( {command}\n) 2>&1; echo "[exit code: $?]"'
+        with open(log_path, "wb") as sink:
+            process = await self._spawn(wrapped, working_dir, sink, sandbox)
         output = (
             f"Started in background. PID {process.pid} (also its process group).\n"
             f"Log: {log_path}\n"
@@ -472,36 +275,22 @@ class BashHandler(ToolHandler):
         if not command:
             return ToolOutput(content="No command provided", success=False)
 
-        # Check if command is allowed (only in restricted mode)
-        if self._restricted:
-            allowed, reason = is_command_allowed(command)
-            if not allowed:
-                return ToolOutput(
-                    content=f"Command blocked: {reason}",
-                    success=False,
-                )
-            if background:
-                return ToolOutput(
-                    content="run_in_background is not available in restricted mode",
-                    success=False,
-                )
+        sandbox = sandbox_for(self._sandbox, invocation)
+        if sandbox is not None and invocation.arguments.get("unsandboxed"):
+            refusal = await self._approve_unsandboxed(invocation, command, working_dir)
+            if refusal:
+                return ToolOutput(content=refusal, success=False)
+            sandbox = None
 
         start_time = time.perf_counter()
 
         try:
             if background:
-                return await self._start_background(command, working_dir, start_time)
+                return await self._start_background(command, working_dir, start_time, sandbox)
 
             output_path = self._new_output_path("cmd")
             with open(output_path, "wb") as sink:
-                process = await asyncio.create_subprocess_shell(
-                    command,
-                    stdin=asyncio.subprocess.DEVNULL,
-                    stdout=sink,
-                    stderr=asyncio.subprocess.STDOUT,
-                    cwd=working_dir,
-                    start_new_session=True,
-                )
+                process = await self._spawn(command, working_dir, sink, sandbox)
 
             timed_out = False
             try:
@@ -527,13 +316,12 @@ class BashHandler(ToolHandler):
             }
             if kept:
                 metadata["full_output_path"] = str(output_path)
+            metadata["sandbox"] = sandbox.level.value if sandbox is not None else "off"
 
             if timed_out:
                 output += (
                     f"\n\n[Command timed out after {timeout}s; it and its child processes "
                     f"were killed. For long-running commands use run_in_background.]"
-                    if not self._restricted
-                    else f"\n\n[Command timed out after {timeout}s and was killed]"
                 )
                 metadata.update(exit_code=-1, timed_out=True)
                 return ToolOutput(
@@ -543,6 +331,12 @@ class BashHandler(ToolHandler):
                 )
 
             exit_code = process.returncode
+            if exit_code != 0 and sandbox is not None:
+                session = invocation.session
+                can_request = session is not None and session.approval_callback is not None
+                hint = sandbox.denial_hint(output, can_request=can_request)
+                if hint:
+                    output += f"\n\n{hint}"
             metadata["exit_code"] = exit_code
             return ToolOutput(
                 content=self._format_output(output, exit_code, duration),
@@ -560,3 +354,26 @@ class BashHandler(ToolHandler):
                 content=f"Error executing command: {e}",
                 success=False,
             )
+
+    async def _approve_unsandboxed(
+        self, invocation: ToolInvocation, command: str, working_dir: str
+    ) -> str | None:
+        """Ask the user to run one command outside the sandbox. None if approved."""
+        session = invocation.session
+        if session is None or session.approval_callback is None:
+            return (
+                "Nobody is available to approve an unsandboxed command; work within "
+                "the sandbox or tell the user what you need."
+            )
+        approved = await session.ask_approval(
+            "bash",
+            {
+                "command": command,
+                "working_dir": working_dir,
+                "unsandboxed": True,
+                "reason": str(invocation.arguments.get("reason", "")),
+            },
+        )
+        if not approved:
+            return "The user declined running this command outside the sandbox."
+        return None

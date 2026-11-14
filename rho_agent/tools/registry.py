@@ -45,6 +45,9 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._handlers: dict[str, ToolHandler] = {}
+        # The OS sandbox the registry's tools run commands in (None for full
+        # access, or for registries not built by tools.factory).
+        self.sandbox: Any | None = None
 
     def register(self, handler: ToolHandler) -> None:
         """Register a tool handler."""

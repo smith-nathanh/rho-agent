@@ -86,7 +86,7 @@ class PostgresHandler(DatabaseHandler):
                 autocommit=True,
             )
             # Set session to read-only when readonly mode is enabled
-            if self._readonly:
+            if self._is_readonly(alias):
                 with conn.cursor() as cur:
                     cur.execute("SET default_transaction_read_only = ON")
         else:
@@ -98,7 +98,7 @@ class PostgresHandler(DatabaseHandler):
                 user=config.user or "",
                 password=config.password or "",
             )
-            conn.set_session(readonly=self._readonly, autocommit=True)
+            conn.set_session(readonly=self._is_readonly(alias), autocommit=True)
 
         self._connections[alias] = conn
         return conn

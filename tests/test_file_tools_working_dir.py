@@ -7,9 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from rho_agent.permissions import PermissionProfile
-from rho_agent.permissions.factory import ToolFactory
 from rho_agent.tools.base import ToolInvocation
+from rho_agent.tools.factory import build_registry
 from rho_agent.tools.handlers.paths import resolve_path
 
 needs_rg = pytest.mark.skipif(shutil.which("rg") is None, reason="ripgrep not installed")
@@ -33,8 +32,8 @@ async def _call(registry, tool: str, **arguments):
 
 
 def _registry(working_dir: Path | None):
-    factory = ToolFactory(PermissionProfile.developer())
-    return factory.create_registry(working_dir=str(working_dir) if working_dir else None)
+    # Full access: these tests are about path resolution, not the sandbox.
+    return build_registry("full", working_dir=str(working_dir) if working_dir else None)
 
 
 async def test_write_relative_path_lands_in_working_dir(dirs):
@@ -121,19 +120,3 @@ async def test_no_working_dir_uses_process_directory(dirs):
     out = await _call(_registry(None), "write", path="cwd.txt", content="cwd\n")
     assert out.success, out.content
     assert (elsewhere / "cwd.txt").read_text() == "cwd\n"
-
-
-async def test_sensitive_check_applies_to_resolved_path(dirs):
-    """A relative path that lands in a sensitive location under working_dir is refused."""
-    work, _ = dirs
-    (work / ".ssh").mkdir()
-    factory = ToolFactory(PermissionProfile.readonly())
-    registry = factory.create_registry(working_dir=str(work / ".ssh"))
-    from rho_agent.tools.handlers.write import WriteHandler
-
-    registry.register(
-        WriteHandler(create_only=True, requires_approval=False, working_dir=str(work / ".ssh"))
-    )
-    out = await _call(registry, "write", path="authorized_keys", content="k\n")
-    assert not out.success
-    assert not (work / ".ssh" / "authorized_keys").exists()

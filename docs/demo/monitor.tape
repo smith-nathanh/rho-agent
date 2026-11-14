@@ -15,7 +15,9 @@ Set CursorBlink false
 Set Framerate 20
 
 Hide
-Type "export HOME=$DEMO_HOME && cd ~ && export PS1='$ ' && clear"
+# exec: if the monitor exits early, the recording ends with it, and nothing
+# typed later runs in a shell (where it could show this machine's processes).
+Type "export HOME=$DEMO_HOME && cd ~ && export PS1='$ ' && alias rho-agent='exec rho-agent' && clear"
 Enter
 Show
 

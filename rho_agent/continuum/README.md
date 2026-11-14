@@ -114,7 +114,7 @@ rho_agent/continuum/
     └── agent.md    # Single agent prompt (Jinja2 + frontmatter)
 ```
 
-The agent runs with a `developer` profile and `auto_approve=True`. The prompt is loaded from disk via the standard `rho_agent/prompts` loader — edit `agent.md` to change agent behavior without touching Python code.
+The agent runs with `workspace` access: it can change the project, inside the sandbox, and no one is asked anything. The prompt is loaded from disk via the standard `rho_agent/prompts` loader — edit `agent.md` to change agent behavior without touching Python code.
 
 ## Design
 

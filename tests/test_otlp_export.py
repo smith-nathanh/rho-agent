@@ -546,7 +546,7 @@ async def test_live_observer_sends_the_same_spans_as_offline_export(
     )
     session_dir = tmp_path / "live1"
     session_dir.mkdir()
-    agent = Agent(AgentConfig(system_prompt="s", profile="readonly", model="m"))
+    agent = Agent(AgentConfig(system_prompt="s", access="full", model="m"))
     session = Session(
         agent,
         session_id="live1",
@@ -569,7 +569,7 @@ async def test_live_observer_sends_the_same_spans_as_offline_export(
 async def test_observer_attaches_once_and_only_when_configured(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = Session(Agent(AgentConfig(profile="readonly", model="m")), client=_Client([]))
+    session = Session(Agent(AgentConfig(access="full", model="m")), client=_Client([]))
     monkeypatch.delenv("RHO_AGENT_OTLP_ENDPOINT", raising=False)
     assert otlp_observer.maybe_attach_otlp_observer(session) is None
 

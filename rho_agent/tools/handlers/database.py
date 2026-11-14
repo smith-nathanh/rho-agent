@@ -101,11 +101,13 @@ class DatabaseHandler(ToolHandler):
         configs: list[DatabaseConfig],
         row_limit: int = DEFAULT_ROW_LIMIT,
         readonly: bool = True,
-        requires_approval: bool = True,
+        requires_approval: bool = False,
     ) -> None:
         self._configs: dict[str, DatabaseConfig] = {c.alias: c for c in configs}
         self._connections: dict[str, Any] = {}  # alias -> connection
         self._row_limit = row_limit
+        # True forces every connection read-only; otherwise each connection's
+        # own ``readonly`` setting (default True) applies.
         self._readonly = readonly
         self._requires_approval = requires_approval
 
@@ -144,10 +146,17 @@ class DatabaseHandler(ToolHandler):
         """Database type identifier (e.g., 'oracle', 'sqlite', 'vertica')."""
         ...
 
+    def _is_readonly(self, alias: str) -> bool:
+        """Whether queries on ``alias`` are limited to reads."""
+        if self._readonly:
+            return True
+        config = self._configs.get(alias)
+        return config is None or config.readonly
+
     @property
     def parallel_safe(self) -> bool:
         # Read-only queries do not affect each other; mutations stay serial.
-        return self._readonly
+        return all(self._is_readonly(alias) for alias in self._configs)
 
     @property
     def name(self) -> str:
@@ -159,7 +168,8 @@ class DatabaseHandler(ToolHandler):
 
     @property
     def description(self) -> str:
-        mode_desc = "read-only" if self._readonly else "full"
+        writable = sorted(a for a in self._configs if not self._is_readonly(a))
+        mode_desc = f"read-only except {', '.join(writable)}" if writable else "read-only"
         db_list = ", ".join(sorted(self._configs.keys())) if self._configs else "none configured"
         return (
             f"Query {self.db_type.title()} databases [{db_list}]. "
@@ -339,7 +349,7 @@ class DatabaseHandler(ToolHandler):
             return ToolOutput(content="No SQL query provided", success=False)
 
         # Only check for mutations in readonly mode
-        if self._readonly:
+        if self._is_readonly(db_alias):
             is_safe, reason = is_read_only_sql(sql)
             if not is_safe:
                 return ToolOutput(content=f"Query blocked: {reason}", success=False)
@@ -447,7 +457,7 @@ class DatabaseHandler(ToolHandler):
             )
 
         # Validate SQL is read-only (only in readonly mode)
-        if self._readonly:
+        if self._is_readonly(db_alias):
             is_safe, reason = is_read_only_sql(sql)
             if not is_safe:
                 return ToolOutput(content=f"Query blocked: {reason}", success=False)

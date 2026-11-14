@@ -15,7 +15,7 @@ def _make_handler(**overrides) -> AgentToolHandler:
         tool_name="test_agent",
         tool_description="A test agent tool.",
         system_prompt="You are a test agent.",
-        config=AgentConfig(profile="readonly"),
+        config=AgentConfig(access="full"),
     )
     defaults.update(overrides)
     return AgentToolHandler(**defaults)

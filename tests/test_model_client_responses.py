@@ -532,7 +532,7 @@ def _session(client: ModelClient, state: State) -> Session:
     registry = ToolRegistry()
     registry.register(_ReadHandler())
     agent = MagicMock(spec=Agent)
-    agent.config = AgentConfig(system_prompt="sys", profile="readonly", model="gpt-6.1-terra")
+    agent.config = AgentConfig(system_prompt="sys", access="full", model="gpt-6.1-terra")
     agent.system_prompt = "sys"
     agent.registry = registry
     agent.sandbox_manager = None

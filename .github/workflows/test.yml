@@ -25,6 +25,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install bubblewrap for sandbox tests
+        # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor;
+        # bwrap needs them.
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
       - name: Install dependencies
         run: uv sync --group dev --frozen
 

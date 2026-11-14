@@ -67,7 +67,7 @@ class SqliteHandler(DatabaseHandler):
             raise RuntimeError(f"No path configured for SQLite database '{alias}'")
 
         # Open in read-only or read-write mode based on readonly flag
-        mode = "ro" if self._readonly else "rw"
+        mode = "ro" if self._is_readonly(alias) else "rw"
         conn = sqlite3.connect(
             f"file:{config.path}?mode={mode}",
             uri=True,

@@ -20,7 +20,7 @@ from ._child import child_session_kwargs, link_child, settle_child, share_sandbo
 class DelegateHandler(ToolHandler):
     """Spawn one child agent to execute a focused instruction.
 
-    The child takes its identity (model, profile, system prompt, working
+    The child takes its identity (model, access, system prompt, working
     directory) from the session that calls the tool, so one handler instance
     can sit in a registry shared by many sessions. The ``parent_*`` arguments
     are only a fallback for calls made outside a session.
@@ -39,14 +39,12 @@ class DelegateHandler(ToolHandler):
         parent_state: State | None = None,
         parent_approval_callback: ApprovalCallback | None = None,
         parent_cancel_check: Callable[[], bool] | None = None,
-        requires_approval: bool = False,
     ) -> None:
         self._parent_config = parent_config
         self._parent_system_prompt = parent_system_prompt
         self._parent_state = parent_state
         self._parent_approval_callback = parent_approval_callback
         self._parent_cancel_check = parent_cancel_check
-        self._requires_approval = requires_approval
 
     @property
     def name(self) -> str:
@@ -86,10 +84,6 @@ class DelegateHandler(ToolHandler):
             },
             "required": ["instruction"],
         }
-
-    @property
-    def requires_approval(self) -> bool:
-        return self._requires_approval
 
     @property
     def parallel_safe(self) -> bool:

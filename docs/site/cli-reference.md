@@ -18,7 +18,8 @@ Without a prompt argument, the agent starts in interactive mode. With a prompt, 
 
 | Flag | Description |
 |---|---|
-| `--profile <name\|path>` | Permission profile: `readonly`, `developer`, `eval`, or path to a YAML file |
+| `--access / -a <level>` | What the agent may change: `workspace` (default), `read-only` or `full`. See [Access](access/) |
+| `--add-dir <path>` | Also let the agent write this directory (repeatable) |
 | `--backend <name>` | Execution backend: `local` (default) or `daytona` |
 | `--upload <local:remote>` | Upload files to sandbox (repeatable, format: `./local:/remote`; Daytona only) |
 | `--working-dir <path>` | Set the agent's working directory |
@@ -30,7 +31,6 @@ Without a prompt argument, the agent starts in interactive mode. With a prompt, 
 | `--base-url <url>` | API endpoint override |
 | `--config / -c <path>` | Agent config YAML file |
 | `--output <path>` | Write the agent's final response to a file |
-| `--auto-approve / -y` | Skip tool approval prompts |
 | `--queue-approvals` | Send approval requests to `rho-agent monitor` instead of prompting here (the default when there is no terminal) |
 | `--resume <id> / -r <id>` | Resume a saved conversation (`-r latest` for most recent) |
 | `--list / -l` | List saved conversations |
@@ -42,8 +42,11 @@ Without a prompt argument, the agent starts in interactive mode. With a prompt, 
 ### Examples
 
 ```bash
-# Interactive session with developer profile
-rho-agent main --profile developer --working-dir ~/proj/myapp
+# Interactive session in a project (workspace access)
+rho-agent main --working-dir ~/proj/myapp
+
+# Look but don't touch
+rho-agent main --access read-only
 
 # One-shot task
 rho-agent main "find all TODO comments in the codebase"
@@ -147,4 +150,24 @@ rho-agent export abc123 --format otlp -o spans.json
 
 # Send to a local Phoenix or OpenTelemetry Collector
 rho-agent export abc123 --format otlp --endpoint http://localhost:6006
+```
+
+## `rho-agent sandbox`
+
+Inspect and try the OS sandbox behind `read-only` and `workspace` access (see [Access](access/)).
+
+```bash
+rho-agent sandbox check [--access read-only|workspace] [--network/--no-network] [--add-dir DIR] [-w DIR]
+rho-agent sandbox run [same options] -- COMMAND [ARGS...]
+```
+
+`check` prints the backend, the resolved policy (what's writable, protected and unreadable, and whether network and Unix sockets are allowed), then runs probes in a scratch directory: writes inside and outside it, git hooks, a credential directory, API keys in the environment, the network, and a Unix socket listening outside the sandbox. It exits 1 if a probe fails or no backend works. `run` runs one command inside the sandbox and exits with its exit code.
+
+`--access` defaults to `workspace`.
+
+```bash
+rho-agent sandbox check --access read-only
+rho-agent sandbox run -- touch ~/x          # Operation not permitted
+rho-agent sandbox run --no-network -- curl https://example.com
+rho-agent sandbox run -- docker ps           # refused: Unix sockets are blocked
 ```

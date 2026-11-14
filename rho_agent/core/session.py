@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from .agent import Agent
 
 from ..client.model import Message, ModelCallError, Prompt, StreamEvent
+from ..sandbox.policy import Grant
 from ..tools.base import ToolInvocation
 from ..tools.registry import ToolRegistry
 from .events import (
@@ -104,7 +105,12 @@ class Session:
         self.spawn_tool_call_id: str | None = None
 
         # Execution-time settings (set by callers before run())
+        # Answers approval requests, such as the agent asking for access to a
+        # directory outside its sandbox. None means nobody can answer: tools
+        # that only ask (request_access) are not offered to the model.
         self.approval_callback: ApprovalCallback | None = None
+        # Access the user granted during this session.
+        self.access_grants: list[Grant] = []
         self.cancel_check: Callable[[], bool] | None = None
         config = agent.config
         # Compaction settings start from the agent config and can be changed
@@ -164,6 +170,50 @@ class Session:
     @property
     def registry(self) -> ToolRegistry:
         return self._registry
+
+    # --- Approvals and access grants ---
+
+    async def ask_approval(self, tool_name: str, tool_args: dict[str, Any]) -> bool:
+        """Ask the user through ``approval_callback``; False when nobody can answer."""
+        if self.approval_callback is None:
+            return False
+        self._update_meta(status="waiting_approval", waiting_on=tool_name)
+        try:
+            return bool(await self.approval_callback(tool_name, tool_args))
+        except ApprovalInterrupt:
+            return False
+        finally:
+            self._update_meta(status="running", waiting_on=None)
+
+    def grant_access(self, grant: Grant) -> None:
+        """Record access the user allowed; it lasts for the rest of the session."""
+        if grant in self.access_grants:
+            return
+        self.access_grants.append(grant)
+        self._state._emit({"type": "access_granted", **grant.to_dict()})
+        self._update_meta(access_grants=[g.to_dict() for g in self.access_grants])
+
+    def revoke_access(self, path: str) -> bool:
+        """Remove a grant by its path. Returns False if there was none."""
+        kept = [g for g in self.access_grants if g.path != path]
+        if len(kept) == len(self.access_grants):
+            return False
+        self.access_grants = kept
+        self._state._emit({"type": "access_revoked", "path": path})
+        self._update_meta(access_grants=[g.to_dict() for g in self.access_grants])
+        return True
+
+    def _tool_specs(self) -> list[dict[str, Any]]:
+        """Tool specs for the model. Tools that only ask the user are left out
+        when nobody can answer."""
+        specs = self._registry.get_specs()
+        if self.approval_callback is not None:
+            return specs
+        return [
+            spec
+            for spec in specs
+            if not getattr(self._registry.get(spec["function"]["name"]), "needs_approver", False)
+        ]
 
     # --- Cancellation ---
 
@@ -421,7 +471,7 @@ class Session:
         """
         setup = (
             self._agent.system_prompt,
-            [spec["function"]["name"] for spec in self._registry.get_specs()],
+            [spec["function"]["name"] for spec in self._tool_specs()],
         )
         if setup == self._recorded_setup:
             return
@@ -581,7 +631,7 @@ class Session:
             llm_prompt = Prompt(
                 system=self._agent.system_prompt,
                 messages=self._to_messages(self._state.get_messages()),
-                tools=self._registry.get_specs(),
+                tools=self._tool_specs(),
                 session_id=self.id,
             )
 

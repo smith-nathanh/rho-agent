@@ -2,7 +2,7 @@
 
 ## Overview
 
-`rho-agent` is a configurable agent runtime for software development, debugging, and operations. It provides a structured agent loop with native tool handlers (shell, filesystem, databases) governed by permission profiles that control what each agent can do. The architecture separates agent definition (stateless `Agent`) from execution (stateful `Session`), with all conversation data managed through session directories.
+`rho-agent` is a configurable agent runtime for software development, debugging, and operations. It provides a structured agent loop with native tool handlers (shell, filesystem, databases), with commands confined by an OS sandbox according to the agent's access level. The architecture separates agent definition (stateless `Agent`) from execution (stateful `Session`), with all conversation data managed through session directories.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -49,52 +49,44 @@
 
 ---
 
-## Permission Profiles (`permissions/__init__.py`)
+## Access and the sandbox (`sandbox/`, `tools/factory.py`)
 
-Profiles control what the agent can do. Three built-in profiles plus YAML custom profiles:
+One setting, `AgentConfig.access`, decides what the agent can change:
 
-| Profile | Shell | File Write | Database | Approval | Use Case |
-|---------|-------|------------|----------|----------|----------|
-| `readonly` | RESTRICTED | OFF | READONLY | DANGEROUS | Safe research on production systems |
-| `developer` | UNRESTRICTED | FULL | READONLY | GRANULAR | Local development with file editing |
-| `eval` | UNRESTRICTED | FULL | MUTATIONS | NONE | Sandboxed benchmark execution |
+| Level | Writable | Sandbox | Use case |
+|-------|----------|---------|----------|
+| `read-only` | temp dirs | yes | Research and inspection; no `write`/`edit` tools |
+| `workspace` (default) | working dir, `add_dirs`, temp dirs, package caches, their git dirs | yes | Everyday work in a project |
+| `full` | anywhere | no | Containers, CI, benchmarks, Daytona |
 
-### Permission Modes
+`Access` (`sandbox/policy.py`) holds the level plus details with defaults (network, Unix sockets, protected paths, env scrubbing). `Access.resolve(working_dir)` gives a `ResolvedPolicy` of absolute paths. A `Sandbox` (`sandbox/__init__.py`) pairs that policy with the OS backend:
 
-**ShellMode:**
-- `RESTRICTED`: Only allowlisted commands (grep, cat, find, etc.), dangerous patterns blocked
-- `UNRESTRICTED`: Any command allowed (rely on container/sandbox)
+- `seatbelt.py`: a generated profile run with `/usr/bin/sandbox-exec` (macOS). Allows by default, then denies writes outside the writable roots, protected paths, Unix-socket connections (except DNS and syslog) and, if off, IP networking.
+- `bubblewrap.py`: `bwrap` mount, PID and (if network is off) network namespaces (Linux)
+- `seccomp.py`: a classic-BPF filter, built in Python, that bwrap loads to refuse `socket(AF_UNIX)` and `io_uring_setup`. It is written once per process to a private temp directory that every sandbox mounts read-only.
 
-**FileWriteMode:**
-- `OFF`: No file writing
-- `CREATE_ONLY`: Can create new files, cannot overwrite
-- `FULL`: Full write/edit capabilities
+Open problems and what was tried are in `docs/sandboxing-known-issues.md`.
 
-**DatabaseMode:**
-- `READONLY`: SELECT only, mutations blocked
-- `MUTATIONS`: Full access including INSERT/UPDATE/DELETE
+`bash` (foreground and background) and the `rg` processes behind `grep`/`glob` run wrapped in the sandbox. In-process tools (`read`, `write`, `edit`, ...) check the same policy. If the level needs a sandbox and the backend cannot run, `SandboxUnavailableError` is raised; nothing falls back to running unsandboxed.
 
-**ApprovalMode:**
-- `ALL`: All tools require approval
-- `DANGEROUS`: Only bash, write, edit, database tools require approval
-- `GRANULAR`: Per-tool configuration via `approval_required_tools`
-- `NONE`: No approval (for sandboxed environments)
+### Access requests
 
-### Tool Factory (`permissions/factory.py`)
+The user can widen a session's access while it runs:
 
-Creates a `ToolRegistry` from a `PermissionProfile`:
+- `request_access` (`tools/handlers/request_access.py`) asks for a directory to write or a protected path to read. It is offered only when the session has an `approval_callback`.
+- `write`/`edit` ask for a file's directory when it is outside the writable set.
+- `bash` with `unsandboxed: true` asks to run one command outside the sandbox.
+
+Answers become `Grant`s on `Session.access_grants`, recorded in the trace and `meta.json` and restored on resume. Handlers apply the calling session's grants per call (`Sandbox.with_grants`), so sessions sharing an agent do not share grants. Delegate children start with their parent's grants.
+
+### Tool Factory (`tools/factory.py`)
 
 ```python
-profile = PermissionProfile.developer()
-factory = ToolFactory(profile)
-registry = factory.create_registry(working_dir="/path/to/project")
+registry = build_registry("workspace", working_dir="/path/to/project", tools=None)
+registry.sandbox  # the Sandbox in use, or None for full access
 ```
 
-The factory:
-1. Registers core tools (read, grep, glob, list, read_excel)
-2. Registers bash with restricted/unrestricted mode per profile
-3. Registers write/edit tools if `file_write != OFF`
-4. Registers database tools if environment variables are set
+It registers the core tools (`read`, `glob`, `grep`, `list`, `read_excel`, `bash`, `view_image`), `write`/`edit` unless read-only, database tools for configured connections (read-only per connection unless `readonly: false`; always read-only with `read-only` access), `delegate`, and `request_access` when sandboxed. `tools` keeps only the named tools.
 
 ---
 
@@ -105,7 +97,6 @@ The agent loop is driven by `Session.run()`. The `Agent` holds stateless configu
 ```python
 config = AgentConfig(
     system_prompt="You are a research assistant.",
-    profile="developer",
     working_dir="/tmp/work",
 )
 agent = Agent(config)
@@ -252,7 +243,7 @@ Stores handlers and dispatches invocations:
 
 ```python
 registry = ToolRegistry()
-registry.register(BashHandler(restricted=True))
+registry.register(BashHandler(working_dir="/srv/app"))
 registry.register(ReadHandler())
 
 # Get specs for LLM
@@ -271,7 +262,8 @@ The registry handles:
 
 | Handler | Name | Description |
 |---------|------|-------------|
-| `BashHandler` | `bash` | Shell execution (restricted or unrestricted) |
+| `BashHandler` | `bash` | Shell execution, in the sandbox when there is one |
+| `RequestAccessHandler` | `request_access` | Ask the user for access outside the sandbox |
 | `ReadHandler` | `read` | Read file contents with line ranges |
 | `GrepHandler` | `grep` | Search file contents with ripgrep |
 | `GlobHandler` | `glob` | Find files by pattern |
@@ -392,7 +384,7 @@ The client handles:
 Agents can delegate subtasks to child agents. A parent agent spawns a child `Session` with a scoped config, runs a prompt, and incorporates the result:
 
 ```python
-child_config = AgentConfig(system_prompt="You are a SQL expert.", profile="readonly")
+child_config = AgentConfig(system_prompt="You are a SQL expert.", access="read-only")
 child_agent = Agent(child_config)
 child_session = Session(child_agent)
 result = await child_session.run(prompt="Find slow queries in the orders table")
@@ -418,7 +410,7 @@ Session control happens through the filesystem — no database or network transp
 
 ## Remote Execution — Daytona Backend (`tools/handlers/daytona/`)
 
-The `--backend daytona` flag routes shell and file tool execution to a Daytona cloud sandbox. Any permission profile can be combined with any backend.
+The `--backend daytona` flag routes shell and file tool execution to a Daytona cloud sandbox. The remote VM is the boundary, so remote agents run with full access inside it.
 
 ### Routing
 
@@ -452,7 +444,7 @@ Each handler executes via the Daytona SDK's `sandbox.process.exec()` (for shell 
 ### CLI
 
 ```bash
-rho-agent main --backend daytona --profile developer
+rho-agent main --backend daytona
 rho-agent main --backend daytona --upload ./data.csv:/home/daytona/data.csv
 ```
 
@@ -467,8 +459,7 @@ rho-agent main --backend daytona --upload ./data.csv:/home/daytona/data.csv
 | Tool output truncation | 20,000 chars (head+tail) | `session.py` |
 | Context limit | 100,000 tokens | `session.py` |
 | Auto-compact threshold | 80% | `session.py` |
-| Bash timeout (restricted) | 120 seconds | `bash.py` |
-| Bash timeout (unrestricted) | 300 seconds | `bash.py` |
+| Bash timeout | 300 seconds | `bash.py` |
 
 ---
 
@@ -477,7 +468,8 @@ rho-agent main --backend daytona --upload ./data.csv:/home/daytona/data.csv
 | Directory | Contents |
 |-----------|----------|
 | `rho_agent/core/` | `agent.py`, `session.py`, `state.py`, `config.py`, `events.py`, `session_store.py` |
-| `rho_agent/permissions/` | Permission profiles, modes, factory (was `capabilities/`) |
+| `rho_agent/sandbox/` | Access levels, resolved policies, grants, Seatbelt and bubblewrap backends |
+| `rho_agent/tools/factory.py` | Builds the tool registry from access and tool list |
 | `rho_agent/tools/` | `base.py`, `registry.py`, `handlers/` (local), `handlers/daytona/` (remote) |
 | `rho_agent/client/` | `model.py` (OpenAI-compatible streaming client) |
 | `rho_agent/cli/` | CLI entry point, REPL, monitor subcommands |
@@ -497,7 +489,7 @@ from rho_agent import Agent, AgentConfig, AgentEvent, RunResult, Session, Sessio
 
 ## Architecture Principles
 
-1. **Configurable permissions**: Profiles control what tools are available and how they behave
+1. **Kernel-enforced access**: an OS sandbox, not command filtering, limits what the agent can change; the user widens it per session on request
 2. **Event-driven streaming**: Session passes events to callbacks for real-time UI updates
 3. **Approval workflow**: Dangerous operations require explicit user approval
 4. **Graceful degradation**: Tool errors return results to agent for self-correction

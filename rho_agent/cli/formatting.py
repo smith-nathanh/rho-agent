@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import os
 import sys
 from datetime import UTC, datetime
 from typing import Any
@@ -111,9 +112,20 @@ def _format_tool_signature(tool_name: str | None, tool_args: dict[str, Any] | No
     if not tool_args:
         return f"{tool_name}()"
 
+    # Access requests read as what is asked for, and why
+    if tool_name == "request_access" and "path" in tool_args:
+        path = str(tool_args["path"])
+        home = os.path.expanduser("~")
+        if path == home or path.startswith(home + os.sep):
+            path = "~" + path[len(home) :]
+        text = f"{tool_args.get('access', 'write')} access to {path}"
+        reason = tool_args.get("reason")
+        return f"{text}: {reason}" if reason else text
+
     # For bash commands, show just the command
     if tool_name == "bash" and "command" in tool_args:
-        return f"{tool_name}({tool_args['command']})"
+        prefix = "unsandboxed: " if tool_args.get("unsandboxed") else ""
+        return f"{tool_name}({prefix}{tool_args['command']})"
 
     # For other tools, show all args (no truncation)
     parts = []
@@ -255,3 +267,22 @@ def _format_tool_preview(
     remaining = len(lines) - max_lines
     preview_lines.append(f"... ({remaining} more lines)")
     return "\n".join(preview_lines)
+
+
+def access_summary(agent: Any) -> str:
+    """One line describing what the agent may change, for the CLI."""
+    config = agent.config
+    if config.backend != "local":
+        return "access: full (remote sandbox)"
+    access = config.access
+    if not access.sandboxed:
+        return "access: full · no sandbox"
+    sandbox = agent.registry.sandbox
+    mechanism = {"seatbelt": "macOS sandbox", "bubblewrap": "bubblewrap"}.get(
+        getattr(sandbox, "backend", ""), "sandbox"
+    )
+    parts = [f"access: {access.level.value}", f"network {'on' if access.network else 'off'}"]
+    if access.add_dirs:
+        parts.append(f"+{len(access.add_dirs)} dir(s)")
+    parts.append(mechanism)
+    return " · ".join(parts)

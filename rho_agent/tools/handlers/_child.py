@@ -63,7 +63,7 @@ def child_session_kwargs(
                     "parent_session_id": parent.id,
                     "status": "created",
                     "model": config.model,
-                    "profile": config.profile,
+                    "access": config.access.level.value,
                     "cwd": config.working_dir or read_meta(parent_dir).get("cwd", ""),
                     **process_identity(),
                     "started_at": started,
@@ -98,6 +98,7 @@ def link_child(
     child.approval_callback = callback
     child.cancel_check = parent._is_cancelled
     child.parallel_tool_calls = parent.parallel_tool_calls
+    child.access_grants = list(parent.access_grants)
 
     if parent.max_cost_usd is not None:
         spent = float(parent.state.usage.get("cost_usd", 0.0) or 0.0)

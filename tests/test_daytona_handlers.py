@@ -545,7 +545,7 @@ class TestDaytonaBackendRouting:
             "rho_agent.tools.handlers.daytona.register_daytona_tools",
             return_value=mock_manager,
         ) as mock_reg:
-            agent = Agent(AgentConfig(backend="daytona", profile="developer"))
+            agent = Agent(AgentConfig(backend="daytona", access="full"))
             mock_reg.assert_called_once()
             # String "daytona" passes backend=None
             _, kwargs = mock_reg.call_args
@@ -564,7 +564,7 @@ class TestDaytonaBackendRouting:
             "rho_agent.tools.handlers.daytona.register_daytona_tools",
             return_value=mock_manager,
         ) as mock_reg:
-            agent = Agent(AgentConfig(backend=backend, profile="developer"))
+            agent = Agent(AgentConfig(backend=backend, access="full"))
             mock_reg.assert_called_once()
             _, kwargs = mock_reg.call_args
             assert kwargs["backend"] is backend

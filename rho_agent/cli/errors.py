@@ -6,8 +6,8 @@ from ..client.model import MissingApiKeyError
 
 __all__ = [
     "CliUsageError",
+    "InvalidConfigError",
     "InvalidModeError",
-    "InvalidProfileError",
     "MissingApiKeyError",
     "PromptLoadError",
 ]
@@ -17,14 +17,11 @@ class CliUsageError(ValueError):
     """Base class for user-facing CLI configuration and usage errors."""
 
 
-class InvalidProfileError(CliUsageError):
-    """Raised when a capability profile cannot be loaded."""
+class InvalidConfigError(CliUsageError):
+    """Raised when the agent configuration cannot be used."""
 
     def __init__(self, details: str) -> None:
-        super().__init__(
-            f"Invalid profile: {details}. Use --profile readonly|developer|unrestricted or a "
-            "valid YAML profile path."
-        )
+        super().__init__(f"Invalid configuration: {details}")
 
 
 class InvalidModeError(CliUsageError):

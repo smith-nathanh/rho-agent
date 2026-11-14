@@ -52,7 +52,7 @@ def _make_agent(registry: ToolRegistry | None = None) -> Agent:
     agent = MagicMock(spec=Agent)
     agent.config = AgentConfig(
         system_prompt="You are a test agent.",
-        profile="readonly",
+        access="full",
         model="test-model",
     )
     agent.system_prompt = "You are a test agent."

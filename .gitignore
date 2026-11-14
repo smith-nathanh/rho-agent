@@ -16,6 +16,7 @@ wheels/
 *.md
 !README.md
 !ARCHITECTURE.md
+!docs/sandboxing-known-issues.md
 !rho_agent/prompts/*.md
 !rho_agent/continuum/prompts/*.md
 !examples/**/*.md

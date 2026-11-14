@@ -64,9 +64,8 @@ class ContinuumConfig:
             system_prompt=system_prompt,
             model=self.model,
             service_tier=self.service_tier,
-            profile="developer",
+            access="workspace",
             working_dir=self.working_dir,
-            auto_approve=True,
         )
 
 

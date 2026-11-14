@@ -1,68 +1,43 @@
-"""File writing handler with configurable restrictions."""
+"""Write a file, creating or overwriting it."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
-from .paths import is_path_sensitive, resolve_path
+from .paths import resolve_path, write_refusal
+
+if TYPE_CHECKING:
+    from ...sandbox import Sandbox
 
 
 class WriteHandler(ToolHandler):
-    """Write content to a file with configurable restrictions.
+    """Write content to a file. Standard agentic tool name: 'write'.
 
-    Standard agentic tool name: 'write'
-
-    Modes:
-    - CREATE_ONLY: Can only create new files, cannot overwrite existing files.
-                   Blocks sensitive paths. Requires approval.
-    - FULL: Full write access. Can create and overwrite files.
-            No path restrictions. No approval required (container is sandbox).
+    With a sandbox, paths outside its writable directories are refused, or,
+    when a user can answer, they are asked to allow the file's directory.
     """
 
-    def __init__(
-        self,
-        create_only: bool = True,
-        requires_approval: bool | None = None,
-        working_dir: str | None = None,
-    ):
-        """Initialize WriteHandler.
-
-        Args:
-            create_only: If True, only allow creating new files (default).
-                        If False, allow overwriting existing files.
-            requires_approval: Override whether approval is required.
-                              Defaults to True for create_only, False otherwise.
-            working_dir: Directory relative paths are resolved against.
-                         Defaults to the process's current directory.
+    def __init__(self, working_dir: str | None = None, sandbox: Sandbox | None = None):
         """
-        self._create_only = create_only
+        Args:
+            working_dir: Directory relative paths are resolved against.
+                Defaults to the process's current directory.
+            sandbox: The access policy to check paths against; None allows any path.
+        """
         self._working_dir = working_dir
-        self._requires_approval = (
-            requires_approval if requires_approval is not None else create_only
-        )
+        self._sandbox = sandbox
 
     @property
     def name(self) -> str:
         return "write"
 
     @property
-    def requires_approval(self) -> bool:
-        return self._requires_approval
-
-    @property
     def description(self) -> str:
-        if self._create_only:
-            return (
-                "Write content to a new file. Use this when the user asks you to produce "
-                "an output file such as a summary, report, script, or document. "
-                "Cannot overwrite existing files."
-            )
-        else:
-            return (
-                "Write content to a file. Creates the file if it doesn't exist, "
-                "or overwrites it if it does. Creates parent directories as needed."
-            )
+        return (
+            "Write content to a file. Creates the file if it doesn't exist, "
+            "or overwrites it if it does. Creates parent directories as needed."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -93,20 +68,9 @@ class WriteHandler(ToolHandler):
             return ToolOutput(content="No content provided", success=False)
 
         path = resolve_path(path_str, self._working_dir)
-
-        # Safety checks for create_only mode
-        if self._create_only:
-            # Check sensitive paths
-            sensitive, reason = is_path_sensitive(path)
-            if sensitive:
-                return ToolOutput(content=reason, success=False)
-
-            # Check if file already exists
-            if path.exists():
-                return ToolOutput(
-                    content=f"File already exists: {path}. Use a different path or delete the existing file first.",
-                    success=False,
-                )
+        refusal = await write_refusal(self._sandbox, invocation, path, "write")
+        if refusal:
+            return ToolOutput(content=refusal, success=False)
 
         try:
             # Create parent directories if needed
@@ -122,10 +86,7 @@ class WriteHandler(ToolHandler):
             size = len(content.encode("utf-8"))
             lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
 
-            if self._create_only:
-                action = "Created"
-            else:
-                action = "Overwrote" if existed else "Created"
+            action = "Overwrote" if existed else "Created"
 
             return ToolOutput(
                 content=f"{action} {path} ({size} bytes, {lines} lines)",
@@ -134,7 +95,7 @@ class WriteHandler(ToolHandler):
                     "path": str(path),
                     "size_bytes": size,
                     "lines": lines,
-                    "overwrote": existed and not self._create_only,
+                    "overwrote": existed,
                 },
             )
 

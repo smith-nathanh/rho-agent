@@ -73,7 +73,7 @@ class MysqlHandler(DatabaseHandler):
             autocommit=True,
         )
         # Set session to read-only mode when readonly is enabled
-        if self._readonly:
+        if self._is_readonly(alias):
             cursor = conn.cursor()
             cursor.execute("SET SESSION TRANSACTION READ ONLY")
             cursor.close()

@@ -1,6 +1,6 @@
 # rho-agent
 
-rho-agent runs AI agents that read code, run commands and edit files, each under a permission profile that sets what it is allowed to touch. You can use it two ways:
+rho-agent runs AI agents that read code, run commands and edit files. Agents run inside an OS sandbox: they can change the project they work in, and ask before touching anything outside it. You can use it two ways:
 
 - **From the terminal.** Work with an agent in a conversation, hand it a task to finish on its own, or start several and supervise them from one place.
 - **From Python.** Import `rho_agent` and build agents into your own programs. The CLI is a thin layer over the same three classes.
@@ -85,7 +85,7 @@ from rho_agent import Agent, AgentConfig, Session
 async def main() -> None:
     config = AgentConfig(
         system_prompt="You answer questions about the code in the current directory.",
-        profile="readonly",
+        access="read-only",
     )
     async with Session(Agent(config)) as session:
         result = await session.run("At what quantity does the bulk discount start? One sentence.")
@@ -103,17 +103,17 @@ The bulk discount starts at 11 units in the implementation, though the documenta
 completed
 ```
 
-Both of these use the `readonly` profile, the default, which can look but not change anything. The rest of this page covers the terminal first, then [Python](#in-python).
+The Python example uses `read-only` access, which can look but not change anything. The default, `workspace`, lets the agent edit the project; see [Access](#access). The rest of this page covers the terminal first, then [Python](#in-python).
 
 ## In the terminal
 
 ### Work with an agent
 
-Run `rho-agent` in a project to start a conversation. To let the agent edit files and run commands, start it with the `developer` profile.
+Run `rho-agent` in a project to start a conversation. The agent can edit files there and run commands, inside a sandbox.
 
 ```bash
 cd ~/proj/myapp
-rho-agent --profile developer
+rho-agent
 ```
 
 ```
@@ -121,7 +121,7 @@ rho-agent --profile developer
 > now run the whole suite
 ```
 
-When the profile requires approval for a call, the agent asks at the prompt and waits for your answer. Ctrl+C stops the current turn without ending the session, `/help` lists the commands available inside it, and the status bar shows how many tokens the session has used.
+When the agent needs something outside the project, such as writing a sibling repository, it asks at the prompt and waits for your answer. Ctrl+C stops the current turn without ending the session, `/help` lists the commands available inside it, and the status bar shows how many tokens the session has used.
 
 Sessions are saved as you go, so you can leave and come back:
 
@@ -137,7 +137,7 @@ The agent reads `AGENTS.md` (or `CLAUDE.md`) from the project for instructions, 
 Give a prompt on the command line and the agent runs it to completion and exits.
 
 ```bash
-rho-agent --profile developer \
+rho-agent \
   "migrate sync_client.py to async with aiohttp, update all callers, run the tests"
 
 # Write the final answer to a file
@@ -163,13 +163,11 @@ From the monitor you can:
 - `pause`, `resume` and `cancel`
 - send a `directive` that the agent reads before its next step
 
-An agent with no terminal attached cannot ask you to approve a command, so it queues the request and waits. In the recording above, both agents were started like this, under a profile that requires approval for every shell command:
+An agent with no terminal attached cannot ask you anything directly, so when it needs access outside its sandbox it queues the request and waits for an answer in the monitor:
 
 ```bash
-rho-agent --profile careful.yaml "split payments don't add up to the invoice total. fix it" &
+rho-agent "split payments don't add up to the invoice total. fix it" &
 ```
-
-[`careful.yaml`](docs/demo/careful.yaml) is a short YAML file; see [Permission profiles](#permission-profiles) for writing your own.
 
 There is no daemon and no server behind this. Each session is a directory of plain files under `~/.config/rho-agent/sessions`, and the monitor reads and writes those files. See [Monitor](docs/site/monitor.md).
 
@@ -191,7 +189,7 @@ def show(event: AgentEvent) -> None:
 
 
 async def main() -> None:
-    agent = Agent(AgentConfig(profile="developer"))
+    agent = Agent(AgentConfig())  # workspace access: edits the current directory
     session = SessionStore().create_session(agent)  # saved, so the monitor sees it
 
     fixed = await session.run("The pricing tests fail. Fix the bug.", on_event=show)
@@ -222,31 +220,43 @@ All 4 pricing tests pass.
 
 A few things to know:
 
-- **The agent works in the directory your program runs from.** With the `developer` profile it can change anything there, so try it on a copy of a project first.
-- **No one is asked for approval by default.** A session created in Python runs every tool call its profile allows. Set `session.approval_callback` to be asked first about the calls the profile marks as needing approval.
+- **The agent works in the directory your program runs from.** With the default `workspace` access it can change anything there, so try it on a copy of a project first.
+- **No one is asked anything by default.** A session created in Python stays inside its sandbox, and commands that need more just fail. Set `session.approval_callback` to let the agent ask for access outside it.
 - **`Session(agent)` keeps nothing on disk.** `SessionStore().create_session(agent)` saves the session under `~/.config/rho-agent/sessions`, where `rho-agent monitor`, `rho-agent --list` and `rho-agent -r` find it.
 - **Leave out `system_prompt`** to get the same built-in prompt the CLI uses, or pass your own text or a prompt file.
 
 The [Python SDK](docs/site/python-sdk.md) guide covers every `AgentConfig` field, the event types, cancellation and custom tools. There are complete programs in [`examples/`](examples/): a single agent, several agents working in parallel, and a Streamlit app that streams an agent's work into a chat window.
 
-## Permission profiles
+## Access
 
-A profile decides what an agent can do before it starts. Pass a built-in name or a path to your own YAML file, as `--profile` on the command line or `AgentConfig(profile=...)` in Python.
+One setting decides what an agent can change: `--access` on the command line, `AgentConfig(access=...)` in Python.
 
-| Profile | Shell | File writes | Database | Asks for approval |
-|---|---|---|---|---|
-| `readonly` (default) | Allowlisted commands only | Off | `SELECT` only | Before shell, database and subagent calls |
-| `developer` | Any command | On | `SELECT` only | Before Oracle and MySQL queries |
-| `developer-bash-only` | Any command | Through the shell | None | As `developer`; the agent gets only a shell tool |
-| `unrestricted` | Any command | On | Full | Never. For containers and sandboxes |
+| Access | The agent can write | For |
+|---|---|---|
+| `workspace` (default) | The working directory, temp directories and package caches | Everyday work in a project |
+| `read-only` | Temp directories only | Investigating without changing anything |
+| `full` | Anywhere you can; no sandbox | Containers, CI and other disposable machines |
+
+`read-only` and `workspace` run every command inside the operating system's sandbox: Seatbelt on macOS (built in), [bubblewrap](https://github.com/containers/bubblewrap) on Linux (`sudo apt install bubblewrap`). The kernel enforces the limits, so they hold whatever the command is and for everything it starts:
+
+- Writes outside the writable directories fail, and `.git/hooks` and `.git/config` stay read-only even inside the project.
+- Credentials such as `~/.ssh`, `~/.aws` and `~/.config/gh` are unreadable, and API keys are removed from commands' environment.
+- Local services that run outside the sandbox, such as Docker, ssh-agent and tmux, are unreachable over their Unix sockets.
+- The network is on; `network: false` turns it off.
+
+The file tools check the same rules themselves. If the sandbox can't run, rho-agent stops rather than run unsandboxed; `rho-agent sandbox check` tests it. Windows has no sandbox yet (use WSL2).
+
+When the agent needs more, it asks: *"Agent wants write access outside the sandbox: ~/proj/shared-lib. Allow for this session? [y/N]"*. You answer in the terminal, or in `rho-agent monitor` for agents running in the background. With nobody to ask, as in a Python program without an approval callback, it stays inside the sandbox.
 
 ```bash
-rho-agent --profile developer
-rho-agent --profile path/to/custom-profile.yaml
-rho-agent --profile developer --auto-approve     # skip approval prompts
+rho-agent --access read-only
+rho-agent --add-dir ../shared-lib      # allow this directory up front
+rho-agent --access full                # inside a container
 ```
 
-See [Profiles](docs/site/profiles.md) for the YAML schema.
+Inside a session, `/access` shows what the agent can reach and `/access read-only` changes it. See [Access](docs/site/access.md) for settings and how the sandbox works on each platform.
+
+The sandbox stops an agent changing things outside the project by mistake. It doesn't yet stop every deliberate escape: on macOS a command can still ask another app to act for it, local TCP services are reachable while the network is on, and there's no per-domain network allowlist. See [Known limits](docs/site/access.md#known-limits), and [docs/sandboxing-known-issues.md](docs/sandboxing-known-issues.md) for details and planned fixes.
 
 ## What else is in the box
 
@@ -270,7 +280,7 @@ The same traces export as OpenTelemetry spans, following the GenAI semantic conv
 | [CLI Reference](docs/site/cli-reference.md) | Commands, flags, and usage examples |
 | [Python SDK](docs/site/python-sdk.md) | Create and run agents programmatically |
 | [Tools](docs/site/tools.md) | Complete tool handler reference |
-| [Profiles](docs/site/profiles.md) | Permission profiles and custom YAML |
+| [Access](docs/site/access.md) | What agents can change, the sandbox, and access requests |
 | [Daytona](docs/site/daytona.md) | Remote sandbox execution via Daytona |
 | [Observability](docs/site/observability.md) | Session traces, offline inspection, observers, and OpenTelemetry export |
 | [Export](rho_agent/export/README.md) | Convert traces to ATIF for training data or OTLP for observability tools |

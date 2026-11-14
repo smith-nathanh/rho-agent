@@ -11,9 +11,8 @@ from rho_agent.client.model import StreamEvent, ToolCall
 from rho_agent.core.agent import Agent
 from rho_agent.core.config import AgentConfig
 from rho_agent.core.session import Session
-from rho_agent.permissions import PermissionProfile
-from rho_agent.permissions.factory import ToolFactory
 from rho_agent.tools.base import ToolHandler, ToolInvocation, ToolOutput
+from rho_agent.tools.factory import build_registry
 from rho_agent.tools.registry import ToolRegistry
 
 
@@ -202,7 +201,7 @@ async def test_cancel_stops_a_parallel_batch() -> None:
 
 
 def test_builtin_tools_declare_parallel_safety() -> None:
-    registry = ToolFactory(PermissionProfile.developer()).create_registry(working_dir="/tmp")
+    registry = build_registry("full", working_dir="/tmp")
     assert registry.is_parallel_safe("read")
     assert registry.is_parallel_safe("grep")
     assert registry.is_parallel_safe("glob")
@@ -213,10 +212,9 @@ def test_builtin_tools_declare_parallel_safety() -> None:
     assert not registry.is_parallel_safe("no-such-tool")
 
 
-def test_parallel_bash_is_a_profile_switch() -> None:
-    profile = PermissionProfile.from_dict(
-        {"shell": "unrestricted", "file_write": "full", "parallel_bash": True}
-    )
-    registry = ToolFactory(profile).create_registry(working_dir="/tmp")
+def test_parallel_bash_is_a_config_switch() -> None:
+    registry = build_registry("full", working_dir="/tmp", parallel_bash=True)
     assert registry.is_parallel_safe("bash")
-    assert profile.to_dict()["parallel_bash"] is True
+    config = AgentConfig._from_dict({"parallel_bash": True, "access": "full"})
+    assert config.parallel_bash is True
+    assert config._to_dict()["parallel_bash"] is True

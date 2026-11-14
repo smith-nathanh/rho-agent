@@ -51,9 +51,14 @@ class MonitorSession:
         while True:
             try:
                 raw = input("monitor> ").strip()
-            except (EOFError, KeyboardInterrupt):
+            except EOFError:
                 console.print()
                 break
+            except KeyboardInterrupt:
+                # Like a shell: Ctrl+C clears the line. A Ctrl+C meant for
+                # `watch` that lands just after it ended must not quit.
+                console.print()
+                continue
 
             if not raw:
                 continue

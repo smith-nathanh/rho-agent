@@ -4,11 +4,11 @@ description: Complete reference for all tool handlers available to agents.
 order: 8
 ---
 
-Tools follow a handler pattern where each tool defines a `name`, `description`, JSON-schema `parameters`, and a `handle()` implementation. Tool availability is controlled by the active [permission profile](profiles/).
+Tools follow a handler pattern where each tool defines a `name`, `description`, JSON-schema `parameters`, and a `handle()` implementation. Which tools an agent gets follows from its [access level](access/) and, optionally, `AgentConfig.tools`, a list of tool names.
 
 ## File inspection tools
 
-These tools are always available regardless of profile.
+These tools are available at every access level. In a sandbox they refuse protected paths such as `~/.ssh`.
 
 ### `read`
 
@@ -32,7 +32,7 @@ Attach an image file (PNG, JPEG, GIF or WebP) so the model can see it: a screens
 
 The image is added to the conversation right after the step's tool results. Files over 4 MB are scaled down when Pillow is installed and refused otherwise. The model must accept image input.
 
-`view_image` has its own profile switch. Left unset it is on, except in bash-only mode. Set `view_image: true` alongside `bash_only: true` in a profile for exactly two tools, bash and images, or `view_image: false` for a model without image input.
+`view_image` is on by default. Leave it out of `AgentConfig.tools` for a model without image input; `read` then stops attaching images too. `tools=["bash", "view_image"]` gives exactly two tools, bash and images.
 
 ### `grep`
 
@@ -91,23 +91,34 @@ Returns tab-delimited data or sheet metadata. Defaults to 500 rows max.
 
 ### `bash`
 
-Execute shell commands. Behavior depends on the profile's shell mode.
+Execute shell commands. Any command is allowed; with `read-only` or `workspace` access it runs inside the OS sandbox, which refuses writes outside the allowed directories, reads of credentials, and connections to local services such as Docker (see [Access](access/#how-it-works)).
 
 | Parameter | Type | Description |
 |---|---|---|
 | `command` | string | Shell command to execute (required) |
 | `working_dir` | string | Working directory override |
-| `timeout` | integer | Timeout in seconds |
-
-**Restricted mode** (`readonly` profile): Only allowlisted commands are permitted. The allowlist includes read-only commands like `cat`, `grep`, `find`, `ls`, `head`, `tail`, `wc`, `jq`, `git log`, `git diff`, `git show`, `ps`, `df`, `du`, `env`, `curl`, and similar inspection tools. Redirects (`>`, `>>`) and destructive commands (`rm`, `mv`, `chmod`, `kill`, `sudo`) are blocked.
-
-**Unrestricted mode** (`developer` and `eval` profiles): Any command is allowed.
+| `timeout` | integer | Timeout in seconds (default 300) |
+| `run_in_background` | boolean | Start the command and return at once with its PID and log file |
+| `unsandboxed` | boolean | Sandboxed agents only: run this one command outside the sandbox, after the user approves |
+| `reason` | string | With `unsandboxed`: why, shown to the user |
 
 Returns JSON with `output`, `exit_code`, and `duration_seconds`.
 
+### `request_access`
+
+Ask the user for access outside the sandbox. Offered only to sandboxed agents, and only when someone can answer (see [Access](access/#asking-for-more)).
+
+| Parameter | Type | Description |
+|---|---|---|
+| `path` | string | Directory to write, or protected path to read (required) |
+| `access` | string | `write` (default) or `read` |
+| `reason` | string | One sentence shown to the user (required) |
+
+A yes lasts for the rest of the session and applies to every tool and command.
+
 ## File edit tools
 
-Available when the profile's `file_write` mode is `create-only` or `full`.
+Available with `workspace` and `full` access. In a sandbox, a path outside the writable directories makes the tool ask the user to allow that directory for the session, or refuses if nobody can answer.
 
 ### `write`
 
@@ -117,10 +128,6 @@ Create or overwrite files.
 |---|---|---|
 | `path` | string | File path (required) |
 | `content` | string | File content (required) |
-
-**Create-only mode**: Can only create new files. Blocks overwrites and writes to sensitive paths (`.bashrc`, `.ssh/`, `.aws/`, `/etc/`, `/usr/`).
-
-**Full mode**: Unrestricted write access.
 
 ### `edit`
 
@@ -140,7 +147,7 @@ Requires a unique match to prevent accidental changes. Uses a three-stage matchi
 
 ## Database tools
 
-Database tools share a common interface. All support `query`, `list_tables`, `describe`, and `export_query` operations. By default, only SELECT queries are allowed. Mutation queries (INSERT, UPDATE, DELETE, DROP, CREATE, ALTER, TRUNCATE) require the `eval` profile.
+Database tools share a common interface. All support `query`, `list_tables`, `describe`, and `export_query` operations. By default, only SELECT queries are allowed. Mutation queries (INSERT, UPDATE, DELETE, DROP, CREATE, ALTER, TRUNCATE) need `readonly: false` on the connection in `databases.yaml`, and are always refused with `read-only` access.
 
 | Parameter | Type | Description |
 |---|---|---|
@@ -182,7 +189,7 @@ Set databases on `AgentConfig` directly — either in YAML agent config files or
 ```yaml
 # agents/data-analyst.yaml
 system_prompt: You are a data analyst.
-profile: readonly
+access: read-only
 databases:
   sales:
     type: sqlite
@@ -200,7 +207,7 @@ databases:
 ```python
 config = AgentConfig(
     system_prompt="You are a data analyst.",
-    profile="readonly",
+    access="read-only",
     databases={
         "sales": {"type": "sqlite", "path": "/data/sales.db"},
         "analytics": {
@@ -247,11 +254,11 @@ Spawn a child agent to execute a focused subtask. The LLM decides at runtime whe
 | `instruction` | string | Task description for the child agent (required) |
 | `full_context` | boolean | Copy parent conversation history to child |
 
-The child agent inherits the parent's profile, model, and working directory. Delegation is single-level — child agents cannot delegate further. Parent cancellation propagates to children automatically.
+The child agent inherits the parent's access, access grants, model, and working directory. Delegation is single-level — child agents cannot delegate further. Parent cancellation propagates to children automatically.
 
 ### Agent-as-tool (pre-configured specialists)
 
-Wrap a pre-configured agent as a named tool with typed parameters. Unlike `delegate`, the child has its own system prompt, profile, and model — configured at setup time, not derived from the parent.
+Wrap a pre-configured agent as a named tool with typed parameters. Unlike `delegate`, the child has its own system prompt, access level, and model — configured at setup time, not derived from the parent.
 
 ```python
 from rho_agent.tools.handlers import AgentToolHandler
@@ -261,7 +268,7 @@ sql_agent = AgentToolHandler(
     tool_name="generate_sql",
     tool_description="Generate SQL from a natural language question.",
     system_prompt="You are an expert SQL developer. ...",
-    config=AgentConfig(model="gpt-6.1-terra", profile="readonly"),
+    config=AgentConfig(model="gpt-6.1-terra", access="read-only"),
     input_schema={
         "type": "object",
         "properties": {
@@ -283,7 +290,7 @@ The parent LLM sees `generate_sql(question, dialect)` as a first-class tool. Eac
 | `tool_name` | string | Tool name the LLM sees (required) |
 | `tool_description` | string | Description for the LLM (required) |
 | `system_prompt` | string | Child agent's system prompt (required) |
-| `config` | AgentConfig | Child's model, profile, etc. |
+| `config` | AgentConfig | Child's model, access, etc. |
 | `input_schema` | dict | JSON Schema for typed parameters |
 | `input_formatter` | callable | Custom `(args) -> instruction` mapper |
 | `requires_approval` | bool | Whether parent needs approval before calling |

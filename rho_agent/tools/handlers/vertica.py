@@ -71,7 +71,7 @@ class VerticaHandler(DatabaseHandler):
             database=config.database,
             user=config.user or "",
             password=config.password or "",
-            read_only=self._readonly,  # Honor readonly mode
+            read_only=self._is_readonly(alias),  # Honor readonly mode
         )
         self._connections[alias] = conn
         return conn

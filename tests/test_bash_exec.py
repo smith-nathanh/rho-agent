@@ -26,7 +26,7 @@ async def _run(handler: BashHandler, **arguments):
 
 
 async def test_stdout_and_stderr_are_captured_in_order(tmp_path: Path) -> None:
-    handler = BashHandler(restricted=False, working_dir=str(tmp_path))
+    handler = BashHandler(working_dir=str(tmp_path))
     out, body = await _run(handler, command="echo one; echo two >&2; echo three; exit 3")
     assert body["output"] == "one\ntwo\nthree\n"
     assert body["metadata"]["exit_code"] == 3
@@ -34,7 +34,7 @@ async def test_stdout_and_stderr_are_captured_in_order(tmp_path: Path) -> None:
 
 
 async def test_timeout_kills_child_processes(tmp_path: Path) -> None:
-    handler = BashHandler(restricted=False, working_dir=str(tmp_path))
+    handler = BashHandler(working_dir=str(tmp_path))
     pidfile = tmp_path / "child.pid"
     out, body = await _run(handler, command=f"sleep 60 & echo $! > {pidfile}; wait", timeout=1)
     assert out.metadata["timed_out"] is True
@@ -48,7 +48,7 @@ async def test_timeout_kills_child_processes(tmp_path: Path) -> None:
 
 
 async def test_command_returns_when_shell_exits_despite_running_child(tmp_path: Path) -> None:
-    handler = BashHandler(restricted=False, working_dir=str(tmp_path))
+    handler = BashHandler(working_dir=str(tmp_path))
     start = time.perf_counter()
     out, body = await _run(handler, command="sleep 20 & echo started", timeout=15)
     assert time.perf_counter() - start < 5
@@ -57,7 +57,7 @@ async def test_command_returns_when_shell_exits_despite_running_child(tmp_path: 
 
 
 async def test_large_output_is_saved_and_referenced(tmp_path: Path) -> None:
-    handler = BashHandler(restricted=False, working_dir=str(tmp_path))
+    handler = BashHandler(working_dir=str(tmp_path))
     out, body = await _run(handler, command="seq 1 20000")
     saved = Path(out.metadata["full_output_path"])
     assert saved.exists()
@@ -70,14 +70,14 @@ async def test_large_output_is_saved_and_referenced(tmp_path: Path) -> None:
 
 
 async def test_small_output_leaves_no_file(tmp_path: Path) -> None:
-    handler = BashHandler(restricted=False, working_dir=str(tmp_path))
+    handler = BashHandler(working_dir=str(tmp_path))
     out, _ = await _run(handler, command="echo hi")
     assert "full_output_path" not in out.metadata
     assert list(handler._output_dir.iterdir()) == []
 
 
 async def test_background_job_returns_at_once_and_logs_exit_code(tmp_path: Path) -> None:
-    handler = BashHandler(restricted=False, working_dir=str(tmp_path))
+    handler = BashHandler(working_dir=str(tmp_path))
     start = time.perf_counter()
     out, body = await _run(
         handler, command="sleep 0.5; echo finished; exit 4", run_in_background=True
@@ -93,15 +93,8 @@ async def test_background_job_returns_at_once_and_logs_exit_code(tmp_path: Path)
     assert log.read_text() == "finished\n[exit code: 4]\n"
 
 
-async def test_background_is_refused_in_restricted_mode(tmp_path: Path) -> None:
-    handler = BashHandler(restricted=True, working_dir=str(tmp_path))
-    assert "run_in_background" not in handler.parameters["properties"]
-    out, _ = await _run(handler, command="ls", run_in_background=True)
-    assert out.success is False
-
-
 async def test_cancel_kills_the_process_group(tmp_path: Path) -> None:
-    handler = BashHandler(restricted=False, working_dir=str(tmp_path))
+    handler = BashHandler(working_dir=str(tmp_path))
     pidfile = tmp_path / "child.pid"
     task = asyncio.ensure_future(
         _run(handler, command=f"sleep 60 & echo $! > {pidfile}; wait", timeout=30)

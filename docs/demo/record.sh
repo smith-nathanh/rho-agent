@@ -6,8 +6,9 @@
 #
 # Needs vhs (https://github.com/charmbracelet/vhs), ffmpeg, a project virtualenv
 # (uv sync --group dev) and RHO_AGENT_API_KEY in the environment or in .env.
-# Everything runs in a throwaway home directory (/tmp/rho-agent-demo unless
-# DEMO_HOME is set), so your own sessions and config never appear in a recording.
+# Everything runs in a throwaway home directory (/Users/Shared/rho-agent-demo on
+# macOS unless DEMO_HOME is set), so your own sessions and config never appear in
+# a recording.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -28,7 +29,10 @@ check_repo() {
 }
 
 # A short path, because the agent's tool calls show absolute paths on screen.
-demo_home="${DEMO_HOME:-/tmp/rho-agent-demo}"
+# Not under /tmp: temp directories are writable inside the sandbox, so
+# read-only agents there would never need to ask for access.
+if [[ -d /Users/Shared ]]; then default_home=/Users/Shared/rho-agent-demo; else default_home="$HOME/rho-agent-demo"; fi
+demo_home="${DEMO_HOME:-$default_home}"
 if [[ -e "$demo_home" ]]; then
   # Only ever remove a directory this script created.
   [[ -f "$demo_home/.rho-agent-demo" ]] || { echo "$demo_home exists and is not a demo home" >&2; exit 1; }
@@ -38,7 +42,6 @@ mkdir -p "$demo_home/proj"
 touch "$demo_home/.rho-agent-demo"
 demo_home="$(cd "$demo_home" && pwd -P)"  # the real path, so projects show as ~/proj/...
 cp -R docs/demo/projects/. "$demo_home/proj/"
-cp docs/demo/careful.yaml "$demo_home/careful.yaml"
 # Each sample project is its own git repository, as a real project would be:
 # agents usually look at `git status` first.
 for project in "$demo_home"/proj/*/; do
@@ -76,18 +79,20 @@ case "${1:-}" in
     check_repo
     ;;
   monitor)
-    # Start two unattended agents in the demo home. With no terminal attached
-    # they queue their approval requests for the monitor.
+    # Start two unattended read-only agents in the demo home. Both have
+    # something to fix, which needs write access, and with no terminal
+    # attached they queue that request for the monitor.
     agent() {  # agent <project> <prompt>
       (cd "$demo_home/proj/$1" && HOME="$demo_home" nohup rho-agent main \
-        --profile "$demo_home/careful.yaml" "$2" >"$demo_home/$1.log" 2>&1 </dev/null &)
+        --access read-only "$2" >"$demo_home/$1.log" 2>&1 </dev/null &)
     }
     agent billing "Customers report that split payments do not add up to the invoice \
 total. Reproduce it with the tests, fix invoice.py, and run the tests again."
     agent api-server "Review this service before release. Use the delegate tool to run two \
 reviews in parallel: one of auth.py for security problems, and one of whether the tests \
 cover every route in routes.py (that reviewer should run the test suite). Start both \
-reviews in one step, before doing anything else yourself. Then summarise."
+reviews in one step, before doing anything else yourself. Then fix the security problems \
+in auth.py, run the tests, and summarise."
 
     sessions="$demo_home/.config/rho-agent/sessions"
     session_for() {  # session_for <project> -> session ID
@@ -96,7 +101,7 @@ reviews in one step, before doing anything else yourself. Then summarise."
       [[ -n "$meta" ]] && basename "$(dirname "$meta")" || true
     }
     echo "waiting for both agents to ask for approval..."
-    for _ in $(seq 1 120); do
+    for _ in $(seq 1 180); do
       billing="$(session_for billing)"; api="$(session_for api-server)"
       if [[ -n "$billing" && -n "$api" ]] &&
         ls "$sessions/$billing"/approvals/*.json >/dev/null 2>&1 &&

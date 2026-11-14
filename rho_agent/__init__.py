@@ -13,8 +13,11 @@ from .core import (
     SessionStore,
     State,
 )
+from .sandbox import Access, AccessLevel
 
 __all__ = [
+    "Access",
+    "AccessLevel",
     "Agent",
     "AgentConfig",
     "AgentEvent",

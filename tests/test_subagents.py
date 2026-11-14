@@ -12,8 +12,7 @@ from rho_agent.core.agent import Agent
 from rho_agent.core.config import AgentConfig
 from rho_agent.core.session import Session
 from rho_agent.core.state import State
-from rho_agent.permissions import PermissionProfile
-from rho_agent.permissions.factory import ToolFactory
+from rho_agent.tools.factory import build_registry
 from rho_agent.tools.handlers._child import link_child
 
 
@@ -56,7 +55,7 @@ def _done(cost: float = 0.1) -> StreamEvent:
 
 
 def _parent(client: _Client, tmp_path: Path) -> Session:
-    agent = Agent(AgentConfig(system_prompt="parent system", profile="readonly", model="m"))
+    agent = Agent(AgentConfig(system_prompt="parent system", access="full", model="m"))
     session_dir = tmp_path / "parent"
     session_dir.mkdir()
     return Session(
@@ -68,16 +67,11 @@ def _parent(client: _Client, tmp_path: Path) -> Session:
 
 
 def test_factory_registers_delegate_for_python_api_users() -> None:
-    registry = ToolFactory(PermissionProfile.developer()).create_registry(working_dir="/tmp")
+    registry = build_registry("full", working_dir="/tmp")
     assert "delegate" in registry
     assert registry.is_parallel_safe("delegate")
 
-    bash_only = PermissionProfile.unrestricted()
-    bash_only.bash_only = True
-    assert "delegate" not in ToolFactory(bash_only).create_registry(working_dir="/tmp")
-
-    off = PermissionProfile.from_dict({"delegate": False})
-    assert "delegate" not in ToolFactory(off).create_registry(working_dir="/tmp")
+    assert "delegate" not in build_registry("full", working_dir="/tmp", tools=["bash"])
 
 
 async def test_delegate_runs_child_with_trace_and_rolls_up_usage(tmp_path: Path) -> None:

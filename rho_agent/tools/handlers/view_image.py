@@ -11,10 +11,13 @@ from __future__ import annotations
 import base64
 import io
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
-from .paths import resolve_path
+from .paths import read_refusal, resolve_path
+
+if TYPE_CHECKING:
+    from ...sandbox import Sandbox
 
 IMAGE_MEDIA_TYPES = {
     ".png": "image/png",
@@ -96,8 +99,9 @@ def encode_image(path: str, data: bytes) -> ToolOutput:
 class ViewImageHandler(ToolHandler):
     """Attach a local image file so the model can look at it."""
 
-    def __init__(self, working_dir: str | None = None) -> None:
+    def __init__(self, working_dir: str | None = None, sandbox: Sandbox | None = None) -> None:
         self._working_dir = working_dir
+        self._sandbox = sandbox
 
     @property
     def parallel_safe(self) -> bool:
@@ -129,6 +133,10 @@ class ViewImageHandler(ToolHandler):
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
         path = resolve_path(path_str, self._working_dir)
+
+        refusal = read_refusal(self._sandbox, invocation, path)
+        if refusal:
+            return ToolOutput(content=refusal, success=False)
         if not path.exists():
             return ToolOutput(content=f"File not found: {path}", success=False)
         if not path.is_file():

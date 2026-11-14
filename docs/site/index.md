@@ -4,11 +4,11 @@ description: A configurable AI agent for software development, triage, and opera
 order: 1
 ---
 
-rho-agent is a configurable AI agent for software development, debugging, and operations workflows. It provides a structured agent loop with built-in tool handlers for shell execution, file inspection, database access, and external service integration — all governed by permission profiles that control what each agent can and cannot do. Every session is traced to disk and can be resumed, inspected, or monitored live.
+rho-agent is a configurable AI agent for software development, debugging, and operations workflows. It provides a structured agent loop with built-in tool handlers for shell execution, file inspection, database access, and external service integration — with commands confined by an OS sandbox to what the agent is allowed to change. Every session is traced to disk and can be resumed, inspected, or monitored live.
 
 ## Key capabilities
 
-**Permission profiles** control shell access, file write permissions, and database mutation behavior per agent. A `readonly` agent can safely inspect production systems. A `developer` agent can edit files and run arbitrary commands. An `unrestricted` agent has full access for sandboxed benchmark execution. The **Daytona backend** (`--backend daytona`) routes shell and file tool execution to a remote cloud sandbox.
+**Access** is one setting: `workspace` (the default) edits the project it runs in, `read-only` can look but not change anything, and `full` has no sandbox, for containers and benchmarks. Sandboxed agents ask before writing outside their project. The **Daytona backend** (`--backend daytona`) routes shell and file tool execution to a remote cloud sandbox.
 
 **Native tool handlers** give agents direct access to shells, files, databases (PostgreSQL, MySQL, Oracle, Vertica, SQLite), and Excel files — without relying on external plugins or MCP servers.
 
@@ -31,7 +31,7 @@ rho-agent is a configurable AI agent for software development, debugging, and op
 | [Python SDK](python-sdk/) | Create and run agents programmatically |
 | [Prompt Files](prompt-files/) | Template prompts with frontmatter and variables |
 | [Tools](tools/) | Complete tool handler reference |
-| [Profiles](profiles/) | Permission profiles and custom profile YAML |
+| [Access](access/) | Access levels, the sandbox, and access requests |
 | [Daytona](daytona/) | Remote sandbox execution via Daytona |
 | [Observability](observability/) | Session traces, offline inspection, and observers |
 | [Monitor](monitor/) | Watch, control, and steer running agents |

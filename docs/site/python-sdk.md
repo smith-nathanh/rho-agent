@@ -29,7 +29,6 @@ from rho_agent import Agent, AgentConfig, Session, SessionStore
 
 config = AgentConfig(
     system_prompt="You are a research assistant.",
-    profile="developer",
     model="gpt-6.1-terra",
     working_dir="/tmp/work",
 )
@@ -54,14 +53,15 @@ class AgentConfig:
     system_prompt: str | None = None
     vars: dict[str, str] = field(default_factory=dict)
     model: str = "gpt-6.1-terra"
-    profile: str | PermissionProfile | None = None
+    access: str | Access = "workspace"          # "read-only", "workspace" or "full"
+    tools: list[str] | None = None              # None: every tool the access level allows
+    parallel_bash: bool = False
     backend: str | DaytonaBackend = "local"  # "local", "daytona", or DaytonaBackend
     working_dir: str | None = None
     base_url: str | None = None
     service_tier: str | None = None
     reasoning_effort: str | None = None
     response_format: dict | None = None
-    auto_approve: bool = True
     auto_compact: bool = True
     compact_threshold: float | None = None   # fraction of the context window
     compact_at_tokens: int | None = None     # exact token count; wins over the fraction
@@ -76,14 +76,15 @@ class AgentConfig:
 | `system_prompt` | `str \| None` | `None` | System prompt text or path to a prompt template file |
 | `vars` | `dict[str, str]` | `{}` | Variables for prompt template substitution |
 | `model` | `str` | `"gpt-6.1-terra"` | Model identifier passed to the LLM client |
-| `profile` | `str \| PermissionProfile \| None` | `None` | Permission profile name, object, or path to YAML |
+| `access` | `str \| Access` | `"workspace"` (or `RHO_AGENT_ACCESS`) | What the agent may change: `"read-only"`, `"workspace"` or `"full"`, or an `Access` with more detail. See [Access](access/) |
+| `tools` | `list[str] \| None` | `None` | Tool names to offer, e.g. `["bash"]`. `None` means every tool the access level allows |
+| `parallel_bash` | `bool` | `False` | Let several bash calls in one turn run concurrently |
 | `backend` | `str \| DaytonaBackend` | `"local"` | Execution backend: `"local"`, `"daytona"`, or a `DaytonaBackend` instance |
 | `working_dir` | `str \| None` | `None` | Working directory for tool execution |
 | `base_url` | `str \| None` | `None` | Custom API base URL. The Responses API is used there too, with a fallback to Chat Completions if the server lacks it (see [Model client](#model-client)) |
 | `service_tier` | `str \| None` | `None` | API service tier |
 | `reasoning_effort` | `str \| None` | `None` | Reasoning effort (`none`, `low`, `medium`, `high`, ...; model-specific). `None` uses the model's default |
 | `response_format` | `dict \| None` | `None` | Structured output format specification |
-| `auto_approve` | `bool` | `True` | Auto-approve tool calls without prompting |
 | `auto_compact` | `bool` | `True` | Summarize older history automatically when the context grows large |
 | `compact_threshold` | `float \| None` | `None` | Compact when input reaches this fraction of the context window. `None` uses `0.7`, kept below a model's higher price tier if it has one |
 | `compact_at_tokens` | `int \| None` | `None` | Compact at this exact input token count. Wins over `compact_threshold` |
@@ -114,7 +115,7 @@ agent = Agent(config)
 
 # Properties
 agent.config            # AgentConfig
-agent.registry          # ToolRegistry (built from profile)
+agent.registry          # ToolRegistry (built from access and tools)
 agent.system_prompt     # Resolved system prompt string
 
 # Create an LLM client instance
@@ -233,13 +234,33 @@ The execution context for running prompts. Created from an Agent, it owns the St
 session = Session(agent)
 ```
 
+### Access requests
+
+A sandboxed agent (`read-only` or `workspace` access) asks for access outside its sandbox through `approval_callback`, an `async (tool_name, tool_args) -> bool`:
+
+- `"request_access"` with `{"path", "access": "write" | "read", "reason"}`: a directory to write, or a protected path to read, for the rest of the session.
+- `"bash"` with `{"command", "working_dir", "unsandboxed": True, "reason"}`: one command to run outside the sandbox.
+- Any custom tool whose handler sets `requires_approval`.
+
+```python
+async def approve(tool_name: str, tool_args: dict) -> bool:
+    if tool_name == "request_access":
+        return tool_args["path"].startswith("/Users/me/proj/")
+    return False
+
+session.approval_callback = approve
+```
+
+Without a callback nobody can answer, so the agent is not offered `request_access` and stays inside its sandbox. Workers dispatched in parallel usually want exactly that.
+
 ### Settable attributes
 
 ```python
-session.approval_callback = my_callback    # Called when tool needs approval
-# Or queue approvals for `rho-agent monitor` to answer (needs a SessionStore session):
+session.approval_callback = my_callback    # Answers the agent's access requests
+# Or queue requests for `rho-agent monitor` to answer (needs a SessionStore session):
 #   from rho_agent.core.approvals import ApprovalQueue
 #   session.approval_callback = ApprovalQueue(session)
+session.access_grants                      # Access allowed this session (list of Grant)
 session.cancel_check = lambda: False       # Polled to check for cancellation
 # Compaction settings start from AgentConfig and can be changed per session
 session.auto_compact = True                # Auto-compact when context is large
@@ -272,7 +293,7 @@ sandbox = await session.get_sandbox()
 When using the Daytona backend, use `Session` as an async context manager to ensure the sandbox is cleaned up:
 
 ```python
-async with Session(Agent(AgentConfig(backend="daytona", profile="developer"))) as session:
+async with Session(Agent(AgentConfig(backend="daytona"))) as session:
     result = await session.run(prompt="Check the deployment status.")
     print(result.text)
 # sandbox deleted automatically
@@ -310,7 +331,7 @@ class SessionInfo:
     status: str
     created_at: datetime
     model: str
-    profile: str
+    access: str        # access level
     first_prompt: str
 ```
 
@@ -390,7 +411,7 @@ A manual `session.compact()` always writes a summary.
 Run multiple prompts in a single session, building on prior context:
 
 ```python
-agent = Agent(AgentConfig(system_prompt="You are a database analyst.", profile="readonly"))
+agent = Agent(AgentConfig(system_prompt="You are a database analyst.", access="read-only"))
 session = Session(agent)
 
 r1 = await session.run(prompt="List all tables in the database.")
@@ -414,7 +435,7 @@ from rho_agent import Agent, AgentConfig, Session
 async def analyze(task_prompt: str, work_dir: str) -> str:
     config = AgentConfig(
         system_prompt="You are an analyst.",
-        profile="readonly",
+        access="read-only",
         working_dir=work_dir,
     )
     session = Session(Agent(config))
@@ -441,7 +462,7 @@ Register custom tool handlers before creating a session:
 ```python
 from rho_agent import Agent, AgentConfig, Session
 
-agent = Agent(AgentConfig(profile="developer"))
+agent = Agent(AgentConfig())
 agent.registry.register(my_custom_handler)
 
 session = Session(agent)
@@ -454,7 +475,7 @@ result = await session.run(prompt="Use my custom tool to process the data.")
 from rho_agent import Agent, AgentConfig, SessionStore
 
 store = SessionStore()
-agent = Agent(AgentConfig(system_prompt="You are a research assistant.", profile="developer"))
+agent = Agent(AgentConfig(system_prompt="You are a research assistant."))
 
 # First session
 session = store.create_session(agent)

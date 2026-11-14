@@ -1,6 +1,6 @@
 ---
 title: FAQ
-description: Common questions about setup, usage, profiles, and operations.
+description: Common questions about setup, usage, access, and operations.
 order: 13
 ---
 
@@ -34,7 +34,7 @@ Set environment variables for each database type. For SQLite, pass a comma-separ
 
 ### What's the difference between interactive and one-shot mode?
 
-**Interactive mode** (`rho-agent main`) starts a REPL where you type messages and the agent responds in a loop. **One-shot mode** (`rho-agent main "your prompt"`) runs a single task and exits. Both support the same profiles, tools, and observability.
+**Interactive mode** (`rho-agent main`) starts a REPL where you type messages and the agent responds in a loop. **One-shot mode** (`rho-agent main "your prompt"`) runs a single task and exits. Both support the same access levels, tools, and observability.
 
 ### How do I resume a previous conversation?
 
@@ -61,37 +61,37 @@ rho-agent main --prompt task.md "focus specifically on OOM errors"
 
 ### How does the delegate tool work?
 
-The agent can spawn a child agent to handle a focused subtask. The child inherits the parent's profile and model, runs its task, and returns a text result. Delegation is single-level — children cannot delegate further. See [Architecture](architecture/) for details.
+The agent can spawn a child agent to handle a focused subtask. The child inherits the parent's access and model, runs its task, and returns a text result. Delegation is single-level — children cannot delegate further. See [Architecture](architecture/) for details.
 
-## Profiles
+## Access
 
-### What is the default profile?
+### What can the agent change by default?
 
-`readonly`. The agent can inspect files and run read-only shell commands, but cannot modify files or execute destructive commands.
+The working directory, plus temp directories and package-manager caches (`workspace` access). Commands run in an OS sandbox, so that holds for every command. When the agent needs a directory outside, it asks you. See [Access](access/).
 
-### When should I use `eval` mode?
+### How do I let it look but not touch?
 
-Only in sandboxed environments (containers, VMs) where the security boundary is the environment itself. The `eval` profile disables all restrictions and approval prompts. It exists for benchmark execution, not for general use.
+`rho-agent --access read-only`. It can run any command, but nothing can write outside temp directories, and the `write` and `edit` tools are not offered.
 
-### Can I create a profile that allows file writes but restricts the shell?
+### When should I use `full` access?
 
-Yes. Create a custom YAML profile:
+Only on machines you can throw away (containers, CI runners, VMs), where the machine itself is the boundary. `full` has no sandbox and asks nothing. Benchmark runs use it.
 
-```yaml
-profile: write-restricted-shell
-shell:
-  mode: restricted
-file_write:
-  mode: full
-database:
-  mode: readonly
-approval:
-  mode: dangerous
-```
+### Can the agent edit another repository too?
 
-```bash
-rho-agent main --profile write-restricted-shell.yaml
-```
+Yes. Start it with `--add-dir ../other-repo`, or let it ask: it calls `request_access` and you answer once for the session.
+
+### Can the agent use Docker?
+
+Not from inside the sandbox: Docker runs outside it, so reaching its socket would undo the sandbox. The agent can ask to run a `docker` command unsandboxed, and you approve each one. To allow it for every command, set `unix_sockets: true` in the [access settings](access/#settings), or use `full` access.
+
+### Is the sandbox a security boundary?
+
+It reliably stops an agent changing things outside the project by mistake, and blocks the obvious ways out. It has [known limits](access/#known-limits) against a command deliberately trying to escape, for example via prompt injection. For untrusted input, run the agent in a container or VM with `full` access.
+
+### Does it work on Windows?
+
+Not natively: the sandbox needs macOS or Linux. Use WSL2, or `full` access inside a container.
 
 ## Daytona remote sandbox
 

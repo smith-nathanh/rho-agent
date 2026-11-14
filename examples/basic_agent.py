@@ -18,7 +18,7 @@ async def run_agent_with_tools(
     task: str,
     working_dir: str | None = None,
 ) -> str:
-    """Run the agent autonomously with profile-based tools."""
+    """Run the agent autonomously, sandboxed to its working directory."""
     system_prompt = (
         "You are a research assistant. Investigate thoroughly using the available tools."
     )
@@ -28,8 +28,7 @@ async def run_agent_with_tools(
     config = AgentConfig(
         system_prompt=system_prompt,
         working_dir=working_dir,
-        profile="developer",
-        auto_approve=True,
+        access="workspace",
     )
     agent = Agent(config)
     session = Session(agent)

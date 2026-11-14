@@ -50,15 +50,16 @@ export RHO_AGENT_API_KEY=sk-...
 rho-agent main
 ```
 
-This starts a REPL with the default `readonly` profile. The agent can inspect files and run read-only shell commands, but cannot modify anything.
+This starts a REPL with the default `workspace` access. The agent can edit files in the current directory and run any command, inside an OS sandbox. When it needs a directory outside, it asks you.
 
-## Start a development session
+## Work in another project, or just look
 
 ```bash
-rho-agent main --profile developer --working-dir ~/proj/myapp
+rho-agent main --working-dir ~/proj/myapp
+rho-agent main --access read-only       # can inspect, cannot change anything
 ```
 
-The `developer` profile enables file editing, unrestricted shell access, and the full tool suite.
+See [Access](access/) for the levels and how requests work.
 
 ## Run a one-shot task
 
@@ -106,13 +107,13 @@ See [Tools](tools/) for configuration details.
 
 ## Run in a remote sandbox
 
-Use the Daytona backend to execute shell and file tools in a remote cloud sandbox. The agent process stays local — only tool execution happens remotely. Combine with any permission profile.
+Use the Daytona backend to execute shell and file tools in a remote cloud sandbox. The agent process stays local — only tool execution happens remotely, with full access inside the remote VM.
 
 ```bash
 # CLI install
 uv tool install 'rho-agent[daytona] @ git+https://github.com/smith-nathanh/rho-agent'
 export DAYTONA_API_KEY=your-key
-rho-agent main --backend daytona --profile developer "explore the filesystem and install Python 3.13"
+rho-agent main --backend daytona "explore the filesystem and install Python 3.13"
 ```
 
 For SDK/project usage, install the extra in your project:
@@ -137,5 +138,5 @@ rho-agent monitor ~/.config/rho-agent/sessions
 
 - [Installation](installation/) — all install methods and environment configuration
 - [CLI Reference](cli-reference/) — complete command and flag documentation
-- [Profiles](profiles/) — understand and customize permission profiles
+- [Access](access/) — what agents can change, and the sandbox that enforces it
 - [Python SDK](python-sdk/) — create and run agents programmatically

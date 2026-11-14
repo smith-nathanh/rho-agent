@@ -26,7 +26,7 @@ def _events(path: Path, kind: str) -> list[dict[str, Any]]:
 
 async def test_system_prompt_is_recorded_once_until_it_changes(tmp_path: Path) -> None:
     trace = tmp_path / "trace.jsonl"
-    agent = Agent(AgentConfig(system_prompt="Be terse.", working_dir=str(tmp_path)))
+    agent = Agent(AgentConfig(system_prompt="Be terse.", access="full", working_dir=str(tmp_path)))
     session = Session(agent, client=_Client(), state=State(trace_path=trace))
 
     await session.run("one")
@@ -58,7 +58,7 @@ async def test_recorded_prompt_includes_project_instructions(tmp_path: Path) -> 
 
 async def test_replay_ignores_the_event(tmp_path: Path) -> None:
     trace = tmp_path / "trace.jsonl"
-    agent = Agent(AgentConfig(system_prompt="Be terse.", working_dir=str(tmp_path)))
+    agent = Agent(AgentConfig(system_prompt="Be terse.", access="full", working_dir=str(tmp_path)))
     session = Session(agent, client=_Client(), state=State(trace_path=trace))
     await session.run("go")
 

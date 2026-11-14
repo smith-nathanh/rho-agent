@@ -13,12 +13,11 @@ from rho_agent.tools.handlers.delegate import DelegateHandler
 
 def _make_handler(**overrides) -> DelegateHandler:
     defaults = dict(
-        parent_config=AgentConfig(profile="readonly"),
+        parent_config=AgentConfig(access="full"),
         parent_system_prompt="system",
         parent_state=State(),
         parent_approval_callback=None,
         parent_cancel_check=None,
-        requires_approval=False,
     )
     defaults.update(overrides)
     return DelegateHandler(**defaults)
@@ -133,11 +132,10 @@ def test_delegate_removes_delegate_from_child_registry() -> None:
     from rho_agent.core.agent import Agent
 
     # Create a parent-like agent that has delegate
-    config = AgentConfig(profile="developer")
+    config = AgentConfig(access="full")
     Agent(config)
-    # developer profile may include delegate — check our logic is correct
     # The key behavior: DelegateHandler builds a child Agent and removes delegate
-    child_config = AgentConfig(profile="developer", system_prompt="test")
+    child_config = AgentConfig(access="full", system_prompt="test")
     child_agent = Agent(child_config)
     if "delegate" in child_agent.registry:
         child_agent.registry.unregister("delegate")
