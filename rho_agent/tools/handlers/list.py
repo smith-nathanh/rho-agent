@@ -6,10 +6,13 @@ import os
 import stat
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
-from .paths import resolve_path
+from .paths import read_refusal, resolve_path
+
+if TYPE_CHECKING:
+    from ...sandbox import Sandbox
 
 # Max entries to return by default
 DEFAULT_MAX_ENTRIES = 200
@@ -21,8 +24,9 @@ class ListHandler(ToolHandler):
     Standard agentic tool name: 'list'
     """
 
-    def __init__(self, working_dir: str | None = None) -> None:
+    def __init__(self, working_dir: str | None = None, sandbox: Sandbox | None = None) -> None:
         self._working_dir = working_dir
+        self._sandbox = sandbox
 
     @property
     def parallel_safe(self) -> bool:
@@ -72,6 +76,10 @@ class ListHandler(ToolHandler):
             return ToolOutput(content="No path provided", success=False)
 
         path = resolve_path(path_str, self._working_dir)
+
+        refusal = read_refusal(self._sandbox, invocation, path)
+        if refusal:
+            return ToolOutput(content=refusal, success=False)
 
         if not path.exists():
             return ToolOutput(content=f"Directory not found: {path}", success=False)

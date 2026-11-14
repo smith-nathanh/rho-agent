@@ -255,3 +255,22 @@ def _format_tool_preview(
     remaining = len(lines) - max_lines
     preview_lines.append(f"... ({remaining} more lines)")
     return "\n".join(preview_lines)
+
+
+def access_summary(agent: Any) -> str:
+    """One line describing what the agent may change, for the CLI."""
+    config = agent.config
+    if config.backend != "local":
+        return "access: full (remote sandbox)"
+    access = config.access
+    if not access.sandboxed:
+        return "access: full · no sandbox"
+    sandbox = agent.registry.sandbox
+    mechanism = {"seatbelt": "macOS sandbox", "bubblewrap": "bubblewrap"}.get(
+        getattr(sandbox, "backend", ""), "sandbox"
+    )
+    parts = [f"access: {access.level.value}", f"network {'on' if access.network else 'off'}"]
+    if access.add_dirs:
+        parts.append(f"+{len(access.add_dirs)} dir(s)")
+    parts.append(mechanism)
+    return " · ".join(parts)

@@ -22,19 +22,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from ..client.model import BASE_URL_ENV, default_model
-from ..core import Agent, AgentConfig, Session, SessionStore
+from ..core import Agent, AgentConfig, SessionStore
 from ..core.approvals import ApprovalQueue
-from ..permissions import ShellMode
-from ..permissions.factory import load_profile
+from ..core.config import access_prompt_vars
+from ..sandbox import Access, AccessLevel
 from .errors import (
+    InvalidConfigError,
     InvalidModeError,
-    InvalidProfileError,
     PromptLoadError,
 )
 from .events import ApprovalHandler, announce_queued_approval
 from .formatting import (
     _is_interactive_terminal,
     _markup,
+    access_summary,
 )
 from .interactive import run_interactive
 from .single import run_single, run_single_with_output
@@ -51,7 +52,7 @@ from .theme import THEME
 SANDBOX_CONFIG_FILE = ".rho-agent.toml"
 
 # Config fields the default system prompt describes.
-_PROMPT_FIELDS = ("profile", "working_dir", "backend")
+_PROMPT_FIELDS = ("access", "working_dir", "backend")
 
 
 def _resolve_daytona_config(
@@ -216,10 +217,8 @@ def _render_prompt_file(
         raise typer.Exit(1) from exc
 
 
-def _default_prompt(
-    capability_profile: Any, working_dir: str, *, is_remote: bool
-) -> tuple[str, str | None]:
-    """Render the default system prompt for a profile, working dir and backend.
+def _default_prompt(access: Access, working_dir: str, *, is_remote: bool) -> tuple[str, str | None]:
+    """Render the default system prompt for an access level, working dir and backend.
 
     Remote backends execute on Linux VMs, not the host machine.
     """
@@ -231,29 +230,11 @@ def _default_prompt(
     except (FileNotFoundError, ValueError) as exc:
         raise ValueError(f"Could not load default prompt at {prompt_path}: {exc}") from exc
 
-    sandbox_info = ""
-    if is_remote:
-        sandbox_info = (
-            "Pre-installed tools: python3, pip, node, git, uv.\n"
-            "Prefer uv over pip for Python package management.\n"
-            "PATH includes ~/.local/bin.\n"
-            "\n"
-            "Important: uv-managed venvs do not include pip. To install packages:\n"
-            "- `uv pip install <pkg>` — install into the project venv\n"
-            "- `uv run --with <pkg> <cmd>` — run a command with a temporary dependency\n"
-            "- `uv run <cmd>` — run a command using the project venv\n"
-            "Always use `uv run` or `uv pip install` instead of plain `pip` or `.venv/bin/python -m pip`."
-        )
-
     prompt_vars: dict[str, str] = {
         "platform": "Linux" if is_remote else platform.system(),
         "home_dir": "/home/daytona" if is_remote else str(Path.home()),
         "working_dir": working_dir,
-        "profile_name": capability_profile.name,
-        "shell_mode": capability_profile.shell.value,
-        "file_write_mode": capability_profile.file_write.value,
-        "database_mode": capability_profile.database.value,
-        "sandbox_info": sandbox_info,
+        **access_prompt_vars(access, working_dir, remote=is_remote),
     }
     return prepare_prompt(loaded_prompt, prompt_vars)
 
@@ -264,11 +245,27 @@ def _default_prompt_for(config: AgentConfig) -> str | None:
         return None
     try:
         text, _ = _default_prompt(
-            load_profile(config.profile), config.working_dir, is_remote=config.backend != "local"
+            config.access, config.working_dir, is_remote=config.backend != "local"
         )
     except (ValueError, FileNotFoundError):
         return None
     return text
+
+
+def _apply_access_flags(base: Access, level: str | None, add_dirs: list[str] | None) -> Access:
+    """``base`` with ``--access`` and ``--add-dir`` applied."""
+    access = base
+    if level:
+        try:
+            access = access.with_level(level)
+        except ValueError as err:
+            allowed = ", ".join(lv.value for lv in AccessLevel)
+            console.print(_markup(str(InvalidModeError("access", level, allowed)), THEME.error))
+            raise typer.Exit(1) from err
+    if add_dirs:
+        extra = tuple(str(Path(d).expanduser().resolve()) for d in add_dirs)
+        access = dataclasses.replace(access, add_dirs=(*access.add_dirs, *extra))
+    return access
 
 
 def _resume_config(
@@ -279,7 +276,7 @@ def _resume_config(
 ) -> tuple[AgentConfig, bool]:
     """The config to resume a session with: ``base`` with flag overrides applied.
 
-    The default system prompt names the profile, working directory and
+    The default system prompt names the access level, working directory and
     platform, so it is rendered again when one of those changes. A custom
     prompt is kept as it is; the second return value is True in that case, to
     tell the user it may describe the old settings.
@@ -360,10 +357,21 @@ def main(
         str | None,
         typer.Option("--working-dir", "-w", help="Working directory for shell commands"),
     ] = None,
-    auto_approve: Annotated[
-        bool,
-        typer.Option("--auto-approve", "-y", help="Auto-approve all tool calls"),
-    ] = False,
+    access: Annotated[
+        str | None,
+        typer.Option(
+            "--access",
+            "-a",
+            help=(
+                "What the agent may change: read-only, workspace (default: edit this "
+                "project, sandboxed) or full (no sandbox; for disposable machines)"
+            ),
+        ),
+    ] = os.getenv("RHO_AGENT_ACCESS"),
+    add_dir: Annotated[
+        list[str] | None,
+        typer.Option("--add-dir", help="Also let the agent write this directory (repeatable)"),
+    ] = None,
     queue_approvals: Annotated[
         bool,
         typer.Option(
@@ -390,13 +398,6 @@ def main(
         int,
         typer.Option("--preview-lines", help="Lines of tool output to show (0 to disable)"),
     ] = int(os.getenv("RHO_AGENT_PREVIEW_LINES", "6")),
-    profile: Annotated[
-        str | None,
-        typer.Option(
-            "--profile",
-            help="Capability profile: 'readonly' (default), 'developer', 'unrestricted', or path to YAML",
-        ),
-    ] = os.getenv("RHO_AGENT_PROFILE"),
     backend: Annotated[
         str,
         typer.Option("--backend", help="Execution backend: 'local' or 'daytona'"),
@@ -419,13 +420,6 @@ def main(
         typer.Option(
             "--snapshot",
             help="Named Daytona snapshot to create sandbox from (faster than --dockerfile)",
-        ),
-    ] = None,
-    shell_mode: Annotated[
-        str | None,
-        typer.Option(
-            "--shell-mode",
-            help="Override shell mode: 'restricted' or 'unrestricted'",
         ),
     ] = None,
     compact_threshold: Annotated[
@@ -453,7 +447,8 @@ def main(
         ),
     ] = None,
 ) -> None:
-    """rho-agent: An agent harness and CLI with readonly and developer modes."""
+    """rho-agent: an agent harness and CLI. Runs sandboxed: it can edit the working
+    directory and asks before going outside it (see --access)."""
     # --- Daytona sandbox configuration ---
     # When --backend daytona, read .rho-agent.toml from the project root.
     # CLI flags (--dockerfile, --snapshot, --upload, --working-dir) override the toml.
@@ -560,8 +555,8 @@ def main(
             overrides["base_url"] = base_url
         if given("reasoning_effort"):
             overrides["reasoning_effort"] = reasoning_effort
-        if given("profile"):
-            overrides["profile"] = profile
+        if given("access") or given("add_dir"):
+            overrides["access"] = _apply_access_flags(base_config.access, access, add_dir)
         if daytona_backend or given("backend"):
             overrides["backend"] = daytona_backend or backend
         if given("working_dir") or (working_dir and "backend" in overrides):
@@ -576,22 +571,17 @@ def main(
             )
             session = session_store.resume(resume, agent_config=agent_config)
         except (ValueError, FileNotFoundError) as e:
-            console.print(_markup(str(InvalidProfileError(str(e))), THEME.error))
+            console.print(_markup(str(InvalidConfigError(str(e))), THEME.error))
             raise typer.Exit(1) from e
         agent = session.agent
         if prompt_kept:
             console.print(
                 _markup(
                     "Keeping the session's custom system prompt; it may describe the "
-                    "previous profile, working directory or backend.",
+                    "previous access level, working directory or backend.",
                     THEME.warning,
                 )
             )
-        if shell_mode:
-            console.print(_markup("--shell-mode is ignored with --resume.", THEME.warning))
-
-        capability_profile = load_profile(agent.config.profile)
-        mode_name = capability_profile.name
         resolved_working_dir = agent.config.working_dir or resolved_working_dir
         # Flags apply to the resumed session and to any child agents it starts.
         for target in (agent.config, session):
@@ -602,8 +592,7 @@ def main(
         agent_config = AgentConfig.from_file(config_file)
         if model != default_model():
             agent_config.model = model
-        if profile:
-            agent_config.profile = profile
+        agent_config.access = _apply_access_flags(agent_config.access, access, add_dir)
         if backend != "local":
             agent_config.backend = backend
         if base_url:
@@ -612,42 +601,17 @@ def main(
             agent_config.reasoning_effort = reasoning_effort
         if working_dir:
             agent_config.working_dir = resolved_working_dir
-        agent_config.auto_approve = auto_approve
         _apply_compaction_flags(agent_config, compact_threshold, compact_at_tokens, auto_compact)
 
         try:
             agent = Agent(agent_config)
         except (ValueError, FileNotFoundError) as e:
-            console.print(_markup(str(InvalidProfileError(str(e))), THEME.error))
+            console.print(_markup(str(InvalidConfigError(str(e))), THEME.error))
             raise typer.Exit(1) from e
-
-        capability_profile = load_profile(agent_config.profile)
-        mode_name = capability_profile.name
         session = session_store.create_session(agent)
     else:
         # Build config from individual CLI flags
-        effective_profile = profile or "readonly"
-
-        # Load capability profile (for validation and prompt rendering)
-        try:
-            capability_profile = load_profile(effective_profile)
-        except (ValueError, FileNotFoundError) as e:
-            console.print(_markup(str(InvalidProfileError(str(e))), THEME.error))
-            raise typer.Exit(1) from e
-        mode_name = capability_profile.name
-
-        # Apply --shell-mode override
-        if shell_mode:
-            try:
-                capability_profile.shell = ShellMode(shell_mode)
-            except ValueError as err:
-                console.print(
-                    _markup(
-                        str(InvalidModeError("shell mode", shell_mode, "restricted, unrestricted")),
-                        THEME.error,
-                    )
-                )
-                raise typer.Exit(1) from err
+        agent_access = _apply_access_flags(Access(), access, add_dir)
 
         # Resolve system prompt
         if system_prompt_file:
@@ -657,7 +621,7 @@ def main(
         else:
             try:
                 system_prompt_text, initial_prompt = _default_prompt(
-                    capability_profile, resolved_working_dir, is_remote=backend != "local"
+                    agent_access, resolved_working_dir, is_remote=backend != "local"
                 )
             except (FileNotFoundError, ValueError) as exc:
                 console.print(_markup(f"Prompt error: {PromptLoadError(str(exc))}", THEME.error))
@@ -671,34 +635,17 @@ def main(
         agent_config = AgentConfig(
             system_prompt=system_prompt_text,
             model=model,
-            profile=effective_profile,
+            access=agent_access,
             backend=daytona_backend or backend,
             base_url=base_url,
             reasoning_effort=reasoning_effort,
             working_dir=resolved_working_dir,
             databases=cli_databases,
-            auto_approve=auto_approve,
         )
         _apply_compaction_flags(agent_config, compact_threshold, compact_at_tokens, auto_compact)
         agent = Agent(agent_config)
 
-        # Apply shell_mode override to the profile used by the registry
-        if shell_mode:
-            # Re-build registry with overridden profile
-            from ..permissions.factory import ToolFactory
-
-            registry = ToolFactory(capability_profile).create_registry(
-                working_dir=resolved_working_dir
-            )
-            agent._registry = registry
-
         session = session_store.create_session(agent)
-
-    # Register delegate handler if profile supports it
-    if capability_profile.name not in ("birdbench",):
-        _register_delegate(agent, session)
-    else:
-        agent.registry.unregister("delegate")
 
     # Determine the prompt to run
     run_prompt_text = (
@@ -717,14 +664,14 @@ def main(
         raise typer.Exit(1)
 
     # Set up approval handler
-    approval_handler = ApprovalHandler(auto_approve=auto_approve)
+    approval_handler = ApprovalHandler()
     if queue_approvals or not sys.stdin.isatty():
         # Nobody can answer a prompt here; the monitor answers instead.
         approval_handler.queue = ApprovalQueue(session, on_request=announce_queued_approval)
     session.approval_callback = approval_handler.check_approval
 
     if run_prompt_text:
-        console.print(_markup(f"Mode: {mode_name}", THEME.accent))
+        console.print(_markup(access_summary(agent), THEME.accent))
         if output:
             asyncio.run(
                 run_single_with_output(
@@ -749,32 +696,9 @@ def main(
             run_interactive(
                 session,
                 approval_handler,
-                mode_name,
                 resolved_working_dir,
                 session_store,
                 upload_mappings=upload_mappings,
                 setup_commands=setup_commands,
             )
         )
-
-
-def _register_delegate(agent: Agent, session: Session) -> None:
-    """Make sure the delegate tool is present for profiles that allow it.
-
-    The tool factory registers it already; this covers registries that were
-    replaced after the agent was built. The handler reads its context from the
-    calling session, so nothing session-specific is bound here.
-    """
-    from ..permissions.factory import ToolFactory, load_profile
-
-    if "delegate" in agent.registry:
-        return
-    try:
-        profile = load_profile(agent.config.profile)
-    except (ValueError, FileNotFoundError):
-        return
-
-    if not hasattr(profile, "requires_tool_approval") or profile.bash_only:
-        return
-
-    ToolFactory(profile).register_delegate_tool(agent.registry)

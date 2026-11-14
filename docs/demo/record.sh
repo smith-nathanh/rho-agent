@@ -38,7 +38,6 @@ mkdir -p "$demo_home/proj"
 touch "$demo_home/.rho-agent-demo"
 demo_home="$(cd "$demo_home" && pwd -P)"  # the real path, so projects show as ~/proj/...
 cp -R docs/demo/projects/. "$demo_home/proj/"
-cp docs/demo/careful.yaml "$demo_home/careful.yaml"
 # Each sample project is its own git repository, as a real project would be:
 # agents usually look at `git status` first.
 for project in "$demo_home"/proj/*/; do
@@ -76,11 +75,12 @@ case "${1:-}" in
     check_repo
     ;;
   monitor)
-    # Start two unattended agents in the demo home. With no terminal attached
-    # they queue their approval requests for the monitor.
+    # Start two unattended read-only agents in the demo home. Fixing anything
+    # needs write access, and with no terminal attached they queue that
+    # request for the monitor.
     agent() {  # agent <project> <prompt>
       (cd "$demo_home/proj/$1" && HOME="$demo_home" nohup rho-agent main \
-        --profile "$demo_home/careful.yaml" "$2" >"$demo_home/$1.log" 2>&1 </dev/null &)
+        --access read-only "$2" >"$demo_home/$1.log" 2>&1 </dev/null &)
     }
     agent billing "Customers report that split payments do not add up to the invoice \
 total. Reproduce it with the tests, fix invoice.py, and run the tests again."

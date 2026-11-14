@@ -25,6 +25,7 @@ from rho_agent.core.session import Session
 from rho_agent.core.session_store import SessionStore
 from rho_agent.core.state import State
 from rho_agent.eval.harbor.trajectory import TrajectoryBuilder
+from rho_agent.sandbox import Access
 from rho_agent.tools.base import ToolHandler, ToolInvocation, ToolOutput
 from rho_agent.tools.registry import ToolRegistry
 
@@ -117,7 +118,7 @@ def _session(
     for h in handlers:
         registry.register(h)
     agent = MagicMock(spec=Agent)
-    agent.config = AgentConfig(system_prompt="sys", profile="readonly", model=model)
+    agent.config = AgentConfig(system_prompt="sys", access="full", model=model)
     agent.system_prompt = "sys"
     agent.registry = registry
     agent.sandbox_manager = None
@@ -191,7 +192,7 @@ async def test_resume_with_model_override_keeps_the_saved_config(
     saved = AgentConfig(
         system_prompt="You are the saved agent.",
         model="saved-model",
-        profile="developer",
+        access="full",
         working_dir=str(tmp_path),
         base_url="http://localhost:9/v1",
         reasoning_effort="high",
@@ -212,7 +213,7 @@ async def test_resume_with_model_override_keeps_the_saved_config(
     assert result.status == "completed"
     config = resumed.agent.config
     assert config.model == "other-model"
-    assert (config.profile, config.working_dir) == ("developer", str(tmp_path))
+    assert (config.access.level.value, config.working_dir) == ("full", str(tmp_path))
     assert (config.base_url, config.reasoning_effort) == ("http://localhost:9/v1", "high")
     assert client.prompts[0].system == "You are the saved agent."
     assert [m["content"] for m in resumed.state.messages if m["role"] == "user"] == [
@@ -229,44 +230,47 @@ def test_resume_flags_override_the_saved_config(tmp_path: Path) -> None:
     saved = AgentConfig(
         system_prompt="Custom prompt.",
         model="saved-model",
-        profile="readonly",
+        access="full",
         working_dir=str(tmp_path),
         reasoning_effort="low",
     )
     overrides = {
         "reasoning_effort": "high",
         "base_url": "http://localhost:9/v1",
-        "profile": "developer",
+        "access": Access("read-only"),
     }
 
     config, prompt_kept = _resume_config(saved, overrides)
 
     assert (config.reasoning_effort, config.base_url) == ("high", "http://localhost:9/v1")
-    assert (config.profile, config.model) == ("developer", "saved-model")
+    assert (config.access.level.value, config.model) == ("read-only", "saved-model")
     assert config.system_prompt == "Custom prompt."
-    assert prompt_kept  # a custom prompt may describe the old profile
-    assert saved.profile == "readonly"
+    assert prompt_kept  # a custom prompt may describe the old access level
+    assert saved.access.level.value == "full"
 
-    config, prompt_kept = _resume_config(saved, {"profile": "developer"}, system_prompt="New.")
+    config, prompt_kept = _resume_config(
+        saved, {"access": Access("read-only")}, system_prompt="New."
+    )
     assert (config.system_prompt, prompt_kept) == ("New.", False)
 
 
-def test_resume_renders_the_default_prompt_again_for_a_new_profile_or_dir(
+def test_resume_renders_the_default_prompt_again_for_new_access_or_dir(
     tmp_path: Path,
 ) -> None:
     old_dir, new_dir = tmp_path / "old", tmp_path / "new"
-    saved = AgentConfig(profile="readonly", working_dir=str(old_dir))
+    saved = AgentConfig(access="full", working_dir=str(old_dir))
     saved.system_prompt = _default_prompt_for(saved)
     assert str(old_dir) in saved.system_prompt
 
     config, prompt_kept = _resume_config(
-        saved, {"profile": "developer", "working_dir": str(new_dir)}
+        saved, {"access": Access("read-only"), "working_dir": str(new_dir)}
     )
 
     assert not prompt_kept
     assert config.system_prompt == _default_prompt_for(config)
     assert str(new_dir) in config.system_prompt
     assert str(old_dir) not in config.system_prompt
+    assert "**read-only** access" in config.system_prompt
 
     # Flags that the prompt does not describe leave it alone.
     config, prompt_kept = _resume_config(saved, {"reasoning_effort": "high"})
@@ -286,7 +290,7 @@ def test_resume_cli_applies_flags_given_on_the_command_line(
     saved = AgentConfig(
         system_prompt="Custom prompt.",
         model="saved-model",
-        profile="readonly",
+        access="full",
         working_dir=str(tmp_path),
         base_url="http://localhost:9/v1",
     )
@@ -301,14 +305,15 @@ def test_resume_cli_applies_flags_given_on_the_command_line(
     monkeypatch.setattr(main_cmd, "run_single", fake_run_single)
     new_dir = tmp_path / "elsewhere"
     new_dir.mkdir()
-    args = ["main", "-r", session_id, "--reasoning-effort", "high", "--profile", "developer"]
+    args = ["main", "-r", session_id, "--reasoning-effort", "high", "--add-dir", str(tmp_path)]
     args += ["--working-dir", str(new_dir), "go on"]
 
     result = CliRunner().invoke(main_cmd.app, args)
 
     assert result.exit_code == 0, result.output
     config = seen["config"]
-    assert (config.reasoning_effort, config.profile) == ("high", "developer")
+    assert config.reasoning_effort == "high"
+    assert config.access == Access("full", add_dirs=(str(tmp_path.resolve()),))
     assert config.working_dir == str(new_dir.resolve())
     # Not given on the command line, so kept from the saved session.
     assert (config.model, config.base_url) == ("saved-model", "http://localhost:9/v1")

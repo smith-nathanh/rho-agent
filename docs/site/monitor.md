@@ -12,7 +12,7 @@ Start an agent in one terminal:
 
 ```bash
 # Terminal 1 — run an agent
-rho-agent main --profile developer "migrate the sync client to async and update all callers"
+rho-agent main "migrate the sync client to async and update all callers"
 ```
 
 Open the monitor in another terminal:
@@ -103,15 +103,15 @@ monitor> approve 47e
 approved: 47e7d3 (bash, a3f8c1d2)
 ```
 
-`approve <request>` lets the tool call run. `deny <request>` rejects it: the agent is told the call was rejected and its run ends, as when you answer "n" at a terminal prompt. `approve all` approves everything pending. Requests from dead sessions are not listed.
+Most requests are the agent asking for [access](access/#asking-for-more) outside its sandbox. `approve <request>` grants it for the rest of the session. `deny <request>` refuses it: the agent is told and looks for another way, as when you answer "n" at a terminal prompt. `approve all` approves everything pending. Requests from dead sessions are not listed.
 
 Approvals are queued this way when the agent is started without a terminal (in the background, from a script or scheduler), or with `--queue-approvals`:
 
 ```bash
-rho-agent main --profile developer --queue-approvals "run the migration and fix what breaks"
+rho-agent main --queue-approvals "run the migration and fix what breaks"
 ```
 
-Started in a terminal without that flag, the agent prompts in that terminal as before. `--auto-approve` skips approvals entirely. A subagent asks through its parent, so its requests are queued or prompted the same way the parent's are.
+Started in a terminal without that flag, the agent prompts in that terminal as before. A subagent asks through its parent, so its requests are queued or prompted the same way the parent's are.
 
 ### `pause <prefix>` — pause a session
 

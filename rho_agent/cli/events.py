@@ -1,7 +1,8 @@
-"""Event handling: ApprovalHandler, handle_event, handle_command, switch_runtime_profile."""
+"""Event handling: ApprovalHandler, handle_event, handle_command."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from rich.markdown import Markdown
@@ -22,44 +23,64 @@ from .theme import THEME
 
 
 class ApprovalHandler:
-    """Handles command approval prompts with Rich UI."""
+    """Asks the user to approve requests from the agent, in the terminal or
+    (with ``queue`` set) through ``rho-agent monitor``.
 
-    def __init__(self, auto_approve: bool = False) -> None:
-        self.auto_approve = auto_approve
+    Requests are access to a directory outside the sandbox (``request_access``),
+    a command to run outside it (``bash`` with ``unsandboxed``), or a custom
+    tool that declares ``requires_approval``.
+    """
+
+    def __init__(self) -> None:
         # When set, requests go to the monitor instead of this terminal.
         self.queue: ApprovalQueue | None = None
 
-    def enable_auto_approve(self) -> None:
-        """Enable auto-approve mode for this session."""
-        self.auto_approve = True
-        console.print(_markup("Auto-approve enabled for this session", THEME.success))
-
     async def check_approval(self, tool_name: str, tool_args: dict[str, Any]) -> bool:
-        """Prompt user for approval. Returns True if approved."""
-        if self.auto_approve:
-            return True
+        """Ask the user. Returns True if approved."""
         if self.queue is not None:
             return await self.queue(tool_name, tool_args)
 
-        sig = _format_tool_signature(tool_name, tool_args)
+        title, body, question = _approval_text(tool_name, tool_args)
         console.print(
             Panel(
-                _markup(sig, THEME.tool_call),
-                title=_markup("approval", THEME.warning),
+                body,
+                title=_markup(title, THEME.warning),
                 title_align="left",
                 border_style=THEME.warning,
                 padding=(0, 1),
             )
         )
-        console.print(_markup("Approve? \\[Y/n]:", THEME.warning), end=" ")
+        console.print(_markup(question, THEME.warning), end=" ")
 
         try:
             response = input().strip().lower()
         except (EOFError, KeyboardInterrupt):
             return False
+        return response in ("y", "yes")
 
-        # Default to yes (empty input = approve)
-        return response not in ("n", "no")
+
+def _approval_text(tool_name: str, tool_args: dict[str, Any]) -> tuple[str, str, str]:
+    """Title, body and question for an approval prompt."""
+    reason = str(tool_args.get("reason") or "").strip()
+    reason_line = f"\n{_markup(reason, THEME.muted)}" if reason else ""
+    if tool_name == "request_access":
+        path = str(tool_args.get("path", ""))
+        kind = "read" if tool_args.get("access") == "read" else "write"
+        warning = ""
+        if path in ("/", str(Path.home())):
+            whole = "filesystem" if path == "/" else "home directory"
+            warning = "\n" + _markup(f"This is your entire {whole}.", THEME.error)
+        body = f"{_markup(path, THEME.tool_call)}{reason_line}{warning}"
+        return (
+            f"agent wants {kind} access outside the sandbox",
+            body,
+            "Allow for this session? [y/N]:",
+        )
+    if tool_name == "bash" and tool_args.get("unsandboxed"):
+        body = f"{_markup(str(tool_args.get('command', '')), THEME.tool_call)}{reason_line}"
+        return ("agent wants to run a command outside the sandbox", body, "Run it? [y/N]:")
+    sig = _format_tool_signature(tool_name, tool_args)
+    return ("approval", _markup(sig, THEME.tool_call), "Approve? [y/N]:")
 
 
 def announce_queued_approval(request: ApprovalRequest) -> None:
@@ -224,10 +245,6 @@ def handle_command(
         "compact" or "compact:<instructions>" if /compact was called
         Other string values for future special handling
     """
-    if cmd == "/approve":
-        approval_handler.enable_auto_approve()
-        return None
-
     if cmd.startswith("/compact"):
         # Extract optional instructions after /compact
         parts = cmd.split(maxsplit=1)
@@ -235,9 +252,9 @@ def handle_command(
             return f"compact:{parts[1]}"
         return "compact"
 
-    if cmd.startswith("/write"):
-        # Handled in run_interactive (needs registry/profile context)
-        return "write"
+    if cmd.startswith("/access"):
+        # Handled in run_interactive (needs the session and agent)
+        return "access"
 
     if cmd.startswith("/resume"):
         # Handled in run_interactive (needs conversation store/session context)
@@ -254,10 +271,10 @@ def handle_command(
         help_text = "\n".join(
             [
                 "[bold]Commands:[/bold]",
-                line("/approve", "Enable auto-approve for all tool calls"),
+                line("/access [level]", "Show access; or switch: read-only | workspace | full"),
+                line("/access revoke <path>", "Remove access granted this session"),
                 line("/compact [guidance]", "Compact conversation history"),
                 line("/download <remote> <local>", "Download file from sandbox"),
-                line("/write [on|off|status]", "Toggle create-only write tool (readonly mode)"),
                 line("/resume [latest|id]", "Resume a saved conversation"),
                 line("/help", "Show this help"),
                 line("/clear", "Clear the screen"),

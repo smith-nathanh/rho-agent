@@ -26,6 +26,8 @@ class DatabaseConfig:
     user: str | None = None
     password: str | None = None
     dsn: str | None = None  # Oracle
+    # Queries are limited to reads unless the entry sets ``readonly: false``.
+    readonly: bool = True
 
 
 # Environment variable pattern for interpolation: ${VAR_NAME}
@@ -110,6 +112,7 @@ def _parse_database_entry(alias: str, entry: dict[str, Any], env: dict[str, str]
         user=interpolated.get("user"),
         password=interpolated.get("password"),
         dsn=interpolated.get("dsn"),
+        readonly=interpolated.get("readonly", True) is not False,
     )
 
 

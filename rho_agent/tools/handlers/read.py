@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
-from .paths import resolve_path
+from .paths import read_refusal, resolve_path
+
+if TYPE_CHECKING:
+    from ...sandbox import Sandbox
 
 # Max lines to return by default to avoid overwhelming context
 DEFAULT_MAX_LINES = 500
@@ -83,9 +86,15 @@ class ReadHandler(ToolHandler):
     Standard agentic tool name: 'read'
     """
 
-    def __init__(self, attach_images: bool = True, working_dir: str | None = None) -> None:
+    def __init__(
+        self,
+        attach_images: bool = True,
+        working_dir: str | None = None,
+        sandbox: Sandbox | None = None,
+    ) -> None:
         self._working_dir = working_dir
-        # False when the profile turns image viewing off (a model without vision).
+        self._sandbox = sandbox
+        # False when image viewing is off (a model without vision).
         self._attach_images = attach_images
 
     @property
@@ -139,6 +148,10 @@ class ReadHandler(ToolHandler):
             return ToolOutput(content="No path provided", success=False)
 
         path = resolve_path(path_str, self._working_dir)
+
+        refusal = read_refusal(self._sandbox, invocation, path)
+        if refusal:
+            return ToolOutput(content=refusal, success=False)
 
         if not path.exists():
             return ToolOutput(content=f"File not found: {path}", success=False)

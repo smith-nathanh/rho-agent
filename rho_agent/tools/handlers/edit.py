@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
-from .paths import resolve_path
+from .paths import resolve_path, write_refusal
+
+if TYPE_CHECKING:
+    from ...sandbox import Sandbox
 
 
 class EditHandler(ToolHandler):
@@ -22,25 +25,19 @@ class EditHandler(ToolHandler):
     3. Indentation-flexible match (leading whitespace normalized)
     """
 
-    def __init__(self, requires_approval: bool = False, working_dir: str | None = None) -> None:
-        """Initialize EditHandler.
-
-        Args:
-            requires_approval: Whether this tool requires user approval.
-                              Defaults to False (container provides sandbox).
-            working_dir: Directory relative paths are resolved against.
-                         Defaults to the process's current directory.
+    def __init__(self, working_dir: str | None = None, sandbox: Sandbox | None = None) -> None:
         """
-        self._requires_approval = requires_approval
+        Args:
+            working_dir: Directory relative paths are resolved against.
+                Defaults to the process's current directory.
+            sandbox: The access policy to check paths against; None allows any path.
+        """
         self._working_dir = working_dir
+        self._sandbox = sandbox
 
     @property
     def name(self) -> str:
         return "edit"
-
-    @property
-    def requires_approval(self) -> bool:
-        return self._requires_approval
 
     @property
     def description(self) -> str:
@@ -87,6 +84,9 @@ class EditHandler(ToolHandler):
             return ToolOutput(content="No old_string provided", success=False)
 
         path = resolve_path(path_str, self._working_dir)
+        refusal = await write_refusal(self._sandbox, invocation, path, "edit")
+        if refusal:
+            return ToolOutput(content=refusal, success=False)
 
         if not path.exists():
             return ToolOutput(content=f"File not found: {path}", success=False)

@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import sys
 
+from ..sandbox import SandboxUnavailableError
+
 # Import subcommand modules so their @app.command() decorators register
 from . import admin as _admin  # noqa: F401
 from . import export_cmd as _export_cmd  # noqa: F401
 from . import main_cmd as _main_cmd  # noqa: F401
 from . import monitor as _monitor  # noqa: F401
+from . import sandbox_cmd as _sandbox_cmd  # noqa: F401
 from .errors import (
     CliUsageError,
+    InvalidConfigError,
     InvalidModeError,
-    InvalidProfileError,
     MissingApiKeyError,
     PromptLoadError,
 )
@@ -41,14 +44,14 @@ def cli() -> None:
         _continuum_registered = True
 
     args = sys.argv[1:]
-    subcommands = {"main", "monitor", "ps", "cancel", "export", "continuum"}
+    subcommands = {"main", "monitor", "ps", "cancel", "export", "continuum", "sandbox"}
 
     if not args or args[0] not in subcommands:
         args = ["main", *args]
 
     try:
         app(args=args, prog_name="rho-agent")
-    except MissingApiKeyError as exc:
+    except (MissingApiKeyError, SandboxUnavailableError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
@@ -56,8 +59,8 @@ def cli() -> None:
 __all__ = [
     "ApprovalHandler",
     "CliUsageError",
+    "InvalidConfigError",
     "InvalidModeError",
-    "InvalidProfileError",
     "MissingApiKeyError",
     "PromptLoadError",
     "TokenStatus",

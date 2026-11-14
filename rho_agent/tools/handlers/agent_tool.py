@@ -20,7 +20,7 @@ class AgentToolHandler(ToolHandler):
     """A tool backed by an independent agent with its own identity.
 
     Unlike ``DelegateHandler`` which derives its identity from the parent,
-    ``AgentToolHandler`` has a fixed system prompt, profile, and model
+    ``AgentToolHandler`` has a fixed system prompt, access level, and model
     configured at construction time.  Each invocation spawns an independent
     session — no conversation history is shared with the caller.
 
@@ -30,7 +30,7 @@ class AgentToolHandler(ToolHandler):
             tool_name="generate_sql",
             tool_description="Generate SQL from a natural language question.",
             system_prompt="You are an expert SQL developer. ...",
-            config=AgentConfig(model="gpt-6.1-terra", profile="readonly"),
+            config=AgentConfig(model="gpt-6.1-terra", access="read-only"),
             input_schema={
                 "type": "object",
                 "properties": {
@@ -114,9 +114,9 @@ class AgentToolHandler(ToolHandler):
             base_url=self._config.base_url,
             service_tier=self._config.service_tier,
             reasoning_effort=self._config.reasoning_effort,
-            profile=self._config.profile,
+            access=self._config.access,
+            tools=self._config.tools,
             working_dir=self._config.working_dir,
-            auto_approve=self._config.auto_approve,
         )
         child_agent = Agent(child_config)
         if "delegate" in child_agent.registry:

@@ -324,7 +324,7 @@ def _image_session(client: _Client, *, parallel: bool, trace: Path | None = None
     registry = ToolRegistry()
     registry.register(_ImageTool(parallel))
     agent = MagicMock(spec=Agent)
-    agent.config = AgentConfig(system_prompt="sys", profile="readonly", model="test-model")
+    agent.config = AgentConfig(system_prompt="sys", access="full", model="test-model")
     agent.system_prompt = "sys"
     agent.registry = registry
     agent.sandbox_manager = None
@@ -417,33 +417,10 @@ async def test_images_survive_resume_and_export_as_a_marker(tmp_path: Path) -> N
 # ---------------------------------------------------------------------------
 
 
-def _tool_names(**profile_settings: Any) -> set[str]:
-    from rho_agent.permissions import PermissionProfile
-    from rho_agent.permissions.factory import ToolFactory
-
-    profile = PermissionProfile.unrestricted()
-    profile.delegate = False
-    for key, value in profile_settings.items():
-        setattr(profile, key, value)
-    return set(ToolFactory(profile).create_registry()._handlers)
-
-
-def test_view_image_is_on_by_default_and_off_in_bash_only_mode() -> None:
-    assert "view_image" in _tool_names()
-    assert _tool_names(bash_only=True) == {"bash"}
-
-
-def test_bash_only_with_view_image_gives_exactly_two_tools() -> None:
-    assert _tool_names(bash_only=True, view_image=True) == {"bash", "view_image"}
-
-
 async def test_view_image_off_removes_the_tool_and_stops_read_attaching(tmp_path: Path) -> None:
-    from rho_agent.permissions import PermissionProfile
-    from rho_agent.permissions.factory import ToolFactory
+    from rho_agent.tools.factory import build_registry
 
-    profile = PermissionProfile.unrestricted()
-    profile.view_image = False
-    registry = ToolFactory(profile).create_registry()
+    registry = build_registry("full", tools=["read", "bash"])
     path = tmp_path / "plot.png"
     path.write_bytes(PNG)
 
@@ -455,14 +432,10 @@ async def test_view_image_off_removes_the_tool_and_stops_read_attaching(tmp_path
     assert not out.success and not out.images  # treated as a binary file again
 
 
-def test_view_image_setting_round_trips_through_a_profile_file() -> None:
-    from rho_agent.permissions import PermissionProfile
+def test_bash_with_view_image_gives_exactly_two_tools() -> None:
+    from rho_agent.tools.factory import build_registry
 
-    profile = PermissionProfile.unrestricted()
-    assert profile.to_dict()["view_image"] is None
-    profile.bash_only, profile.view_image = True, True
-
-    loaded = PermissionProfile.from_dict(profile.to_dict())
-
-    assert loaded.bash_only is True and loaded.view_image is True
-    assert loaded.view_image_enabled is True
+    assert set(build_registry("full", tools=["bash", "view_image"])._handlers) == {
+        "bash",
+        "view_image",
+    }

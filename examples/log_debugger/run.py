@@ -304,9 +304,8 @@ async def run_dispatcher(args: argparse.Namespace) -> int:
         config = AgentConfig(
             system_prompt=system_prompt,
             model=args.model,
-            profile="readonly",
+            access="read-only",
             working_dir=incident.working_dir,
-            auto_approve=True,
         )
         agent = Agent(config)
         session = store.create_session(agent, session_id=incident.service_name)

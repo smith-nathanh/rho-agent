@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..sandbox.policy import Grant
 from .agent import Agent
 from .approvals import ApprovalRequest, pending_requests
 from .config import AgentConfig
@@ -36,7 +37,7 @@ class SessionInfo:
     status: str
     created_at: str
     model: str = ""
-    profile: str = ""
+    access: str = ""  # access level: read-only, workspace or full
     first_prompt: str = ""
     # Project the session works in (its working directory).
     cwd: str = ""
@@ -141,7 +142,7 @@ class SessionStore:
                 "id": sid,
                 "status": "created",
                 "model": agent.config.model,
-                "profile": agent.config.profile,
+                "access": agent.config.access.level.value,
                 "cwd": agent.config.working_dir or os.getcwd(),
                 **process_identity(),
                 "started_at": started,
@@ -231,7 +232,11 @@ class SessionStore:
             state = State()
         state.trace_path = trace_path
 
-        return Session(agent, session_id=session_id, state=state, session_dir=session_dir)
+        session = Session(agent, session_id=session_id, state=state, session_dir=session_dir)
+        session.access_grants = [
+            Grant.from_dict(g) for g in read_meta(session_dir).get("access_grants", []) or []
+        ]
+        return session
 
     def list(self, limit: int = 20) -> list[SessionInfo]:
         """List sessions, most recently active first."""
@@ -271,14 +276,14 @@ class SessionStore:
             modified = datetime.fromtimestamp(activity_path.stat().st_mtime, tz=UTC).isoformat()
 
             model = meta.get("model", "")
-            profile = meta.get("profile", "")
+            access = meta.get("access", "")
             cwd = meta.get("cwd", "")
             config_path = session_dir / "config.yaml"
-            if config_path.exists() and not (model and profile and cwd):
+            if config_path.exists() and not (model and access and cwd):
                 try:
                     config = AgentConfig.from_file(config_path)
                     model = model or config.model
-                    profile = profile or config.profile
+                    access = access or config.access.level.value
                     cwd = cwd or (config.working_dir or "")
                 except Exception:
                     pass
@@ -298,7 +303,7 @@ class SessionStore:
                 status=effective_status(meta),
                 created_at=meta.get("started_at") or modified,
                 model=model,
-                profile=profile,
+                access=access,
                 first_prompt=meta.get("first_prompt") or _first_prompt_from_trace(trace_path),
                 cwd=cwd,
                 user=meta.get("user", ""),

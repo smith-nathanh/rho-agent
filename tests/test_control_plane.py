@@ -48,7 +48,7 @@ def _text(text: str, cost: float = 0.0) -> list[StreamEvent]:
 def _agent(tmp_path: Path, registry: ToolRegistry | None = None) -> Agent:
     agent = MagicMock(spec=Agent)
     agent.config = AgentConfig(
-        system_prompt="test", profile="readonly", model="test-model", working_dir=str(tmp_path)
+        system_prompt="test", access="full", model="test-model", working_dir=str(tmp_path)
     )
     agent.system_prompt = "test"
     agent.registry = registry or ToolRegistry()
@@ -249,7 +249,7 @@ async def test_status_is_waiting_approval_while_the_callback_runs(tmp_path: Path
 
 def test_children_are_listed_under_their_parent(tmp_path: Path) -> None:
     store, parent = _session(tmp_path)
-    child_config = AgentConfig(model="child-model", profile="readonly")
+    child_config = AgentConfig(model="child-model", access="full")
 
     kwargs = child_session_kwargs(parent, State(), share_client=True, config=child_config)
 
@@ -505,7 +505,6 @@ def _interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     repl = InteractiveSession(
         session=session,
         approval_handler=MagicMock(),
-        mode_name="test",
         working_dir=str(tmp_path),
         session_store=store,
     )

@@ -68,14 +68,14 @@ settings = Settings()
 # Typer app
 app = typer.Typer(
     name="rho-agent",
-    help="An agent harness and CLI with readonly and developer modes.",
+    help="An agent harness and CLI. Sandboxed by default: edits the working directory, asks before going outside it.",
     epilog=(
         "Examples:\n"
         "  rho-agent\n"
         '  rho-agent "What errors are in app.log?"\n'
         '  rho-agent --prompt "Investigate why CI is failing"\n'
-        "  rho-agent --profile readonly\n"
-        "  rho-agent --profile developer\n"
+        "  rho-agent --access read-only\n"
+        "  rho-agent --add-dir ../shared-lib\n"
         "  rho-agent -r latest\n"
         "  rho-agent --system-prompt ./prompt.md --var env=prod"
     ),

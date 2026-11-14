@@ -18,7 +18,6 @@ from rho_agent.core import Agent, AgentConfig, Session
 from rho_agent.core.events import AgentEvent, CompletionGate
 from rho_agent.core.state import State
 from rho_agent.export.atif import trace_to_atif
-from rho_agent.permissions import PermissionProfile
 from rho_agent.prompts import load_prompt, prepare_prompt
 
 # Load .env file - try multiple locations
@@ -236,34 +235,40 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
         )
         sys.exit(2)
 
-    # Build agent with unrestricted profile
+    # Full access: the task container is the boundary. Benchmark runs measure
+    # a single agent, so no child agents.
+    if bash_only:
+        tools = ["bash"]
+    else:
+        tools = [
+            "read",
+            "grep",
+            "glob",
+            "list",
+            "read_excel",
+            "bash",
+            "view_image",
+            "write",
+            "edit",
+        ]
+    # Unset keeps the default: image viewing on, except in bash-only mode.
+    view_image = os.environ.get("RHO_AGENT_VIEW_IMAGE", "").strip()
+    if view_image:
+        wanted = view_image not in ("0", "false", "no", "off")
+        tools = [t for t in tools if t != "view_image"] + (["view_image"] if wanted else [])
     agent = Agent(
         AgentConfig(
             system_prompt=system_prompt,
             model=model,
-            profile="unrestricted",
+            access="full",
+            tools=tools,
             working_dir=working_dir,
-            auto_approve=True,
             # Every task gets the same prompt: an AGENTS.md or skills folder
             # shipped with a task would otherwise be appended to it.
             project_instructions=False,
             skills=False,
         )
     )
-
-    # Replace registry with unrestricted tools
-    profile = PermissionProfile.unrestricted(working_dir=working_dir)
-    profile.bash_only = bash_only
-    # Unset keeps the default: image viewing on, except in bash-only mode.
-    view_image = os.environ.get("RHO_AGENT_VIEW_IMAGE", "").strip()
-    if view_image:
-        profile.view_image = view_image not in ("0", "false", "no", "off")
-    # Benchmark runs measure a single agent; no child agents.
-    profile.delegate = False
-    from rho_agent.permissions.factory import ToolFactory
-
-    factory = ToolFactory(profile)
-    agent._registry = factory.create_registry(working_dir=working_dir)
 
     # Log available tools for debugging
     tool_names = [h.name for h in agent.registry._handlers.values()]

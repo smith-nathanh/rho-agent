@@ -59,7 +59,8 @@ class BirdRunner:
             os.close(tmp_fd)
             shutil.copy2(task.db_path, tmp_db_path)
 
-            # Build agent with minimal profile
+            # Built with no tools; it gets only the BIRD tool below, which
+            # reads its own database copy, so there is nothing to sandbox.
             system_prompt = self._get_system_prompt()
             agent = Agent(
                 AgentConfig(
@@ -67,8 +68,8 @@ class BirdRunner:
                     model=self.config.model,
                     base_url=self.config.base_url,
                     service_tier=self.config.service_tier,
-                    profile="readonly",
-                    auto_approve=True,
+                    access="full",
+                    tools=[],
                 )
             )
 

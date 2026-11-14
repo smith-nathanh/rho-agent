@@ -99,9 +99,9 @@ def test_default_prompt_resolves_without_vars(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setenv("HOME", str(tmp_path))  # no user default.md
 
-    prompt = AgentConfig(profile="developer", working_dir="/srv/app").resolve_system_prompt()
+    prompt = AgentConfig(access="full", working_dir="/srv/app").resolve_system_prompt()
     assert "/srv/app" in prompt
     assert "{{" not in prompt
 
-    custom = AgentConfig(profile="developer", vars={"working_dir": "/elsewhere"})
+    custom = AgentConfig(access="full", vars={"working_dir": "/elsewhere"})
     assert "/elsewhere" in custom.resolve_system_prompt()

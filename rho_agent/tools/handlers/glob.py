@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..base import ToolHandler, ToolInvocation, ToolOutput
-from .paths import resolve_path
+from .paths import read_refusal, resolve_path, sandbox_for
+
+if TYPE_CHECKING:
+    from ...sandbox import Sandbox
 
 DEFAULT_MAX_RESULTS = 100
 DEFAULT_TIMEOUT = 30  # seconds
@@ -20,8 +23,14 @@ class GlobHandler(ToolHandler):
     Standard agentic tool name: 'glob'
     """
 
-    def __init__(self, timeout: int = DEFAULT_TIMEOUT, working_dir: str | None = None) -> None:
+    def __init__(
+        self,
+        timeout: int = DEFAULT_TIMEOUT,
+        working_dir: str | None = None,
+        sandbox: Sandbox | None = None,
+    ) -> None:
         self._working_dir = working_dir
+        self._sandbox = sandbox
         self._timeout = timeout
         self._rg_path = shutil.which("rg")
 
@@ -78,6 +87,10 @@ class GlobHandler(ToolHandler):
 
         path = resolve_path(path_str, self._working_dir)
 
+        refusal = read_refusal(self._sandbox, invocation, path)
+        if refusal:
+            return ToolOutput(content=refusal, success=False)
+
         if not path.exists():
             return ToolOutput(content=f"Directory not found: {path}", success=False)
 
@@ -109,11 +122,13 @@ class GlobHandler(ToolHandler):
         # Search path
         cmd.append(str(path))
 
+        sandbox = sandbox_for(self._sandbox, invocation)
         try:
             process = await asyncio.create_subprocess_exec(
-                *cmd,
+                *(sandbox.wrap(cmd) if sandbox else cmd),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=sandbox.env() if sandbox else None,
             )
 
             try:

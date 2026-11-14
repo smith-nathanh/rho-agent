@@ -8,7 +8,7 @@ order: 4
 
 rho-agent separates *what an agent is* from *what an agent does* from *what an agent has done*.
 
-**Agent** is a stateless blueprint — a system prompt, a permission profile, and a tool registry bundled into a reusable definition. It holds no conversation history and runs nothing on its own. You create one Agent and stamp out as many independent Sessions from it as you need. The registry is built once at construction time and shared across Sessions, so parallel conversations don't duplicate setup work or invalidate each other's prompt caches.
+**Agent** is a stateless blueprint — a system prompt, an access level, and a tool registry bundled into a reusable definition. It holds no conversation history and runs nothing on its own. You create one Agent and stamp out as many independent Sessions from it as you need. The registry is built once at construction time and shared across Sessions, so parallel conversations don't duplicate setup work or invalidate each other's prompt caches.
 
 **Session** is where execution happens. It drives the agent loop — LLM call, tool dispatch, repeat — and owns all the lifecycle concerns: cancellation, pause/resume via sentinel files, operator directives injected between turns, auto-compaction when context gets large, and budget gates. Sessions are long-lived. You can call `run()` multiple times for multi-turn conversations, and resume them across process restarts from a saved trace.
 
@@ -31,7 +31,7 @@ This decomposition is deliberate. Agent is stateless so one definition can back 
 
 The lifecycle is simple:
 
-1. **`Agent(config)`** — Resolves the permission profile, builds the tool registry, resolves the system prompt.
+1. **`Agent(config)`** — Builds the tool registry (and the sandbox) for the access level, resolves the system prompt.
 2. **`Session(agent)`** — Sync constructor. Creates the State, sets up defaults. Ready to run immediately.
 3. **`await session.run(prompt=...)`** — Executes a prompt to completion. Returns a `RunResult`. Can be called multiple times for multi-turn conversations.
 4. **`await session.close()`** — Cleans up remote resources (Daytona backend only). No-op for local backend.
@@ -62,37 +62,35 @@ Events are emitted throughout the loop via `State` observers and the `on_event` 
 
 ## Tool routing
 
-The `ToolRegistry` maps tool names to handler instances. It is built during `Agent()` construction based on the active `PermissionProfile`:
+The `ToolRegistry` maps tool names to handler instances. It is built during `Agent()` construction from the access level and `AgentConfig.tools`:
 
-- **`readonly`** registers: `bash` (restricted), `read`, `grep`, `glob`, `list`, `read_excel`, and available database handlers
-- **`developer`** adds: `write`, `edit`, `delegate`
-- **`eval`** enables database mutations and disables approval
+- Every level registers `read`, `grep`, `glob`, `list`, `read_excel`, `bash`, `view_image`, `delegate`, and handlers for configured databases
+- `workspace` and `full` add `write` and `edit`
+- `read-only` and `workspace` add `request_access` and run commands in the OS sandbox
+- `tools=[...]` keeps only the named tools
 - When `--backend daytona` is set, file and shell tools execute in a Daytona cloud sandbox instead of locally
-- Custom profiles define their own tool set via YAML
 
 Each handler implements a common interface: `name`, `description`, `parameters` (JSON schema), and `handle()`. The registry generates the tool definitions array sent to the model API.
 
-The `ToolFactory` creates the registry from a profile, resolving which handlers to instantiate and how to configure them.
+## Access enforcement
 
-## Permission enforcement
+Access is enforced at three levels:
 
-Permissions are enforced at two levels:
+**Tool availability** — Tools not registered don't exist from the model's perspective. A `read-only` agent never sees `write` or `edit`.
 
-**Tool availability** — Tools not registered in the registry don't exist from the model's perspective. A `readonly` agent never sees `write` or `edit` in its tool list.
+**The OS sandbox** — Commands run under Seatbelt (macOS) or bubblewrap with a seccomp filter (Linux). The kernel refuses writes outside the writable directories, reads of protected paths, connections to local services over Unix sockets, and network access when it is off, for the command and everything it starts. See [Access — How it works](access/#how-it-works).
 
-**Runtime checks** — Handlers perform additional validation at execution time. `BashHandler` checks commands against its allowlist in restricted mode. Database handlers reject mutation queries in readonly mode. `WriteHandler` blocks overwrites and sensitive paths in create-only mode.
+**In-process checks** — `read`, `write`, `edit` and the other file tools check the same policy before touching a path. Database handlers reject mutation queries on read-only connections.
 
-## Approval system
+## Access requests and approvals
 
-When a permission profile requires approval, tool calls are routed through an approval callback before execution. Set the callback on the Session:
+A sandboxed agent asks for more through the session's approval callback:
 
 ```python
-session.approval_callback = my_callback
+session.approval_callback = my_callback   # async (tool_name, tool_args) -> bool
 ```
 
-The callback receives the tool name and arguments and returns an allow/deny decision. In interactive CLI mode, this prompts the user. In the Python API, a custom callback can implement any approval logic. If approval is denied, a `tool_blocked` event is emitted.
-
-When the approval callback is not set and approval is required, the session raises an `ApprovalInterrupt` exception for out-of-band handling.
+It is called for `request_access` (a directory to write or a protected path to read), for `bash` with `unsandboxed: true`, and for custom tools that set `requires_approval`. An approved access request becomes a grant on the session for the rest of its life. In interactive CLI mode the user is prompted; with no terminal, requests are queued for `rho-agent monitor`. Without a callback, `request_access` is not offered and the agent stays in its sandbox.
 
 ## Multi-agent coordination
 
@@ -100,7 +98,7 @@ When the approval callback is not set and approval is required, the session rais
 
 The `delegate` tool spawns a child agent to handle a focused subtask. The child:
 
-- Inherits the parent's profile, model, and working directory
+- Inherits the parent's access, access grants, model, and working directory
 - Optionally receives a copy of the parent's conversation history (`full_context`)
 - Cannot delegate further (single-level only)
 - Is automatically cancelled when the parent is cancelled
@@ -141,6 +139,6 @@ The `--list` flag shows saved sessions and `--resume` restores one, enabling lon
 | `rho_agent/cli/` | Typer CLI commands |
 | `rho_agent/core/` | Core abstractions: `agent`, `session`, `state`, `config`, `events`, `session_store` |
 | `rho_agent/tools/` | Tool handlers and registry |
-| `rho_agent/permissions/` | Permission profile definitions and enforcement |
+| `rho_agent/sandbox/` | Access levels, grants, and the Seatbelt and bubblewrap backends |
 | `rho_agent/client/` | LLM client adapters |
 | `rho_agent/prompts/` | Prompt template loading and variable substitution |

@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from ..client.model import BASE_URL_ENV, default_model
+from ..sandbox.policy import Access, AccessLevel
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -35,7 +36,7 @@ class AgentConfig:
     """Portable agent configuration — what an agent is and how it runs.
 
     Captures identity (system prompt + template variables) and infrastructure
-    (model, profile, backend, API settings). Designed to live as a YAML file
+    (model, access, backend, API settings). Designed to live as a YAML file
     in version control so teams can share and version agent definitions.
 
     Unknown YAML fields are preserved in ``extras`` so teams can stash custom
@@ -50,7 +51,7 @@ class AgentConfig:
         # Inline
         config = AgentConfig(
             system_prompt="You are a helpful assistant.",
-            profile="developer",
+            access="read-only",
         )
 
         # Then create an Agent from it
@@ -60,7 +61,16 @@ class AgentConfig:
     system_prompt: str = ""
     vars: dict[str, str] = field(default_factory=dict)
     model: str = field(default_factory=default_model)
-    profile: str = field(default_factory=lambda: os.getenv("RHO_AGENT_PROFILE", "readonly"))
+    # What the agent may change: "read-only", "workspace" (the default) or
+    # "full", or an Access with more detail. See rho_agent.sandbox.
+    access: Access = field(
+        default_factory=lambda: Access.from_value(os.getenv("RHO_AGENT_ACCESS") or "workspace")
+    )
+    # Tool names to offer the model. None means every tool the access level
+    # allows. Example: ["bash"] for a bash-only agent.
+    tools: list[str] | None = None
+    # Let several bash calls in one model turn run concurrently.
+    parallel_bash: bool = False
     backend: str | Any = field(
         default_factory=lambda: os.getenv("RHO_AGENT_BACKEND", "local")
     )  # str | DaytonaBackend
@@ -72,7 +82,6 @@ class AgentConfig:
     )
     response_format: dict[str, Any] | None = None
     databases: dict[str, dict[str, Any]] | None = None
-    auto_approve: bool = True
     # Context management. Compaction replaces older history with a summary
     # once the input grows past a threshold.
     #   auto_compact       turn automatic compaction on or off
@@ -109,7 +118,9 @@ class AgentConfig:
             "system_prompt",
             "vars",
             "model",
-            "profile",
+            "access",
+            "tools",
+            "parallel_bash",
             "backend",
             "working_dir",
             "base_url",
@@ -117,7 +128,6 @@ class AgentConfig:
             "reasoning_effort",
             "response_format",
             "databases",
-            "auto_approve",
             "auto_compact",
             "compact_threshold",
             "compact_at_tokens",
@@ -133,6 +143,10 @@ class AgentConfig:
 
     def __post_init__(self) -> None:
         from .models import validate_compaction_settings
+
+        self.access = Access.from_value(self.access)
+        if self.tools is not None:
+            self.tools = [str(name) for name in self.tools]
 
         validate_compaction_settings(self.compact_threshold, self.compact_at_tokens)
 
@@ -177,7 +191,11 @@ class AgentConfig:
         if self.vars:
             data["vars"] = dict(self.vars)
         data["model"] = self.model
-        data["profile"] = self.profile
+        data["access"] = self.access.to_value()
+        if self.tools is not None:
+            data["tools"] = list(self.tools)
+        if self.parallel_bash:
+            data["parallel_bash"] = True
         data["backend"] = "daytona" if not isinstance(self.backend, str) else self.backend
         if self.working_dir:
             data["working_dir"] = self.working_dir
@@ -191,7 +209,6 @@ class AgentConfig:
             data["response_format"] = self.response_format
         if self.databases:
             data["databases"] = self.databases
-        data["auto_approve"] = self.auto_approve
         if not self.auto_compact:
             data["auto_compact"] = False
         if not self.project_instructions:
@@ -242,7 +259,7 @@ class AgentConfig:
         return system_prompt
 
     def _default_prompt_vars(self) -> dict[str, str]:
-        """What the default prompt says about the machine, directory and profile.
+        """What the default prompt says about the machine, directory and access.
 
         Filled in here so a config with no ``system_prompt`` works from Python
         as it does from the CLI. Entries in ``vars`` take precedence.
@@ -255,22 +272,7 @@ class AgentConfig:
             "home_dir": "/home/daytona" if remote else str(Path.home()),
             "working_dir": self.working_dir or ("/home/daytona" if remote else os.getcwd()),
         }
-        if isinstance(self.profile, str):
-            from ..permissions.factory import load_profile
-
-            try:
-                profile = load_profile(self.profile)
-            except (FileNotFoundError, ValueError):
-                return values  # the Agent reports a bad profile itself
-        else:
-            profile = self.profile
-        if profile is not None:
-            values.update(
-                profile_name=profile.name,
-                shell_mode=profile.shell.value,
-                file_write_mode=profile.file_write.value,
-                database_mode=profile.database.value,
-            )
+        values.update(access_prompt_vars(self.access, values["working_dir"], remote=remote))
         return values
 
     def _resolve_prompt_file(self, path: str) -> str:
@@ -280,3 +282,32 @@ class AgentConfig:
         loaded = load_prompt(path)
         system_prompt, _ = prepare_prompt(loaded, dict(self.vars))
         return system_prompt
+
+
+def access_prompt_vars(access: Access, working_dir: str, *, remote: bool) -> dict[str, str]:
+    """Template variables describing what the agent may change.
+
+    ``access_level`` is the level name; ``sandbox_info`` describes the limits
+    (or, for a remote backend, the remote machine).
+    """
+    if remote:
+        return {"access_level": AccessLevel.FULL.value, "sandbox_info": REMOTE_SANDBOX_INFO}
+    if access.sandboxed:
+        info = access.resolve(working_dir).describe()
+    else:
+        info = "Access: full. There is no sandbox: commands run with the user's permissions."
+    return {"access_level": access.level.value, "sandbox_info": info}
+
+
+REMOTE_SANDBOX_INFO = (
+    "You are running in a remote sandbox VM, not on the user's machine.\n"
+    "Pre-installed tools: python3, pip, node, git, uv.\n"
+    "Prefer uv over pip for Python package management.\n"
+    "PATH includes ~/.local/bin.\n"
+    "\n"
+    "Important: uv-managed venvs do not include pip. To install packages:\n"
+    "- `uv pip install <pkg>` — install into the project venv\n"
+    "- `uv run --with <pkg> <cmd>` — run a command with a temporary dependency\n"
+    "- `uv run <cmd>` — run a command using the project venv\n"
+    "Always use `uv run` or `uv pip install` instead of plain `pip` or `.venv/bin/python -m pip`."
+)
