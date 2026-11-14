@@ -735,3 +735,15 @@ def test_default_prompt_describes_access(tmp_path: Path) -> None:
 
     read_only, _ = _default_prompt(Access("read-only"), str(tmp_path), is_remote=False)
     assert "File Editing Tools" not in read_only
+
+
+def test_monitor_shows_access_requests_plainly(monkeypatch, tmp_path: Path) -> None:
+    from rho_agent.cli.formatting import _format_tool_signature
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    args = {"path": str(tmp_path / "proj" / "lib"), "access": "write", "reason": "fix the import"}
+    assert _format_tool_signature("request_access", args) == (
+        "write access to ~/proj/lib: fix the import"
+    )
+    bash = {"command": "docker ps", "unsandboxed": True, "reason": "needs Docker"}
+    assert _format_tool_signature("bash", bash) == "bash(unsandboxed: docker ps)"

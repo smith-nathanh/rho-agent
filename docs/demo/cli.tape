@@ -14,7 +14,9 @@ Set CursorBlink false
 Set Framerate 20
 
 Hide
-Type "export HOME=$DEMO_HOME RHO_AGENT_PREVIEW_LINES=3 && cd ~/proj/shop && export PS1='\[\e[2m\]shop\[\e[0m\] $ ' && clear"
+# exec: if the session exits early, the recording ends with it, and nothing
+# typed later runs in a shell.
+Type "export HOME=$DEMO_HOME RHO_AGENT_PREVIEW_LINES=3 && cd ~/proj/shop && export PS1='\[\e[2m\]shop\[\e[0m\] $ ' && alias rho-agent='exec rho-agent' && clear"
 Enter
 Show
 
@@ -22,7 +24,7 @@ Type "pytest -q --tb=no"
 Enter
 Sleep 3s
 
-Type "rho-agent --profile developer"
+Type "rho-agent"
 Enter
 Sleep 4s
 

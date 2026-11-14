@@ -606,3 +606,22 @@ def test_resume_id_resolution_order() -> None:
     assert resolve("2", sessions) == "20000000"  # a number wins over a prefix
     assert resolve("9", sessions) is None
     assert resolve("", sessions) is None
+
+
+def test_monitor_ctrl_c_at_prompt_does_not_quit(tmp_path: Path, monkeypatch) -> None:
+    store, _ = _session(tmp_path)
+    module, mon = _monitor(store)
+    typed = iter([KeyboardInterrupt, "ps", "quit", "never reached"])
+    calls: list[str] = []
+
+    def fake_input(prompt: str) -> str:
+        item = next(typed)
+        calls.append(str(item))
+        if item is KeyboardInterrupt:
+            raise KeyboardInterrupt
+        return item
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    with module.console.capture():
+        mon.run()
+    assert calls[-1] == "quit"  # Ctrl+C was ignored; quit ended the loop

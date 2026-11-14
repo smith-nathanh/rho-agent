@@ -59,7 +59,7 @@ An `Owner` column (`user@host`) appears when the directory holds sessions from m
 
 ### `watch <prefix> [n|all]` — follow a session live
 
-Shows the last 20 events of `trace.jsonl`, then renders new events as the agent works. Pass a number to see more or fewer past events, or `all` for the whole trace. You see LLM calls, tool invocations, tool results, and assistant messages in real time. Press Ctrl+C to stop watching (the agent keeps running). The prefix can be a child session's ID, to follow one subagent.
+Shows the last 20 events of `trace.jsonl`, then renders new events as the agent works. Pass a number to see more or fewer past events, or `all` for the whole trace. You see LLM calls, tool invocations, tool results, and assistant messages in real time. Press Ctrl+C to stop watching (the agent keeps running). At the `monitor>` prompt, Ctrl+C only clears the line; `quit` or Ctrl+D exits. The prefix can be a child session's ID, to follow one subagent.
 
 ```
 monitor> watch a3f
