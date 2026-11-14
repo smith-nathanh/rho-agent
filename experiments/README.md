@@ -14,10 +14,10 @@ not happen.
 | [E003](E003-openrouter-api-checks/) | 2026-11-13 | Live API checks: OpenRouter reasoning replay, cost reporting | Done | 9 API calls | 0.003 | Reasoning replay and cost both work |
 | [E004](E004-pilot-tool-sets/) | 2026-11-13 | Pilot: bash + images vs full tool set, Sol | Done | 16 | 4.36 | Same cost; full tools 35% more calls; pass 3/8 vs 1/8 (not significant) |
 | [E005](E005-full-terminal-bench-4.1/) | — | Full Terminal-Bench 4.1, Sol | Planned | 66 planned | at most 264 | — |
-| [E006](E006-pilot-max-effort/) | 2026-11-13 | Pilot: full tools at max effort, Sol (repeats E004 arm B) | Running | 8 | — | — |
+| [E006](E006-pilot-max-effort/) | 2026-11-13 | Pilot: full tools at max effort, Sol (repeats E004 arm B) | Done | 8 | 11.17 | 2/8 vs 3/8 at medium; 5x cost; same tests fail |
 
-**Spent so far: $10.45** (E000–E004): $5.39 in March 2026 (E000) and $5.06
-in November (E001–E004). The machine-readable ledger is
+**Spent so far: $21.62** (E000–E006): $5.39 in March 2026 (E000) and $16.23
+in November (E001–E006). The machine-readable ledger is
 [`ledger.csv`](ledger.csv).
 
 ## How to record an experiment

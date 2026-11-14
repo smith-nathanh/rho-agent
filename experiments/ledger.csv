@@ -7,3 +7,5 @@ E003,2026-11-13,OpenRouter reasoning replay test (7 calls),openai/gpt-6.1-sol vi
 E003,2026-11-13,live cost check (OpenRouter + OpenAI),openai/gpt-6.1-sol,2,0.0002,usage.cost and built-in price table
 E004,2026-11-13,pilot arm A bash + images (8 trials),openai/gpt-6.1-sol,8,2.1493,jobs/pilot-bash-image/2026-11-13__17-13-52/result.json
 E004,2026-11-13,pilot arm B full tools (8 trials),openai/gpt-6.1-sol,8,2.2060,jobs/pilot-full-tools/2026-11-13__17-14-12/result.json
+E006,2026-11-13,API check that Sol accepts effort max (1 call),openai/gpt-6.1-sol,1,0.0003,usage and built-in price table
+E006,2026-11-13,pilot full tools at max effort (8 trials),openai/gpt-6.1-sol,8,11.1697,jobs/pilot-max-effort/2026-11-13__20-18-16/result.json
