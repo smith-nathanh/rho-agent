@@ -9,3 +9,4 @@ E004,2026-11-13,pilot arm A bash + images (8 trials),openai/gpt-6.1-sol,8,2.1493
 E004,2026-11-13,pilot arm B full tools (8 trials),openai/gpt-6.1-sol,8,2.2060,jobs/pilot-full-tools/2026-11-13__17-14-12/result.json
 E006,2026-11-13,API check that Sol accepts effort max (1 call),openai/gpt-6.1-sol,1,0.0003,usage and built-in price table
 E006,2026-11-13,pilot full tools at max effort (8 trials),openai/gpt-6.1-sol,8,11.1697,jobs/pilot-max-effort/2026-11-13__20-18-16/result.json
+E005,2026-11-14,Daytona setup check (4 trials; 2 graded),openai/gpt-6.1-terra,4,0.5595,jobs/daytona-smoke/2026-11-14__10-35-47 trial tokens.json (Daytona compute not included)
