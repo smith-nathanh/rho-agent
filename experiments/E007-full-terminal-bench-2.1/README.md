@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| Status | Planned; setup check run (see [Setup check](#setup-check-daytona-smoke-test-2026-11-15)) |
+| Status | Ready, not run |
 | Dates | planned 2026-11-15 |
 | rho-agent commit | `87bb9ac3b9f4fd332e6207b7018906f67e113f9b` planned (`main` after smith-nathanh/rho-agent#33) |
 | Harbor version | 0.25.0; Daytona SDK 0.231.1 |
 | Dataset | `terminal-bench/terminal-bench-2-1` (Harbor hub), all 89 tasks |
-| Budget | model: worst case $356 (89 x $4 cap), expected $20–40; Daytona: to estimate from the setup check |
+| Budget | model: worst case $356 (89 x $4 cap), expected $20–40; Daytona: a few dollars (small CPU sandboxes) |
 | Cost | setup check $0.10 model (Daytona billed separately) |
 
 ## Why Terminal-Bench 2.1 instead of 4.1
@@ -64,7 +64,18 @@ effort, and at what cost per task?
   sandbox.
 - **Resuming:** `harbor job resume -p <job dir>` reruns only trials without a
   `result.json`.
-- **Configs:** `configs/*.yaml`.
+- **Trials at once:** 3. The account stays on its current Daytona tier
+  (decided 2026-11-15), whose totals are 10 CPUs, 10 GiB of memory and
+  30 GiB of disk; every task asks for 10 GB of disk. When 4 and 8 GB tasks
+  overlap, Daytona refuses the sandbox for the memory total; Harbor retries
+  `EnvironmentStartTimeoutError` up to 10 times, 1–5 minutes apart. Refused
+  sandboxes cost nothing. Expected wall time: several hours (one E008 task
+  took 1.5–7 agent minutes; the 89 task limits add up to 42 hours).
+- **Dataset version:** pinned to the hub content hash
+  `sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a`,
+  the version the setup check and E008 ran.
+- **Config:** [`configs/tb21-full.yaml`](configs/tb21-full.yaml) (dry run:
+  89 trials).
 
 ## Setup check: Daytona smoke test, 2026-11-15
 
@@ -116,10 +127,5 @@ What it shows:
 
 ## Open decisions
 
-- **Daytona tier.** Raise the account's total limits (a higher tier), or run
-  1–3 trials at a time. With 3 at once, 8 GB tasks running together still
-  exceed the memory limit.
-- **Retries.** If trials can still be refused for limits, set Harbor's
-  `retry` so `EnvironmentStartTimeoutError` is retried (it is not in the
-  default exclude list).
-- **Request timeout** for single model calls (`max_call_seconds`).
+None. Run it from the main checkout inside tmux (commands at the top of the
+config); if it stops, `harbor job resume` reruns only unfinished trials.
