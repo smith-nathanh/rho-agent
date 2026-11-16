@@ -15,12 +15,12 @@ not happen.
 | [E004](E004-pilot-tool-sets/) | 2026-11-13 | Pilot: bash + images vs full tool set, Sol | Done | 16 | 4.36 | Same cost; full tools 35% more calls; pass 3/8 vs 1/8 (not significant) |
 | [E005](E005-full-terminal-bench-4.1/) | 2026-11-14 (setup check) | Full Terminal-Bench 4.1, Sol, on Daytona | Deferred | 66 planned (+4 setup) | 0.56 so far | Setup check: GPU and DinD work; per-sandbox limits block 8 tasks |
 | [E006](E006-pilot-max-effort/) | 2026-11-13 | Pilot: full tools at max effort, Sol (repeats E004 arm B) | Done | 8 | 11.17 | 2/8 vs 3/8 at medium; 5x cost; same tests fail |
-| [E007](E007-full-terminal-bench-2.1/) | 2026-11-15 to 16 | Full Terminal-Bench 2.1, Sol, on Daytona | Done | 89 (+2 setup) | 9.97 | 76/89 passed (85.4%); 3 not run (setup), 2 blocked by OpenAI's cyber filter; no timeouts |
+| [E007](E007-full-terminal-bench-2.1/) | 2026-11-15 to 16 | Full Terminal-Bench 2.1, Sol, on Daytona | Done | 89 (+2 setup, 3 reruns of setup failures) | 10.33 | 79/89 passed (88.8%); no timeouts. Flag: 2 failures were refused by OpenAI's cyber filter |
 | [E008](E008-sol-on-gpt-5.2-failures/) | 2026-11-15 | Sol on 7 TB 2.1 tasks GPT-5.2 always failed, Daytona | Done | 7 | 0.80 | 4/7 passed; the 3 failures were near misses, no timeouts |
 | [E009](E009-reviewer-replay/) | 2026-11-15 | Reviewer replay on E008 traces: current vs revised prompt | Done | 42 reviewer calls | 0.39 | Both flag 1 of 3 failures; revised prompt finds its real cause but flags 2 of 4 passes |
 
-**Spent so far: $33.34** in model calls (E000–E009): $5.39 in March 2026
-(E000) and $27.95 in November (E001–E009). Daytona compute (from E005 on) is
+**Spent so far: $33.70** in model calls (E000–E009): $5.39 in March 2026
+(E000) and $28.31 in November (E001–E009). Daytona compute (from E005 on) is
 billed separately and not included. The machine-readable ledger is
 [`ledger.csv`](ledger.csv).
 
