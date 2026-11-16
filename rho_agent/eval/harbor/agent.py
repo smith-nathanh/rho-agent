@@ -43,6 +43,20 @@ _UV_ON_PATH = (
     'else export PATH="$HOME/.local/bin:$PATH"; fi'
 )
 
+# Debian moved bullseye's security repository to archive.debian.org in 2026;
+# the old URL still serves the index but 404s on the packages, so apt installs
+# fail on bullseye task images. Repoint it before installing anything (the
+# change also lets a task's own test script install packages).
+_ARCHIVED_DEBIAN_SECURITY = (
+    "if [ -r /etc/os-release ] && . /etc/os-release"
+    ' && [ "${VERSION_CODENAME:-}" = bullseye ]; then'
+    " for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do"
+    ' [ -f "$f" ] && sed -i -E'
+    " 's#https?://(deb|security)\\.debian\\.org/debian-security#"
+    'http://archive.debian.org/debian-security#g\' "$f";'
+    " done; fi; true"
+)
+
 
 class RhoAgentOptions(InstalledAgentOptions):
     """Options accepted as ``--ak key=value`` or ``kwargs`` in a job config.
@@ -193,6 +207,7 @@ class RhoAgent(BaseInstalledAgent):
 
     @override
     async def install(self, environment: BaseEnvironment) -> None:
+        await self.exec_as_root(environment, command=_ARCHIVED_DEBIAN_SECURITY)
         await self.ensure_system_dependencies(environment, ("curl", "bash", "git"))
         python_version = shlex.quote(AGENT_PYTHON_VERSION)
         await self.exec_as_agent(

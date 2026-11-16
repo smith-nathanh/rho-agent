@@ -97,6 +97,12 @@ async def test_install_builds_a_private_virtualenv(tmp_path: Path) -> None:
     assert "import rho_agent.eval.harbor.runner" in install
     assert env.calls[-1].get("user") is None  # runs as the agent user, not root
 
+    # Before any apt install, bullseye images get the archived security repo.
+    repoint = env.calls[0]
+    assert repoint.get("user") == "root"
+    assert "bullseye" in repoint["command"]
+    assert "archive.debian.org/debian-security" in repoint["command"]
+
 
 async def test_run_passes_instruction_settings_and_credentials(tmp_path: Path) -> None:
     env = _FakeEnvironment()
