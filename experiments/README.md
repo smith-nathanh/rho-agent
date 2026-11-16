@@ -50,6 +50,14 @@ billed separately and not included. The machine-readable ledger is
 Job outputs live in `jobs/` in the main checkout, which is not committed. The
 paths are recorded in each experiment so the raw traces can be found.
 
+**Before sharing or uploading traces from runs up to E009:** the agent's
+commands could see the model API key (`RHO_AGENT_API_KEY`), and when a
+command printed the environment the key went into the trace. On 2026-11-16 it
+was found in the traces of `jobs/daytona-smoke/2026-11-14__10-35-47`,
+`jobs/pilot-bash-image`, `jobs/pilot-full-tools`, `jobs/pilot-max-effort` and
+`jobs/e007-tb21` (`compile-compcert`). Redact it first. Runs after the fix
+(see the git log for `bash.py`) do not pass the key to commands.
+
 ## Tools
 
 - [`tools/compare_trials.py`](tools/compare_trials.py): compares two job
