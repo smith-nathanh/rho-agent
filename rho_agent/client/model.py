@@ -60,10 +60,27 @@ CONTEXT_OVERFLOW_MARKERS = (
 # HTTP statuses where retrying the same request cannot help.
 _FATAL_STATUSES = frozenset({400, 401, 403, 404, 422})
 
+# A provider's safety filter refused the request's content. Sending it again
+# gets the same refusal, and repeated flagged requests can get the whole
+# account's access restricted, so the run stops on the first one.
+_POLICY_REFUSAL_CODES = frozenset({"cyber_policy"})
+_POLICY_REFUSAL_MARKERS = ("flagged for possible cybersecurity risk",)
+
+
+def is_policy_refusal(code: str | None, text: str) -> bool:
+    """Whether an error is a provider's content-policy refusal."""
+    if code in _POLICY_REFUSAL_CODES:
+        return True
+    text = text.lower()
+    return any(marker in text for marker in _POLICY_REFUSAL_MARKERS)
+
 
 def classify_error(exc: BaseException) -> str:
-    """Classify a provider error as ``context_overflow``, ``fatal`` or ``transient``."""
+    """Classify a provider error as ``context_overflow``, ``policy_refusal``,
+    ``fatal`` or ``transient``."""
     text = str(exc).lower()
+    if is_policy_refusal(getattr(exc, "code", None), text):
+        return "policy_refusal"
     if any(marker in text for marker in CONTEXT_OVERFLOW_MARKERS):
         return "context_overflow"
     status = getattr(exc, "status_code", None)
@@ -127,7 +144,8 @@ class StreamEvent:
     tool_call: ToolCall | None = None
     stop_reason: str | None = None
     usage: dict[str, Any] | None = None
-    # For type="error": "context_overflow", "fatal" or "transient".
+    # For type="error": "context_overflow", "policy_refusal", "fatal" or
+    # "transient".
     error_kind: str | None = None
     # For type="done": the response's output items in order, to be stored on
     # the assistant message (see ``Message.response_items``). None when the
@@ -423,7 +441,9 @@ _TRANSIENT_RESPONSE_ERRORS = frozenset(
 def _response_error(code: str | None, message: str | None) -> StreamEvent:
     """Error event for a failure reported inside a response, not as an HTTP status."""
     text = f"{code}: {message}" if code else (message or "response failed")
-    if any(marker in text.lower() for marker in CONTEXT_OVERFLOW_MARKERS):
+    if is_policy_refusal(code, text):
+        kind = "policy_refusal"
+    elif any(marker in text.lower() for marker in CONTEXT_OVERFLOW_MARKERS):
         kind = "context_overflow"
     elif code is None or code in _TRANSIENT_RESPONSE_ERRORS:
         kind = "transient"

@@ -15,6 +15,7 @@ from rho_agent.client.model import (
     ModelCallError,
     StreamEvent,
     ToolCall,
+    _response_error,
     classify_error,
     parse_tool_arguments,
 )
@@ -466,7 +467,7 @@ async def test_transient_error_gives_up_after_max_retries() -> None:
 
 
 async def test_fatal_and_unclassified_errors_are_not_retried() -> None:
-    for kind in ("fatal", None):
+    for kind in ("fatal", "policy_refusal", None):
         client = _ScriptedClient([_error(kind)], [_text("never"), _done()])
         session = _session(client)
         result = await session.run("go")
@@ -505,6 +506,38 @@ def test_classify_error() -> None:
     assert classify_error(_Status("bad key", 401)) == "fatal"
     assert classify_error(_Status("overloaded", 529)) == "transient"
     assert classify_error(TimeoutError("timed out")) == "transient"
+
+
+_CYBER_MESSAGE = (
+    "This content was flagged for possible cybersecurity risk. If this seems wrong, "
+    "try rephrasing your request."
+)
+
+
+def test_cyber_policy_refusal_is_its_own_kind() -> None:
+    # A stream error raised by the SDK: no HTTP status, the code in the body.
+    class _ApiError(Exception):
+        def __init__(self, msg: str, code: str | None) -> None:
+            super().__init__(msg)
+            self.code = code
+
+    assert classify_error(_ApiError(_CYBER_MESSAGE, None)) == "policy_refusal"
+    assert classify_error(_ApiError("refused", "cyber_policy")) == "policy_refusal"
+    assert classify_error(_ApiError("overloaded", None)) == "transient"
+    # Reported inside a response (response.failed or a stream error event).
+    assert _response_error(None, _CYBER_MESSAGE).error_kind == "policy_refusal"
+    assert _response_error("cyber_policy", "refused").error_kind == "policy_refusal"
+    assert _response_error(None, "something broke").error_kind == "transient"
+
+
+async def test_cyber_policy_refusal_ends_the_run_without_retrying() -> None:
+    client = _ScriptedClient([_response_error(None, _CYBER_MESSAGE)], [_text("never"), _done()])
+    session = _session(client)
+
+    result = await session.run("go")
+
+    assert result.status == "error"
+    assert len(client.prompts) == 1
 
 
 async def test_max_turns_is_reported_as_its_own_status() -> None:

@@ -265,7 +265,9 @@ flagged; Daybreak access was not pursued (2026-11-16).
 
 ## Follow-ups
 
-- rho-agent classes the cyber-policy refusal as `transient` and retries it 4
-  times. It is not transient, and repeated flagged requests count against the
-  organization, so it should end the run on the first refusal.
+- Done (2026-11-16, on this branch): rho-agent classed the cyber-policy
+  refusal as `transient` and retried it 4 times. It now classes it as
+  `policy_refusal` (error code `cyber_policy`, or the "flagged for possible
+  cybersecurity risk" message) and ends the run on the first refusal. E007
+  ran before this change.
 - Merge smith-nathanh/rho-agent#34 so later runs on bullseye images install.
