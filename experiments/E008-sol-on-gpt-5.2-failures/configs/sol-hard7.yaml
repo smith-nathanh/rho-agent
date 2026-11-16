@@ -1,0 +1,41 @@
+# E008: GPT-6.1 Sol on 7 TB 2.1 tasks that GPT-5.2 failed in all five full
+# TB 2.0 runs (Jan-Feb 2026), mostly without timing out. Daytona, full tools,
+# medium effort; settings as planned for E007.
+jobs_dir: /Users/nate/proj/rho-agent/jobs/sol-hard7
+n_attempts: 1
+n_concurrent_trials: 3          # account totals: 10 CPU, 10 GiB memory, 30 GiB disk
+
+# A sandbox refused for the account's memory total fails to start after 600 s;
+# rerun it once others have finished. Refused sandboxes cost nothing.
+retry:
+  max_retries: 3
+  include_exceptions: [EnvironmentStartTimeoutError]
+
+environment:
+  type: daytona
+  delete: true
+
+agents:
+  - import_path: rho_agent.eval.harbor.agent:RhoAgent
+    model_name: openai/gpt-6.1-sol
+    kwargs:
+      install_source: git
+      version: 87bb9ac3b9f4fd332e6207b7018906f67e113f9b   # main after PR #33
+      bash_only: false
+      reasoning_effort: medium
+      enable_confirm_done: true
+      confirm_done_max: 3
+      cost_ceiling_usd: 4.0
+      max_wall_seconds: 0        # use each task's own agent time limit
+      max_call_seconds: 1200
+
+datasets:
+  - name: terminal-bench/terminal-bench-2-1
+    task_names:
+      - terminal-bench/mteb-retrieve              # 2 GB, 30 min
+      - terminal-bench/sam-cell-seg               # 4 GB, 2 h
+      - terminal-bench/dna-insert                 # 4 GB, 30 min
+      - terminal-bench/filter-js-from-html        # 8 GB, 30 min
+      - terminal-bench/regex-chess                # 2 GB, 1 h
+      - terminal-bench/torch-tensor-parallelism   # 8 GB, 15 min
+      - terminal-bench/video-processing           # 2 GB, 1 h

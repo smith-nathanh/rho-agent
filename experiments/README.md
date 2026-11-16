@@ -16,9 +16,10 @@ not happen.
 | [E005](E005-full-terminal-bench-4.1/) | 2026-11-14 (setup check) | Full Terminal-Bench 4.1, Sol, on Daytona | Deferred | 66 planned (+4 setup) | 0.56 so far | Setup check: GPU and DinD work; per-sandbox limits block 8 tasks |
 | [E006](E006-pilot-max-effort/) | 2026-11-13 | Pilot: full tools at max effort, Sol (repeats E004 arm B) | Done | 8 | 11.17 | 2/8 vs 3/8 at medium; 5x cost; same tests fail |
 | [E007](E007-full-terminal-bench-2.1/) | 2026-11-15 (setup check) | Full Terminal-Bench 2.1, Sol, on Daytona | Planned | 89 planned (+2 setup) | 0.10 so far | Setup check: 1 passed; 1 refused by the account's 10 GiB memory total |
+| [E008](E008-sol-on-gpt-5.2-failures/) | 2026-11-15 | Sol on 7 TB 2.1 tasks GPT-5.2 always failed, Daytona | Done | 7 | 0.80 | 4/7 passed; the 3 failures were near misses, no timeouts |
 
-**Spent so far: $22.29** in model calls (E000–E007): $5.39 in March 2026
-(E000) and $16.90 in November (E001–E007). Daytona compute (from E005 on) is
+**Spent so far: $23.08** in model calls (E000–E008): $5.39 in March 2026
+(E000) and $17.69 in November (E001–E008). Daytona compute (from E005 on) is
 billed separately and not included. The machine-readable ledger is
 [`ledger.csv`](ledger.csv).
 

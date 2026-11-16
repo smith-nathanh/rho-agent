@@ -11,3 +11,4 @@ E006,2026-11-13,API check that Sol accepts effort max (1 call),openai/gpt-6.1-so
 E006,2026-11-13,pilot full tools at max effort (8 trials),openai/gpt-6.1-sol,8,11.1697,jobs/pilot-max-effort/2026-11-13__20-18-16/result.json
 E005,2026-11-14,Daytona setup check (4 trials; 2 graded),openai/gpt-6.1-terra,4,0.5595,jobs/daytona-smoke/2026-11-14__10-35-47 trial tokens.json (Daytona compute not included)
 E007,2026-11-15,Daytona setup check TB 2.1 (2 trials; 1 graded),openai/gpt-6.1-terra,2,0.1043,jobs/tb21-smoke/2026-11-15__20-25-55 result.json (Daytona compute not included)
+E008,2026-11-15,Sol on 7 TB 2.1 tasks GPT-5.2 always failed,openai/gpt-6.1-sol,7,0.7973,jobs/sol-hard7/2026-11-15__21-28-41 result.json (Daytona compute not included)
