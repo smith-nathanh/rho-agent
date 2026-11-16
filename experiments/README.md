@@ -50,13 +50,15 @@ billed separately and not included. The machine-readable ledger is
 Job outputs live in `jobs/` in the main checkout, which is not committed. The
 paths are recorded in each experiment so the raw traces can be found.
 
-**Before sharing or uploading traces from runs up to E009:** the agent's
+**API keys in saved traces:** up to smith-nathanh/rho-agent#35, the agent's
 commands could see the model API key (`RHO_AGENT_API_KEY`), and when a
-command printed the environment the key went into the trace. On 2026-11-16 it
-was found in the traces of `jobs/daytona-smoke/2026-11-14__10-35-47`,
-`jobs/pilot-bash-image`, `jobs/pilot-full-tools`, `jobs/pilot-max-effort` and
-`jobs/e007-tb21` (`compile-compcert`). Redact it first. Runs after the fix
-(see the git log for `bash.py`) do not pass the key to commands.
+command printed the environment the key went into the trace. On 2026-11-16
+every key found in `jobs/` and `results/` (16 occurrences, 2 keys) was
+replaced with `REDACTED_API_KEY` and the OpenAI key was rotated; see
+[E007](E007-full-terminal-bench-2.1/#api-key-leak-in-saved-traces-and-its-redaction-2026-11-16).
+Before sharing traces from a new run, run
+[`redact_api_key.py`](E007-full-terminal-bench-2.1/redact_api_key.py) on it
+(it only reports unless given `--write`).
 
 ## Tools
 

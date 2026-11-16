@@ -258,6 +258,71 @@ Setup check: $0.1043. Daytona compute is billed separately and not included:
 89 sandboxes that ran (plus refused starts, which cost nothing), most for a
 few minutes.
 
+## API key leak in saved traces, and its redaction (2026-11-16)
+
+**What leaked.** In `compile-compcert` the agent printed its environment, and
+the output included `RHO_AGENT_API_KEY`, the OpenAI key the run used. Up to
+smith-nathanh/rho-agent#35, commands the agent ran without the OS sandbox (the
+setting for Harbor evals) inherited the runner's whole environment. The key
+went into the trace, the trajectory, and the conversation sent to OpenAI. A
+search of all saved job output found the same leak in earlier runs, plus a
+second key in a January run.
+
+**Actions.**
+- The OpenAI key was rotated on 2026-11-16.
+- smith-nathanh/rho-agent#35 removes the model key from the environment of
+  unsandboxed commands. It is in rho-agent from `4b3f401`; runs must pin
+  that commit or later inside the sandbox.
+- Every key was replaced with `REDACTED_API_KEY` in the saved files by
+  [`redact_api_key.py`](redact_api_key.py). The script finds values that
+  follow a `*_API_KEY` name, then replaces every occurrence of those values.
+  Text files are edited as bytes; SQLite files (`telemetry.db` from older
+  runs) are edited through SQLite and vacuumed. It never prints a key.
+
+The command, from the main checkout, and its output:
+
+```
+python3 -I experiments/E007-full-terminal-bench-2.1/redact_api_key.py jobs results --write
+
+Keys found in 10204 files:
+  csk-fpt... (52 chars, sha256 79b4d2b987c4)
+  sk-proj... (56 chars, sha256 f5a877e186be)
+    1 in jobs/daytona-smoke/2026-11-14__10-35-47/payments-pipeline-fix__EeHX9qY/agent/trace.jsonl
+    1 in jobs/daytona-smoke/2026-11-14__10-35-47/payments-pipeline-fix__EeHX9qY/agent/trajectory.json
+    1 in jobs/e007-tb21/2026-11-15__22-26-05/compile-compcert__SBckeV6/agent/trace.jsonl
+    1 in jobs/e007-tb21/2026-11-15__22-26-05/compile-compcert__SBckeV6/agent/trajectory.json
+    1 in jobs/pilot-bash-image/2026-11-13__17-13-52/payments-pipeline-fix__RJLWHuy/agent/trace.jsonl
+    1 in jobs/pilot-bash-image/2026-11-13__17-13-52/payments-pipeline-fix__RJLWHuy/agent/trajectory.json
+    1 in jobs/pilot-bash-image/2026-11-13__17-13-52/payments-pipeline-fix__TJv5W8F/agent/trace.jsonl
+    1 in jobs/pilot-bash-image/2026-11-13__17-13-52/payments-pipeline-fix__TJv5W8F/agent/trajectory.json
+    1 in jobs/pilot-full-tools/2026-11-13__17-14-12/payments-pipeline-fix__7XTnqii/agent/trace.jsonl
+    1 in jobs/pilot-full-tools/2026-11-13__17-14-12/payments-pipeline-fix__7XTnqii/agent/trajectory.json
+    1 in jobs/pilot-full-tools/2026-11-13__17-14-12/payments-pipeline-fix__qJn8pTt/agent/trace.jsonl
+    1 in jobs/pilot-full-tools/2026-11-13__17-14-12/payments-pipeline-fix__qJn8pTt/agent/trajectory.json
+    1 in jobs/pilot-max-effort/2026-11-13__20-18-16/payments-pipeline-fix__FrAbjPX/agent/trace.jsonl
+    1 in jobs/pilot-max-effort/2026-11-13__20-18-16/payments-pipeline-fix__FrAbjPX/agent/trajectory.json
+    1 in results/gpt-5.2-terminal-bench/2026-02-05__15-31-33/password-recovery__ACekQtg/agent/telemetry.db (SQLite)
+    1 in results/gpt-oss-120b-terminal-bench/2026-01-27__14-55-16/torch-pipeline-parallelism__vkDKqzJ/agent/telemetry.db (SQLite)
+Replaced 16 occurrences in 16 files with REDACTED_API_KEY.
+```
+
+- `sk-proj...` is the OpenAI key used up to 2026-11-16 (rotated).
+- `csk-fpt...` was stored as `OPENAI_API_KEY` in the January `gpt-oss-120b`
+  run; the `csk-` prefix suggests a Cerebras key. It was not rotated as part
+  of this.
+
+**Checks after the run:**
+- The script run again finds no keys in the 10,204 files.
+- The old OpenAI key is in no file under `jobs/` or `results/`.
+- Edited JSON still parses, and both databases pass `PRAGMA integrity_check`
+  (tested on copies before the real run).
+- `experiments/`, `evolve-runs/` and the session scratchpad have no keys.
+
+**Not covered:**
+- Copies sent elsewhere: the conversations sent to OpenAI, and the deleted
+  Daytona sandboxes.
+- `.env` still has the old key as a commented-out line.
+
 ## Open decisions
 
 None. The 2 tasks blocked by the cyber filter stay counted as failures and
@@ -265,9 +330,9 @@ flagged; Daybreak access was not pursued (2026-11-16).
 
 ## Follow-ups
 
-- Done (2026-11-16, on this branch): rho-agent classed the cyber-policy
-  refusal as `transient` and retried it 4 times. It now classes it as
-  `policy_refusal` (error code `cyber_policy`, or the "flagged for possible
-  cybersecurity risk" message) and ends the run on the first refusal. E007
-  ran before this change.
-- Merge smith-nathanh/rho-agent#34 so later runs on bullseye images install.
+- Done (2026-11-16): rho-agent classed the cyber-policy refusal as
+  `transient` and retried it 4 times. It now classes it as `policy_refusal`
+  (error code `cyber_policy`, or the "flagged for possible cybersecurity
+  risk" message) and ends the run on the first refusal
+  (smith-nathanh/rho-agent#32). E007 ran before this change.
+- Done (2026-11-16): smith-nathanh/rho-agent#34 (bullseye installer) merged.
