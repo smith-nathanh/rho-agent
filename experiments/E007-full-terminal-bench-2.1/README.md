@@ -48,8 +48,9 @@ effort, and at what cost per task?
   ([E006](../E006-pilot-max-effort/): max costs about 5 times as much with the
   same failing tests).
 - **Tools:** full tool set ([E004](../E004-pilot-tool-sets/) arm B).
-- **Settings:** completion gate on (`confirm_done_max: 3`), $4 cost cap per
-  task, same system prompt for every task.
+- **Settings:** completion gate on (`confirm_done_max: 3`), reviewer off
+  (decided in [E009](../E009-reviewer-replay/#decision-2026-11-15)), $4 cost
+  cap per task, same system prompt for every task.
 - **Time limits:** the benchmark's own per-task agent limits (900–12,000 s).
   rho-agent's `max_wall_seconds` is one value for the whole job, so it is
   turned off (0) and Harbor's limit applies. Harbor grades a trial that hits

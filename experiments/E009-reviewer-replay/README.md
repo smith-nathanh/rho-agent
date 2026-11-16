@@ -97,6 +97,14 @@ What it shows:
   written after seeing them, this is not evidence for or against a reviewer in
   general.
 
+## Decision (2026-11-15)
+
+The reviewer stays off (`enable_reviewer: false`) for E007 and later runs. The
+completion gate stays on. Reason: on these traces the current prompt approves
+nearly everything, and making it more skeptical added false alarms without
+catching the failures that only running an alternative would expose. The
+held-out replay below was not run.
+
 ## Cost
 
 $0.3870 in model calls (42 calls; 355K input and 12.6K output tokens), summed
