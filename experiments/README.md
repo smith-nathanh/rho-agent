@@ -13,11 +13,12 @@ not happen.
 | [E002](E002-smoke-model-client/) | 2026-11-13 | Smoke test, Sol, ModelClient with reasoning carried | Done | 1 | 0.50 | Failed (one XSS case) |
 | [E003](E003-openrouter-api-checks/) | 2026-11-13 | Live API checks: OpenRouter reasoning replay, cost reporting | Done | 9 API calls | 0.003 | Reasoning replay and cost both work |
 | [E004](E004-pilot-tool-sets/) | 2026-11-13 | Pilot: bash + images vs full tool set, Sol | Done | 16 | 4.36 | Same cost; full tools 35% more calls; pass 3/8 vs 1/8 (not significant) |
-| [E005](E005-full-terminal-bench-4.1/) | 2026-11-14 (setup check) | Full Terminal-Bench 4.1, Sol, on Daytona | Planned | 66 planned (+4 setup) | 0.56 so far | Setup check: GPU and DinD work; per-sandbox limits block 8 tasks |
+| [E005](E005-full-terminal-bench-4.1/) | 2026-11-14 (setup check) | Full Terminal-Bench 4.1, Sol, on Daytona | Deferred | 66 planned (+4 setup) | 0.56 so far | Setup check: GPU and DinD work; per-sandbox limits block 8 tasks |
 | [E006](E006-pilot-max-effort/) | 2026-11-13 | Pilot: full tools at max effort, Sol (repeats E004 arm B) | Done | 8 | 11.17 | 2/8 vs 3/8 at medium; 5x cost; same tests fail |
+| [E007](E007-full-terminal-bench-2.1/) | 2026-11-15 (setup check) | Full Terminal-Bench 2.1, Sol, on Daytona | Planned | 89 planned (+2 setup) | 0.10 so far | Setup check: 1 passed; 1 refused by the account's 10 GiB memory total |
 
-**Spent so far: $22.18** in model calls (E000–E006): $5.39 in March 2026
-(E000) and $16.79 in November (E001–E006). Daytona compute (from E005 on) is
+**Spent so far: $22.29** in model calls (E000–E007): $5.39 in March 2026
+(E000) and $16.90 in November (E001–E007). Daytona compute (from E005 on) is
 billed separately and not included. The machine-readable ledger is
 [`ledger.csv`](ledger.csv).
 

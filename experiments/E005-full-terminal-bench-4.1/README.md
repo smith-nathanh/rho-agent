@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Planned; Daytona limits to settle (see [Setup check](#setup-check-daytona-smoke-test-2026-11-14)) |
+| Status | Deferred: Daytona limits. Terminal-Bench 2.1 runs first as [E007](../E007-full-terminal-bench-2.1/) |
 | rho-agent commit | `87bb9ac3b9f4fd332e6207b7018906f67e113f9b` planned (`main` after smith-nathanh/rho-agent#33) |
 | Harbor version | 0.25.0; Daytona SDK 0.231.1 |
 | Dataset | `terminal-bench/terminal-bench` 4.1.0, all 66 tasks |
@@ -112,7 +112,7 @@ main checkout.
 | `math-eval-grader` | GPU task (H100) | Ran end to end: sandbox up in 33 s, agent ran to its 20-minute cap, graded (reward 0). $0.27 |
 | `payments-pipeline-fix` | multi-container (DinD) | Agent ran 10 minutes in the DinD sandbox ($0.29); grading failed: verifier sandbox asks for 8 CPUs, limit 4 |
 | `jax-speedrun-gpu` | largest GPU task | Sandbox refused: 1,000 GB disk requested, limit 512 GB. No cost |
-| `html-js-filter` | plain single-container task | Sandbox did not start within Harbor's 600 s; cause not identified (possibly account-wide limits with the other sandboxes running) |
+| `html-js-filter` | plain single-container task | Sandbox did not start within Harbor's 600 s. Cause, found in E007: the account's total memory limit (10 GiB) with the other sandboxes running |
 
 What it shows:
 
