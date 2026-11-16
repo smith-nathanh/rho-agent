@@ -27,8 +27,7 @@ PROMPTS = {
     "v1": (runner._REVIEWER_PROMPT, runner._REVIEWER_SYSTEM),
     "v2": (
         HERE / "prompts" / "eval_reviewer_v2.md",
-        "You review whether an AI agent's work on a task will pass grading. "
-        "Be concise and direct.",
+        "You review whether an AI agent's work on a task will pass grading. Be concise and direct.",
     ),
 }
 

@@ -7,6 +7,20 @@ rho-agent runs AI agents that read code, run commands and edit files, each under
 
 ![An interactive session: the agent finds a bug behind two failing tests, fixes it and reruns the tests](docs/demo/cli.gif)
 
+## Benchmark results
+
+| Benchmark | Model | Score | Model cost |
+|---|---|---|---|
+| [Terminal-Bench 2.1](https://tbench.ai/leaderboard/terminal-bench/2.1), all 89 tasks | GPT-6.1 Sol, medium reasoning effort | **79 / 89 (88.8%)** | $10.23 |
+
+This is a single eval run (November 2026): one attempt per task, so the score
+has a standard error of about 3 points. It is not an official leaderboard
+submission, which needs at least 5 attempts per task. The run used Harbor on
+Daytona with each task's own time limit, rho-agent's full tool set and a $4
+cost cap per task; no task timed out. Two of the 10 failures were requests
+that OpenAI's cybersecurity filter refused, and they count as failures.
+Design, per-task results and costs: [experiment E007](experiments/E007-full-terminal-bench-2.1/).
+
 ## Install
 
 You need Python 3.11 or newer, [uv](https://docs.astral.sh/uv/), and an API key from a model provider that offers an OpenAI-compatible API: OpenAI, OpenRouter, xAI, Groq, DeepSeek and many others. A server you run yourself (vLLM, Ollama) works too. rho-agent is not on PyPI yet, so install it from GitHub.

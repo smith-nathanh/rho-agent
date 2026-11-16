@@ -20,7 +20,8 @@ PY_SCRIPT = re.compile(r"python3?\s+-\s*<<|python3?\s+-c")
 PY_WRITES = re.compile(r"write_text|\.write\(|open\([^)]*['\"][wa]")
 BASH_READ = {
     "sed -n / head / tail slice": re.compile(
-        r"sed\s+-n\s+['\"]?\d+,\d+p|head\s+-n?\s*\d+|head\s+-c|tail\s+-n?\s*\d+|nl\s+-ba.*\|\s*sed"),
+        r"sed\s+-n\s+['\"]?\d+,\d+p|head\s+-n?\s*\d+|head\s+-c|tail\s+-n?\s*\d+|nl\s+-ba.*\|\s*sed"
+    ),
     "find / ls": re.compile(r"(^|[;&|]\s*)(find|ls|tree)\b"),
     "cat of a whole file": re.compile(r"(^|[;&|]\s*)cat\s+(?![>|<])[^>|<]*\S"),
     "grep / rg": re.compile(r"(^|[;&|]\s*)(grep|rg)\b"),
@@ -38,7 +39,7 @@ def trials(job):
 
 def tool_calls(trial):
     calls, out = {}, {}
-    for line in open(trial / "agent" / "trace.jsonl"):
+    for line in (trial / "agent" / "trace.jsonl").read_text().splitlines():
         e = json.loads(line)
         if e.get("type") == "tool_start":
             calls[e["tool_call_id"]] = (e["tool_name"], e.get("tool_args") or {})
@@ -68,11 +69,11 @@ def report(job):
                 read[label] += bool(pat.search(cmd))
             for label, pat in BASH_EDIT.items():
                 edit[label] += bool(pat.search(cmd))
-        t = json.load(open(trial / "agent" / "tokens.json"))
+        t = json.loads((trial / "agent" / "tokens.json").read_text())
         tokens["uncached"] += t["input"] - t["cached"]
         tokens["cached"] += t["cached"]
         tokens["output"] += t["output"]
-        tests = json.load(open(trial / "verifier" / "ctrf.json"))["results"]["tests"]
+        tests = json.loads((trial / "verifier" / "ctrf.json").read_text())["results"]["tests"]
         failed = sorted(x["name"].split("::")[-1] for x in tests if x["status"] != "passed")
         print(f"  {trial.name:34} passed {len(tests) - len(failed)}/{len(tests)}  failed: {failed}")
 
