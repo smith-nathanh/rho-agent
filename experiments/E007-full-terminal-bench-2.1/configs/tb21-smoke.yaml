@@ -1,0 +1,30 @@
+# Daytona smoke test before E007 (Terminal-Bench 2.1). GPT-6.1 Terra, full tools,
+# medium effort. Two tasks: the one whose sandbox failed to start in the E005
+# check (TB 2 version), and the largest resource request in TB 2.1 (4 CPU, 8 GB).
+jobs_dir: /Users/nate/proj/rho-agent/jobs/tb21-smoke
+n_attempts: 1
+n_concurrent_trials: 2
+
+environment:
+  type: daytona
+  delete: true
+
+agents:
+  - import_path: rho_agent.eval.harbor.agent:RhoAgent
+    model_name: openai/gpt-6.1-terra
+    kwargs:
+      install_source: git
+      version: 87bb9ac3b9f4fd332e6207b7018906f67e113f9b   # main after PR #33
+      bash_only: false
+      reasoning_effort: medium
+      enable_confirm_done: true
+      confirm_done_max: 3
+      cost_ceiling_usd: 1.0
+      max_wall_seconds: 1200
+      max_call_seconds: 600
+
+datasets:
+  - name: terminal-bench/terminal-bench-2-1
+    task_names:
+      - terminal-bench/filter-js-from-html   # 1 CPU, 8 GB; agent limit 30 min
+      - terminal-bench/rstan-to-pystan       # 4 CPU, 8 GB; agent limit 30 min

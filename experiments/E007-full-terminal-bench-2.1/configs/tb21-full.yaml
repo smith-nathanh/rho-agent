@@ -1,0 +1,46 @@
+# E007: rho-agent on all 89 Terminal-Bench 2.1 tasks, GPT-6.1 Sol, Daytona.
+# Settings as in E008: medium effort, full tools, completion gate on, reviewer
+# off (E009), $4 cap per task, each task's own agent time limit.
+#
+# Run from the main checkout, inside tmux so it survives the terminal closing:
+#   tmux new -s e007
+#   caffeinate -is uv run --env-file .env harbor run --config <this file>
+# If it stops, rerun only unfinished trials:
+#   uv run --env-file .env harbor job resume -p jobs/e007-tb21/<timestamp>
+jobs_dir: /Users/nate/proj/rho-agent/jobs/e007-tb21
+n_attempts: 1
+
+# Daytona account totals (2026-11-15): 10 CPUs, 10 GiB memory, 30 GiB disk.
+# Every task asks for 10 GB of disk, so at most 3 sandboxes fit at once.
+n_concurrent_trials: 3
+
+# When the 4 and 8 GB tasks overlap, Daytona refuses the sandbox for the memory
+# total and the trial fails to start after 600 s. Refusals cost nothing; retry
+# them once other trials have finished. Agent timeouts are not retried.
+retry:
+  max_retries: 10
+  include_exceptions: [EnvironmentStartTimeoutError]
+  min_wait_sec: 60
+  max_wait_sec: 300
+
+environment:
+  type: daytona
+  delete: true
+
+agents:
+  - import_path: rho_agent.eval.harbor.agent:RhoAgent
+    model_name: openai/gpt-6.1-sol
+    kwargs:
+      install_source: git
+      version: 87bb9ac3b9f4fd332e6207b7018906f67e113f9b   # main after PR #33
+      bash_only: false
+      reasoning_effort: medium
+      enable_confirm_done: true
+      confirm_done_max: 3
+      cost_ceiling_usd: 4.0
+      max_wall_seconds: 0        # use each task's own agent time limit
+      max_call_seconds: 1200
+
+datasets:
+  - name: terminal-bench/terminal-bench-2-1
+    ref: "sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a"

@@ -1,0 +1,32 @@
+# Daytona smoke test before E005. GPT-6.1 Terra, full tools, medium effort.
+# Covers a plain task, a multi-container task and both kinds of GPU task.
+jobs_dir: /Users/nate/proj/rho-agent/jobs/daytona-smoke
+n_attempts: 1
+n_concurrent_trials: 4
+
+environment:
+  type: daytona
+  delete: true
+
+agents:
+  - import_path: rho_agent.eval.harbor.agent:RhoAgent
+    model_name: openai/gpt-6.1-terra
+    kwargs:
+      install_source: git
+      version: 87bb9ac3b9f4fd332e6207b7018906f67e113f9b   # main after PR #33
+      bash_only: false
+      reasoning_effort: medium
+      enable_confirm_done: true
+      confirm_done_max: 3
+      cost_ceiling_usd: 1.0
+      max_wall_seconds: 1200
+      max_call_seconds: 600
+
+datasets:
+  - name: terminal-bench/terminal-bench
+    version: "4.1.0"
+    task_names:
+      - terminal-bench/html-js-filter          # single container, CPU
+      - terminal-bench/payments-pipeline-fix   # multi-container (docker compose)
+      - terminal-bench/math-eval-grader        # 1 H100, 8 CPU, 16 GB
+      - terminal-bench/jax-speedrun-gpu        # 1 H100, 16 CPU, 32 GB, 1 TB disk

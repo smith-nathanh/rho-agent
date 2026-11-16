@@ -1,0 +1,17 @@
+id,date,description,model,trials,cost_usd,source
+E000,2026-03-17,hello-world check (2 runs),openai/gpt-5.2,2,0.0137,jobs/rho-agent-terminal-bench/2026-03-17__16-36-06 and __16-40-40 result.json
+E000,2026-03-17,Terminal-Bench 2.0 sample bash only,openai/gpt-5.4,8,5.3759,jobs/rho-agent-terminal-bench/2026-03-17__16-51-13 result.json
+E001,2026-11-11,smoke html-js-filter (LiteLLM client),openai/gpt-6.1-sol,1,0.2037,jobs/rho-agent-smoke/2026-11-11__16-05-40/result.json
+E002,2026-11-13,smoke html-js-filter (ModelClient),openai/gpt-6.1-sol,1,0.5010,jobs/rho-agent-smoke/2026-11-13__16-09-16/result.json
+E003,2026-11-13,OpenRouter reasoning replay test (7 calls),openai/gpt-6.1-sol via OpenRouter,7,0.0027,usage.cost reported by OpenRouter
+E003,2026-11-13,live cost check (OpenRouter + OpenAI),openai/gpt-6.1-sol,2,0.0002,usage.cost and built-in price table
+E004,2026-11-13,pilot arm A bash + images (8 trials),openai/gpt-6.1-sol,8,2.1493,jobs/pilot-bash-image/2026-11-13__17-13-52/result.json
+E004,2026-11-13,pilot arm B full tools (8 trials),openai/gpt-6.1-sol,8,2.2060,jobs/pilot-full-tools/2026-11-13__17-14-12/result.json
+E006,2026-11-13,API check that Sol accepts effort max (1 call),openai/gpt-6.1-sol,1,0.0003,usage and built-in price table
+E006,2026-11-13,pilot full tools at max effort (8 trials),openai/gpt-6.1-sol,8,11.1697,jobs/pilot-max-effort/2026-11-13__20-18-16/result.json
+E005,2026-11-14,Daytona setup check (4 trials; 2 graded),openai/gpt-6.1-terra,4,0.5595,jobs/daytona-smoke/2026-11-14__10-35-47 trial tokens.json (Daytona compute not included)
+E007,2026-11-15,Daytona setup check TB 2.1 (2 trials; 1 graded),openai/gpt-6.1-terra,2,0.1043,jobs/tb21-smoke/2026-11-15__20-25-55 result.json (Daytona compute not included)
+E008,2026-11-15,Sol on 7 TB 2.1 tasks GPT-5.2 always failed,openai/gpt-6.1-sol,7,0.7973,jobs/sol-hard7/2026-11-15__21-28-41 result.json (Daytona compute not included)
+E009,2026-11-15,Reviewer replay on E008 traces (v1 and v2 prompts x 3 samples),openai/gpt-6.1-sol,42,0.3870,experiments/E009-reviewer-replay/reviews.jsonl cost_usd
+E007,2026-11-16,Full Terminal-Bench 2.1 (89 trials; 86 ran),openai/gpt-6.1-sol,89,9.8647,jobs/e007-tb21/2026-11-15__22-26-05 trial result.json agent_result.cost_usd (Daytona compute not included)
+E007,2026-11-16,Full Terminal-Bench 2.1: rerun of 3 setup failures in the same job,openai/gpt-6.1-sol,3,0.3609,jobs/e007-tb21/2026-11-15__22-26-05 trial result.json agent_result.cost_usd for gpt2-codegolf qemu-startup qemu-alpine-ssh (Daytona compute not included)
