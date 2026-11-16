@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ...client.model import API_KEY_ENV
 from ...core.truncate import APPROX_BYTES_PER_TOKEN, MAX_OUTPUT_TOKENS
 from ..base import ToolHandler, ToolInvocation, ToolOutput
 from .paths import sandbox_for
@@ -23,6 +24,16 @@ if TYPE_CHECKING:
 MAX_INLINE_OUTPUT_TOKENS = MAX_OUTPUT_TOKENS - 500
 
 DEFAULT_TIMEOUT = 300  # seconds
+
+# rho-agent's own model key. Commands never need it, and one that prints the
+# environment (``env``, ``printenv``) would copy it into the transcript and
+# the saved trace. Sandboxed commands lose it through the sandbox's scrub list.
+_HIDDEN_ENV = frozenset({API_KEY_ENV})
+
+
+def unsandboxed_env() -> dict[str, str]:
+    """Environment for a command run without the OS sandbox."""
+    return {name: value for name, value in os.environ.items() if name not in _HIDDEN_ENV}
 
 
 class BashHandler(ToolHandler):
@@ -230,7 +241,7 @@ class BashHandler(ToolHandler):
             "start_new_session": True,
         }
         if sandbox is None:
-            return await asyncio.create_subprocess_shell(command, **common)
+            return await asyncio.create_subprocess_shell(command, env=unsandboxed_env(), **common)
         argv = sandbox.wrap(["/bin/sh", "-c", command])
         return await asyncio.create_subprocess_exec(*argv, env=sandbox.env(), **common)
 

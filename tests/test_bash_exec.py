@@ -33,6 +33,40 @@ async def test_stdout_and_stderr_are_captured_in_order(tmp_path: Path) -> None:
     assert out.success is False
 
 
+async def test_model_api_key_is_hidden_from_commands(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("RHO_AGENT_API_KEY", "sk-test-hidden")
+    monkeypatch.setenv("RHO_TEST_VISIBLE", "still-here")
+    handler = BashHandler(working_dir=str(tmp_path))
+
+    for arguments in (
+        {"command": "env"},
+        {"command": "printenv RHO_AGENT_API_KEY; echo rc=$?"},
+    ):
+        out, body = await _run(handler, **arguments)
+        assert "sk-test-hidden" not in out.content
+    assert "rc=1" in body["output"]
+
+    # Other variables, and the agent's own process, are unchanged.
+    out, body = await _run(handler, command="printenv RHO_TEST_VISIBLE")
+    assert body["output"] == "still-here\n"
+    assert os.environ["RHO_AGENT_API_KEY"] == "sk-test-hidden"
+
+
+async def test_model_api_key_is_hidden_from_background_jobs(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("RHO_AGENT_API_KEY", "sk-test-hidden")
+    handler = BashHandler(working_dir=str(tmp_path))
+    out_file = tmp_path / "env.txt"
+
+    await _run(handler, command=f"env > {out_file}", run_in_background=True)
+    for _ in range(50):
+        if out_file.exists() and out_file.read_text():
+            break
+        await asyncio.sleep(0.1)
+
+    assert "PATH=" in out_file.read_text()
+    assert "sk-test-hidden" not in out_file.read_text()
+
+
 async def test_timeout_kills_child_processes(tmp_path: Path) -> None:
     handler = BashHandler(working_dir=str(tmp_path))
     pidfile = tmp_path / "child.pid"
