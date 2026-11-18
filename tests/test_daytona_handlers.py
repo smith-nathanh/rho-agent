@@ -183,11 +183,9 @@ class TestSandboxManager:
         assert mgr._uv_version is None
 
     def test_from_backend_passes_resources_through(self):
-        from daytona.v2 import Resources
-
         from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
 
-        resources = Resources(cpu=2, memory=4, disk=10)
+        resources = SimpleNamespace(cpu=2, memory=4, disk=10)  # a daytona.v2.Resources
         mgr = SandboxManager.from_backend(DaytonaBackend(resources=resources))
         assert mgr._resources is resources
 

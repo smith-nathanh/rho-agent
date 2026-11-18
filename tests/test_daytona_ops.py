@@ -11,6 +11,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+pytest.importorskip("daytona", reason="daytona extra not installed")
+
 from daytona.v2 import DISABLED
 
 from rho_agent.tools.handlers.daytona.backend import (
