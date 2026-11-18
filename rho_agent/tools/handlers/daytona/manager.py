@@ -14,8 +14,9 @@ from typing import TYPE_CHECKING, Any, ClassVar
 if TYPE_CHECKING:
     from .backend import DaytonaBackend
 
-# Seconds to wait for an image pull or build.
+# Seconds to wait for an image pull or build, and for a sandbox to start.
 _BUILD_TIMEOUT = 1800.0
+_START_TIMEOUT = 300.0
 # Daytona v2 always applies a wall-clock limit to a sandbox; a session's
 # sandbox is deleted after this long even if close() never runs.
 _SANDBOX_MAX_SECONDS = 24 * 3600
@@ -45,8 +46,10 @@ class SandboxManager:
         self._resources = resources
         self._idle_timeout_minutes = idle_timeout_minutes
         self._api_config = api_config
-        self._sandbox = None
+        self._sandbox = None  # set once the sandbox is ready for tools
+        self._starting = None  # a sandbox created but not yet ready
         self._client = None
+        self._home: str | None = None
         self._lock = asyncio.Lock()
 
     @property
@@ -62,6 +65,23 @@ class SandboxManager:
         if path.startswith(("/", "~")):
             return path
         return posixpath.normpath(posixpath.join(self._working_dir, path))
+
+    async def absolute_path(self, path: str) -> str:
+        """Like :meth:`resolve_path`, with ``~`` expanded to the sandbox user's home.
+
+        Daytona v2's file API takes absolute paths only, and a quoted ``~`` is
+        not expanded by the shell either.
+        """
+        path = self.resolve_path(path)
+        if path != "~" and not path.startswith("~/"):
+            return path
+        if self._home is None:
+            from .ops import run
+
+            sandbox = await self.get_sandbox()
+            result = await run(sandbox, 'printf %s "$HOME"', timeout=30)
+            self._home = result.output.strip() or "/"
+        return posixpath.normpath(self._home + path[1:])
 
     @property
     def env_vars(self) -> dict[str, str]:
@@ -87,24 +107,23 @@ class SandboxManager:
                 self._client = AsyncDaytona()
             v2 = self._client.v2
 
-            sandbox = await v2.create(
+            # Return as soon as the create is accepted and record the sandbox,
+            # so close() deletes it even if this call is cancelled while it boots.
+            self._starting = await v2.create(
                 await self._resolve_image(v2),
                 env=self._env_vars or None,
                 resources=self._resources,
                 lifecycle_policy=self._lifecycle_policy(),
                 labels={"created-by": "rho-agent"},
-                wait_seconds=120,
+                wait_seconds=0,
             )
-            state = getattr(sandbox.state, "value", sandbox.state)
-            if state != "started":
-                try:
-                    await sandbox.delete()
-                finally:
-                    raise RuntimeError(
-                        f"Daytona sandbox {sandbox.id} did not start (state: {state})"
-                    )
+            sandbox = self._starting
+            try:
+                await sandbox.wait(until="started", timeout=_START_TIMEOUT)
+            except Exception:
+                await self.close()
+                raise
             await prefer_image_git(sandbox)
-            self._sandbox = sandbox
 
             # Ensure uv is available (an image may not ship it)
             check = await run(sandbox, "which uv 2>/dev/null", timeout=10)
@@ -117,7 +136,9 @@ class SandboxManager:
                     timeout=60,
                 )
 
-            return self._sandbox
+            # Publish only now: get_sandbox() returns _sandbox without the lock.
+            self._sandbox, self._starting = sandbox, None
+            return sandbox
 
     async def _resolve_image(self, v2: Any) -> str:
         """Return the v2 image (name or id) to boot, pulling or building it if needed."""
@@ -145,20 +166,27 @@ class SandboxManager:
 
     def _lifecycle_policy(self) -> dict[str, Any]:
         """Wall-clock limit for the sandbox, plus the idle timeout when one is set."""
+        from daytona.v2 import DISABLED
+
         policy: dict[str, Any] = {"timeout_seconds": _SANDBOX_MAX_SECONDS, "on_timeout": "delete"}
         if self._idle_timeout_minutes > 0:
             policy["idle_expiry_seconds"] = self._idle_timeout_minutes * 60
             policy["on_idle_timeout"] = "delete"
+        else:
+            # Explicitly off: an omitted idle timeout inherits the project default.
+            policy["idle_expiry_seconds"] = DISABLED
         return policy
 
     async def close(self) -> None:
         """Delete the sandbox and close the client."""
-        if self._sandbox is not None:
+        sandbox = self._sandbox or self._starting
+        self._sandbox = self._starting = None
+        self._home = None
+        if sandbox is not None:
             try:
-                await self._sandbox.delete()
+                await sandbox.delete()
             except Exception:
                 pass  # Best-effort cleanup
-            self._sandbox = None
 
         if self._client is not None:
             try:

@@ -40,8 +40,12 @@ async def upload_to_sandbox(
 
     console.print(_markup("Creating sandbox...", THEME.muted))
     sandbox = await session.get_sandbox()
+    manager = session.agent.sandbox_manager
 
     for src_str, dest in mappings:
+        # Relative destinations are under the sandbox working directory; the
+        # v2 file API takes absolute paths only.
+        dest = await manager.absolute_path(dest)
         src = Path(src_str).expanduser().resolve()
         if not src.exists():
             console.print(_markup(f"Upload source not found: {src}", THEME.error))

@@ -6,10 +6,12 @@ The live tests in test_daytona_live.py check the service itself.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from daytona.v2 import DISABLED
 
 from rho_agent.tools.handlers.daytona.backend import (
     DaytonaBackend,
@@ -39,6 +41,7 @@ def _sandbox():
     sandbox.state = "started"
     sandbox.process.run = AsyncMock(return_value=_process_result(output="hi\n"))
     sandbox.fs.write_many = AsyncMock()
+    sandbox.wait = AsyncMock()
     sandbox.delete = AsyncMock()
     return sandbox
 
@@ -59,6 +62,17 @@ class TestRun:
     def test_unknown_end_is_minus_one(self):
         assert exit_code_of(_process_result(exit_code=None, reason="killed")) == -1
 
+    @pytest.mark.parametrize("name", ["SIGKILL", "KILL", "kill"])
+    def test_killed_by_signal_is_128_plus_n(self, name):
+        result = _process_result(exit_code=None, reason="signaled")
+        result.signal = name
+        assert exit_code_of(result) == 137
+
+    def test_unknown_signal_is_minus_one(self):
+        result = _process_result(exit_code=None, reason="signaled")
+        result.signal = "SIGNOPE"
+        assert exit_code_of(result) == -1
+
     def test_output_preferred_over_streams(self):
         assert combined_output(_process_result(output="both", stdout="o", stderr="e")) == "both"
 
@@ -72,6 +86,12 @@ class TestRun:
         sandbox.process.run.assert_awaited_once_with(
             "echo hi", cwd="/w", env={"A": "1"}, execution_timeout=10.0, timeout=40.0
         )
+
+    async def test_run_without_kill_only_bounds_the_wait(self):
+        sandbox = _sandbox()
+        await run(sandbox, "sleep 600 &", timeout=10, kill_on_timeout=False)
+        kwargs = sandbox.process.run.await_args.kwargs
+        assert kwargs["execution_timeout"] is None and kwargs["timeout"] == 40.0
 
     async def test_run_without_timeout_waits_unbounded(self):
         sandbox = _sandbox()
@@ -153,7 +173,10 @@ class TestSandboxManager:
         assert args == ("img_pulled",)
         assert kwargs["env"]["PATH"].startswith("/home/daytona/.local/bin")
         assert kwargs["lifecycle_policy"]["on_timeout"] == "delete"
-        assert "idle_expiry_seconds" not in kwargs["lifecycle_policy"]
+        # Off explicitly, so a project default idle timeout does not apply.
+        assert kwargs["lifecycle_policy"]["idle_expiry_seconds"] == DISABLED
+        assert kwargs["wait_seconds"] == 0
+        sandbox.wait.assert_awaited_once()
         assert sandbox is fake_v2.create.return_value
 
     async def test_registered_image_boots_without_pull(self, fake_v2):
@@ -190,9 +213,22 @@ class TestSandboxManager:
 
     async def test_sandbox_that_did_not_start_is_deleted(self, fake_v2):
         sandbox = fake_v2.create.return_value
-        sandbox.state = "error"
-        with pytest.raises(RuntimeError, match="did not start"):
-            await SandboxManager().get_sandbox()
+        sandbox.wait.side_effect = RuntimeError("sandbox entered state error")
+        mgr = SandboxManager()
+        with pytest.raises(RuntimeError, match="state error"):
+            await mgr.get_sandbox()
+        sandbox.delete.assert_awaited_once()
+        assert mgr._sandbox is None
+
+    async def test_sandbox_is_recorded_while_it_boots(self, fake_v2):
+        # Cancelled mid-boot: close() must still find the sandbox to delete it.
+        sandbox = fake_v2.create.return_value
+        sandbox.wait.side_effect = asyncio.CancelledError
+        mgr = SandboxManager()
+        with pytest.raises(asyncio.CancelledError):
+            await mgr.get_sandbox()
+        assert mgr._sandbox is None  # never handed out before it is ready
+        await mgr.close()
         sandbox.delete.assert_awaited_once()
 
     async def test_unready_image_raises(self, fake_v2):
@@ -212,6 +248,16 @@ class TestSandboxManager:
         await SandboxManager(uv_version="0.6.6").get_sandbox()
         install = sandbox.process.run.await_args_list[-1].args[0]
         assert "astral.sh/uv/0.6.6/install.sh" in install
+
+    async def test_absolute_path_expands_home(self, fake_v2):
+        mgr = SandboxManager(working_dir="/w")
+        sandbox = await mgr.get_sandbox()
+        sandbox.process.run = AsyncMock(return_value=_process_result(output="/home/daytona"))
+        assert await mgr.absolute_path("~/a/../b.txt") == "/home/daytona/b.txt"
+        assert await mgr.absolute_path("~") == "/home/daytona"
+        assert await mgr.absolute_path("rel") == "/w/rel"
+        assert await mgr.absolute_path("~user/x") == "~user/x"  # left to the shell
+        sandbox.process.run.assert_awaited_once()  # $HOME looked up once
 
     async def test_close_deletes_sandbox(self, fake_v2):
         mgr = SandboxManager()

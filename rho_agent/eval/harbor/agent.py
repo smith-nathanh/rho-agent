@@ -14,10 +14,12 @@ Example::
 from __future__ import annotations
 
 import json
+import re
 import shlex
 from importlib import metadata
 from pathlib import PurePosixPath
 from typing import Literal, override
+from urllib.parse import quote
 
 from harbor.agents.agent_auth_resolution import (
     ModelConnectionSpec,
@@ -56,6 +58,18 @@ _ARCHIVED_DEBIAN_SECURITY = (
     'http://archive.debian.org/debian-security#g\' "$f";'
     " done; fi; true"
 )
+
+
+_GITHUB_REPO = re.compile(
+    r"^(?:(?:git\+)?https?://(?:www\.)?github\.com/|git@github\.com:|ssh://git@github\.com/)"
+    r"(?P<repo>[\w.-]+/[\w.-]+?)(?:\.git)?/?$"
+)
+
+
+def _github_repo(url: str) -> str | None:
+    """``owner/name`` of a GitHub repository URL (https, ssh or scp-style), else None."""
+    match = _GITHUB_REPO.match(url)
+    return match["repo"] if match else None
 
 
 class RhoAgentOptions(InstalledAgentOptions):
@@ -207,9 +221,10 @@ class RhoAgent(BaseInstalledAgent):
         """
         if self.options.install_source == "git":
             repo = self.options.repo_url
-            if repo.startswith("https://github.com/"):
-                base = repo.removesuffix("/").removesuffix(".git")
-                return f"rho-agent @ {base}/archive/{self._version or 'HEAD'}.tar.gz"
+            github = _github_repo(repo)
+            if github is not None:
+                ref = quote(self._version or "HEAD", safe="/")
+                return f"rho-agent @ https://github.com/{github}/archive/{ref}.tar.gz"
             ref = f"@{self._version}" if self._version else ""
             return f"rho-agent @ git+{repo}{ref}"
         pin = f"=={self._version}" if self._version else ""

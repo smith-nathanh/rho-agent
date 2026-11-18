@@ -55,6 +55,10 @@ SANDBOX_CONFIG_FILE = ".rho-agent.toml"
 _PROMPT_FIELDS = ("access", "working_dir", "backend")
 
 
+# .rho-agent.toml [sandbox] keys from the Daytona v0 backend, and what replaced them.
+_RENAMED_SANDBOX_KEYS = {"snapshot": "registered_image (an image in your Daytona v2 project)"}
+
+
 def _resolve_daytona_config(
     *,
     dockerfile: str | None,
@@ -92,6 +96,12 @@ def _resolve_daytona_config(
         console.print(_markup(f"Loaded {config_path.relative_to(project_root)}", THEME.muted))
 
     sandbox_cfg = toml_config.get("sandbox", {})
+    for old, new in _RENAMED_SANDBOX_KEYS.items():
+        if old in sandbox_cfg:
+            console.print(
+                _markup(f"[sandbox] {old} is no longer supported; use {new}", THEME.error)
+            )
+            raise typer.Exit(1)
 
     # Resolve the image — CLI flags override toml. One of: a registered v2
     # image, a Dockerfile to build, or a registry reference (default).

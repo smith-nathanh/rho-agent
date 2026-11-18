@@ -73,12 +73,20 @@ or `harbor run ... -e rho_agent.eval.harbor.daytona_v2:DaytonaV2Environment`.
 | Supported | Tasks built from a Dockerfile or a `docker_image`; the task's CPU, memory and disk; separate verifier environments; public, no-network and allow-list (hostnames, IPv4) network policies, switched between agent and verifier phases |
 | Not supported | docker-compose (multi-container) tasks, GPUs, Windows, wildcard hostnames in allow lists |
 
+Daytona v2 sizes CPU in cores, and one core is 2 vCPUs. A task's `cpus` are
+vCPUs, so a task asking for 8 gets a 4-core sandbox, which shows 8 CPUs to
+`nproc`. The sandbox is held to the task's CPU, memory and disk (they are set
+as both the request and the limit). The image is pulled or built once per
+content and reused, so `force_build` has no effect.
+
 Each sandbox has a 24-hour wall-clock limit, after which Daytona v2 deletes it.
+It is never stopped for being idle.
 
 Daytona v2 adds its own minimal git as `/usr/local/bin/git` (no
 `git submodule`, among others), ahead of the image's git on `PATH`. When the
-task image has its own git, the environment moves Daytona's to
-`/usr/local/bin/daytona-git` so the task sees the image's git. For the same
+task image has its own git, the environment renames Daytona's to
+`/usr/local/bin/daytona-git` and makes `/usr/local/bin/git` a link to the
+image's git, so tasks and Daytona's git service both use it. For the same
 reason, `install_source: git` installs rho-agent from GitHub's source archive
 of the ref rather than with git.
 

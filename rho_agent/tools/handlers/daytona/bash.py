@@ -168,7 +168,15 @@ class DaytonaBashHandler(ToolHandler):
                 script = build_foreground_script(command, timeout, self._seq)
                 # The sandbox-side `timeout` should fire first; this is a backstop.
                 sdk_timeout = timeout + 30
-            response = await run(sandbox, script, cwd=working_dir, timeout=sdk_timeout)
+            # A background launch returns at once; a server-side deadline would
+            # kill the detached job with the launcher, so only the wait is bounded.
+            response = await run(
+                sandbox,
+                script,
+                cwd=working_dir,
+                timeout=sdk_timeout,
+                kill_on_timeout=not background,
+            )
 
             duration = time.perf_counter() - start_time
             output = response.output or ""

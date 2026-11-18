@@ -565,6 +565,18 @@ class TestRelativePaths:
         assert manager.resolve_path("/etc/hosts") == "/etc/hosts"
         assert manager.resolve_path("~/notes.txt") == "~/notes.txt"
 
+    async def test_home_paths_expand_to_sandbox_home(self, manager, sandbox):
+        async def process_run(command, **kwargs):
+            home = "$HOME" in command
+            return _make_exec_response("/home/daytona" if home else "")
+
+        sandbox.process.run.side_effect = process_run
+        result = await DaytonaWriteHandler(manager).handle(
+            _invocation("write", path="~/notes.txt", content="note\n")
+        )
+        assert result.success is True
+        assert sandbox.fs.write_bytes.call_args.args[0] == "/home/daytona/notes.txt"
+
     async def test_write(self, manager, sandbox):
         result = await DaytonaWriteHandler(manager).handle(
             _invocation("write", path="src/a.py", content="x = 1\n")
@@ -596,3 +608,21 @@ class TestRelativePaths:
         assert "'/workspace/proj/src'" in sandbox.process.run.call_args.args[0]
         await DaytonaGrepHandler(manager).handle(_invocation("grep", pattern="x", path="src"))
         assert any("/workspace/proj/src" in c.args[0] for c in sandbox.process.run.call_args_list)
+
+
+# ---------------------------------------------------------------------------
+# .rho-agent.toml keys from the v0 backend are refused, not ignored
+# ---------------------------------------------------------------------------
+
+
+def test_toml_snapshot_key_is_refused(tmp_path, monkeypatch):
+    import typer
+
+    from rho_agent.cli.main_cmd import _resolve_daytona_config
+
+    (tmp_path / ".rho-agent.toml").write_text('[sandbox]\nsnapshot = "old"\n')
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(typer.Exit):
+        _resolve_daytona_config(
+            dockerfile=None, registered_image=None, upload=None, working_dir=None
+        )

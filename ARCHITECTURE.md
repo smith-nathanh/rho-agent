@@ -433,7 +433,7 @@ Configuration dataclass for sandbox shape:
 class DaytonaBackend:
     config: DaytonaConfig | None = None  # SDK auth (None = DAYTONA_API_KEY)
     image: str | DockerfileImage | RegisteredImage = "daytonaio/sandbox:latest"
-    resources: Resources | None = None   # daytona.v2.Resources: cores, memory GiB, disk GiB
+    resources: Resources | None = None   # daytona.v2.Resources: cores (2 vCPU each), memory GiB, disk GiB
     idle_timeout_minutes: int = 0
     env_vars: dict[str, str] = {}
     uv_version: str | None = None

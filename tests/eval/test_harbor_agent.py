@@ -93,6 +93,23 @@ def test_package_spec_for_pypi_and_git(tmp_path: Path) -> None:
     assert head._package_spec().endswith("/archive/HEAD.tar.gz")
 
 
+@pytest.mark.parametrize(
+    "repo_url",
+    [
+        "https://github.com/smith-nathanh/rho-agent",
+        "https://github.com/smith-nathanh/rho-agent.git/",
+        "http://www.github.com/smith-nathanh/rho-agent",
+        "git@github.com:smith-nathanh/rho-agent.git",
+        "ssh://git@github.com/smith-nathanh/rho-agent.git",
+    ],
+)
+def test_github_urls_use_the_archive(tmp_path: Path, repo_url: str) -> None:
+    agent = _agent(tmp_path, install_source="git", version="feature/x y", repo_url=repo_url)
+    assert agent._package_spec() == (
+        "rho-agent @ https://github.com/smith-nathanh/rho-agent/archive/feature/x%20y.tar.gz"
+    )
+
+
 async def test_install_builds_a_private_virtualenv(tmp_path: Path) -> None:
     env = _FakeEnvironment()
     await _agent(tmp_path, install_source="git", version="main").install(env)

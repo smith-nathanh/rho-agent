@@ -54,7 +54,7 @@ class DaytonaWriteHandler(ToolHandler):
 
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
-        path_str = self._manager.resolve_path(path_str)
+        path_str = await self._manager.absolute_path(path_str)
 
         if not content:
             return ToolOutput(content="No content provided", success=False)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+import tarfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -10,11 +12,16 @@ import pytest
 
 pytest.importorskip("harbor", reason="harbor extra not installed")
 
+from daytona.v2 import DISABLED
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
 
 from rho_agent.eval.harbor import daytona_v2
-from rho_agent.eval.harbor.daytona_v2 import DaytonaV2Environment, network_policy_input
+from rho_agent.eval.harbor.daytona_v2 import (
+    DaytonaV2Environment,
+    network_policy_input,
+    sandbox_shape,
+)
 
 
 def _policy(mode: NetworkMode, hosts: list[str] | None = None) -> NetworkPolicy:
@@ -61,6 +68,7 @@ def fake_v2(monkeypatch):
     sandbox.id = "sbx_1"
     sandbox.state = "started"
     sandbox.process.run = AsyncMock(return_value=_process_result())
+    sandbox.wait = AsyncMock()
     sandbox.delete = AsyncMock()
     v2.create = AsyncMock(return_value=sandbox)
     client = MagicMock()
@@ -134,9 +142,16 @@ class TestDaytonaV2Environment:
         args, kwargs = fake_v2.create.await_args
         assert args == ("img_built",)
         res = kwargs["resources"]
-        assert (res.cpu, res.memory, res.disk) == (8, 16, 20)
+        # 8 vCPUs is 4 Daytona cores; the max limits pin the sandbox to that shape.
+        assert (res.cpu, res.cpu_max) == (4, 4)
+        assert (res.memory, res.memory_max) == (16, 16)
+        assert (res.disk, res.disk_max) == (20, 20)
         assert kwargs["network_policy"] == {"block_all": True}
-        assert kwargs["lifecycle_policy"]["timeout_seconds"] >= 12 * 3600
+        assert kwargs["wait_seconds"] == 0
+        policy = kwargs["lifecycle_policy"]
+        assert policy["timeout_seconds"] >= 12 * 3600
+        assert policy["idle_expiry_seconds"] == DISABLED
+        fake_v2.create.return_value.wait.assert_awaited_once()
 
     async def test_start_pulls_prebuilt_image(self, tmp_path, fake_v2):
         env = _env(tmp_path, docker_image="ghcr.io/example/task:1")
@@ -144,12 +159,49 @@ class TestDaytonaV2Environment:
         assert fake_v2.images.pull.await_args.args[0] == "ghcr.io/example/task:1"
         assert "network_policy" not in fake_v2.create.await_args.kwargs
 
+    def test_shape_rounds_and_defaults(self):
+        res = sandbox_shape(cpus=1, memory_mb=None, storage_mb=None)
+        assert (res.cpu, res.memory, res.disk) == (0.5, 2, 10)
+        assert sandbox_shape(cpus=3, memory_mb=4096, storage_mb=None).cpu == 1.5
+
     async def test_failed_start_deletes_sandbox(self, tmp_path, fake_v2):
-        fake_v2.create.return_value.state = "error"
+        sandbox = fake_v2.create.return_value
+        sandbox.wait.side_effect = RuntimeError("sandbox entered state error")
         env = _env(tmp_path)
-        with pytest.raises(RuntimeError, match="did not start"):
+        with pytest.raises(RuntimeError, match="state error"):
             await env.start(force_build=False)
-        fake_v2.create.return_value.delete.assert_awaited_once()
+        sandbox.delete.assert_awaited_once()
+        assert env._sandbox is None
+
+    async def test_exec_defaults_to_task_workdir(self, tmp_path, fake_v2):
+        env = _env(tmp_path, workdir="/app")
+        await env.start(force_build=False)
+        sandbox = fake_v2.create.return_value
+        await env.exec("ls")
+        assert sandbox.process.run.await_args.kwargs["cwd"] == "/app"
+        await env.exec("ls", cwd="/tmp")
+        assert sandbox.process.run.await_args.kwargs["cwd"] == "/tmp"
+
+    async def test_numeric_user_is_resolved_once(self, tmp_path, fake_v2):
+        env = _env(tmp_path)
+        await env.start(force_build=False)
+        sandbox = fake_v2.create.return_value
+        sandbox.process.run = AsyncMock(
+            side_effect=[_process_result(stdout="agent\n"), _process_result(), _process_result()]
+        )
+        await env.exec("id", user=1000)
+        await env.exec("id", user=1000)
+        calls = sandbox.process.run.await_args_list
+        assert calls[0].args[0].startswith("getent passwd 1000")
+        assert calls[1].kwargs["user"] == calls[2].kwargs["user"] == "agent"
+        assert len(calls) == 3
+
+    async def test_unknown_numeric_user_raises(self, tmp_path, fake_v2):
+        env = _env(tmp_path)
+        await env.start(force_build=False)
+        fake_v2.create.return_value.process.run = AsyncMock(return_value=_process_result())
+        with pytest.raises(RuntimeError, match="UID 4242"):
+            await env.exec("id", user=4242)
 
     async def test_exec_passes_user_env_and_deadline(self, tmp_path, fake_v2):
         env = _env(tmp_path)
@@ -218,6 +270,104 @@ class TestDaytonaV2Environment:
         )
         with pytest.raises(RuntimeError, match="bad"):
             await env.set_network_policy(_policy(NetworkMode.NO_NETWORK))
+
+    async def test_error_of_a_later_revision_is_not_ours(self, tmp_path, fake_v2, monkeypatch):
+        monkeypatch.setattr(daytona_v2.asyncio, "sleep", AsyncMock())
+        env = _env(tmp_path)
+        await env.start(force_build=False)
+        sandbox = fake_v2.create.return_value
+        # Revision 2 is ours; a later revision 3 from elsewhere fails, then applies.
+        pending = SimpleNamespace(
+            etag='"e2"', desired_revision=2, applied_revision=1, error=None, status="pending"
+        )
+        theirs = SimpleNamespace(desired_revision=3, applied_revision=1, error="x", status="x")
+        applied = SimpleNamespace(desired_revision=3, applied_revision=3, error=None)
+        sandbox.get_network_policy = AsyncMock(
+            side_effect=[SimpleNamespace(etag='"e1"'), theirs, applied]
+        )
+        sandbox.update_network_policy = AsyncMock(return_value=pending)
+        await env._apply_network_policy(_policy(NetworkMode.NO_NETWORK))
+        assert sandbox.get_network_policy.await_count == 3
+
+    async def test_policy_not_applied_times_out(self, tmp_path, fake_v2, monkeypatch):
+        monkeypatch.setattr(daytona_v2, "_POLICY_APPLY_SECONDS", -1.0)
+        env = _env(tmp_path)
+        await env.start(force_build=False)
+        sandbox = fake_v2.create.return_value
+        sandbox.get_network_policy = AsyncMock(return_value=SimpleNamespace(etag='"e1"'))
+        sandbox.update_network_policy = AsyncMock(
+            return_value=SimpleNamespace(
+                desired_revision=2, applied_revision=1, error=None, status="pending"
+            )
+        )
+        with pytest.raises(TimeoutError, match="revision 2"):
+            await env.set_network_policy(_policy(NetworkMode.NO_NETWORK))
+
+    async def test_upload_dir_extracts_without_owner(self, tmp_path, fake_v2):
+        env = _env(tmp_path)
+        await env.start(force_build=False)
+        sandbox = fake_v2.create.return_value
+        src = tmp_path / "src"
+        (src / "sub").mkdir(parents=True)
+        (src / "sub" / "a.txt").write_text("hello")
+        uploaded = {}
+
+        async def upload_file(local, remote):
+            with tarfile.open(local) as tar:
+                uploaded[remote] = sorted(tar.getnames())
+
+        sandbox.fs.upload_file = AsyncMock(side_effect=upload_file)
+        sandbox.process.run = AsyncMock(return_value=_process_result())
+
+        await env.upload_dir(src, "/app/data dir")
+
+        ((remote_tar, names),) = uploaded.items()
+        assert "./sub/a.txt" in names
+        commands = [c.args[0] for c in sandbox.process.run.await_args_list]
+        assert any(
+            f"tar --no-same-owner -xzf {remote_tar} -C '/app/data dir'" in c for c in commands
+        )
+        assert commands[-1] == f"rm -f {remote_tar}"
+
+    async def test_download_dir_skips_refused_members(self, tmp_path, fake_v2):
+        env = _env(tmp_path)
+        await env.start(force_build=False)
+        sandbox = fake_v2.create.return_value
+        # What the sandbox would pack: a file, and a symlink out of the directory.
+        packed = tmp_path / "packed.tar.gz"
+        with tarfile.open(packed, "w:gz") as tar:
+            data = b"result"
+            info = tarfile.TarInfo("out/result.txt")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+            link = tarfile.TarInfo("out/passwd")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "/etc/passwd"
+            tar.addfile(link)
+
+        async def download_file(remote, local):
+            Path(local).write_bytes(packed.read_bytes())
+
+        sandbox.fs.download_file = AsyncMock(side_effect=download_file)
+        sandbox.process.run = AsyncMock(return_value=_process_result())
+
+        target = tmp_path / "downloaded"
+        await env.download_dir("/logs", target)
+
+        assert (target / "out" / "result.txt").read_text() == "result"
+        assert not (target / "out" / "passwd").exists()
+        assert sandbox.process.run.await_args.args[0].startswith("rm -f /tmp/harbor-download-")
+
+    async def test_failed_pack_still_cleans_up(self, tmp_path, fake_v2):
+        env = _env(tmp_path)
+        await env.start(force_build=False)
+        sandbox = fake_v2.create.return_value
+        sandbox.process.run = AsyncMock(
+            side_effect=[_process_result(exit_code=2, stderr="no such dir"), _process_result()]
+        )
+        with pytest.raises(RuntimeError):
+            await env.download_dir("/missing", tmp_path / "d")
+        assert sandbox.process.run.await_args.args[0].startswith("rm -f ")
 
     async def test_stop_deletes(self, tmp_path, fake_v2):
         env = _env(tmp_path)
