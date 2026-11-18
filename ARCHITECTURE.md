@@ -431,15 +431,19 @@ Configuration dataclass for sandbox shape:
 ```python
 @dataclass
 class DaytonaBackend:
-    config: DaytonaConfig | None = None  # SDK auth (None = env vars)
-    image: str = "ubuntu:latest"
-    resources: Resources | None = None   # CPU, memory, disk, GPU
-    auto_stop_interval: int = 0
+    config: DaytonaConfig | None = None  # SDK auth (None = DAYTONA_API_KEY)
+    image: str | DockerfileImage | RegisteredImage = "daytonaio/sandbox:latest"
+    resources: Resources | None = None   # daytona.v2.Resources: cores (2 vCPU each), memory GiB, disk GiB
+    idle_timeout_minutes: int = 0
+    env_vars: dict[str, str] = {}
+    uv_version: str | None = None
 ```
 
 ### Handler implementation
 
-Each handler executes via the Daytona SDK's `sandbox.process.exec()` (for shell commands) or `sandbox.fs` (for file upload/download). Tool names and parameter schemas are identical to local handlers — the model sees the same interface.
+Sandboxes run on Daytona v2 through SDK 2.x. Each handler calls the v2 sandbox directly: shell commands through `ops.run()` (a thin wrapper over `sandbox.process.run()` that sets a server-side deadline and normalises the exit code) and files through `sandbox.fs.read_bytes()` / `write_bytes()`. Tool names and parameter schemas are identical to local handlers — the model sees the same interface.
+
+Harbor evals use `rho_agent/eval/harbor/daytona_v2.py`, a Harbor environment on Daytona v2 (SDK 2.x disables Harbor's built-in Daytona environment).
 
 ### CLI
 

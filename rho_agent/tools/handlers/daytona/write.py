@@ -7,6 +7,7 @@ from typing import Any
 from ...base import ToolHandler, ToolInvocation, ToolOutput
 from ._utils import shell_quote
 from .manager import SandboxManager
+from .ops import run
 
 
 class DaytonaWriteHandler(ToolHandler):
@@ -53,7 +54,7 @@ class DaytonaWriteHandler(ToolHandler):
 
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
-        path_str = self._manager.resolve_path(path_str)
+        path_str = await self._manager.absolute_path(path_str)
 
         if not content:
             return ToolOutput(content="No content provided", success=False)
@@ -64,11 +65,11 @@ class DaytonaWriteHandler(ToolHandler):
             # Ensure parent directory exists
             parent = str(_posix_parent(path_str))
             if parent and parent != path_str:
-                await sandbox.process.exec(f"mkdir -p {shell_quote(parent)}", timeout=10)
+                await run(sandbox, f"mkdir -p {shell_quote(parent)}", timeout=10)
 
             # Upload file content
             content_bytes = content.encode("utf-8")
-            await sandbox.fs.upload_file(content_bytes, path_str)
+            await sandbox.fs.write_bytes(path_str, content_bytes)
 
             size = len(content_bytes)
             lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)

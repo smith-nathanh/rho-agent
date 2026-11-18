@@ -9,6 +9,7 @@ from ...base import ToolHandler, ToolInvocation, ToolOutput
 from ..read import BINARY_EXTENSIONS
 from ._utils import shell_quote
 from .manager import SandboxManager
+from .ops import run
 
 DEFAULT_MAX_LINES = 500
 MAX_LINE_LENGTH = 500
@@ -67,7 +68,7 @@ class DaytonaReadHandler(ToolHandler):
 
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
-        path_str = self._manager.resolve_path(path_str)
+        path_str = await self._manager.absolute_path(path_str)
 
         # Check for binary files
         suffix = PurePosixPath(path_str).suffix.lower()
@@ -88,19 +89,20 @@ class DaytonaReadHandler(ToolHandler):
             sandbox = await self._manager.get_sandbox()
 
             # Use sed for line ranges to avoid downloading entire large files
-            response = await sandbox.process.exec(
+            response = await run(
+                sandbox,
                 f"sed -n '{start_line},{end_line}p' {shell_quote(path_str)} && "
                 f"wc -l < {shell_quote(path_str)}",
                 timeout=30,
             )
 
             if response.exit_code != 0:
-                error = response.result or "Unknown error"
+                error = response.output or "Unknown error"
                 if "No such file" in error:
                     return ToolOutput(content=f"File not found: {path_str}", success=False)
                 return ToolOutput(content=f"Error reading file: {error}", success=False)
 
-            output = response.result or ""
+            output = response.output or ""
 
             # The last line of output is the total line count from wc -l
             lines = output.split("\n")

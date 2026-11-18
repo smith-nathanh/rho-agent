@@ -10,6 +10,7 @@ from typing import Any
 from ....core.truncate import APPROX_BYTES_PER_TOKEN, MAX_OUTPUT_TOKENS
 from ...base import ToolHandler, ToolInvocation, ToolOutput
 from .manager import SandboxManager
+from .ops import run
 
 DEFAULT_TIMEOUT = 300
 # Directory in the sandbox for saved command output and background logs.
@@ -167,10 +168,18 @@ class DaytonaBashHandler(ToolHandler):
                 script = build_foreground_script(command, timeout, self._seq)
                 # The sandbox-side `timeout` should fire first; this is a backstop.
                 sdk_timeout = timeout + 30
-            response = await sandbox.process.exec(script, cwd=working_dir, timeout=sdk_timeout)
+            # A background launch returns at once; a server-side deadline would
+            # kill the detached job with the launcher, so only the wait is bounded.
+            response = await run(
+                sandbox,
+                script,
+                cwd=working_dir,
+                timeout=sdk_timeout,
+                kill_on_timeout=not background,
+            )
 
             duration = time.perf_counter() - start_time
-            output = response.result or ""
+            output = response.output or ""
             exit_code = response.exit_code
             metadata["duration_seconds"] = round(duration, 1)
 

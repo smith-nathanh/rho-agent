@@ -50,6 +50,46 @@ harbor run -d terminal-bench/terminal-bench@4.1.0 \
   --ak bash_only=true --ak cost_ceiling_usd=4 --ak max_wall_seconds=27000
 ```
 
+## Running on Daytona v2
+
+Harbor's built-in `daytona` environment uses the Daytona v0 platform, which
+caps each sandbox at 4 vCPU, 8 GiB and 10 GiB: Terminal-Bench 4.1,
+Terminal-Bench-Science and SWE-Marathon all have tasks above that. Daytona v2
+allows up to 16 cores and 32 GiB per sandbox. rho-agent's `daytona` extra
+installs Daytona SDK 2.x, which also disables Harbor's built-in Daytona
+environment, so jobs on Daytona use rho-agent's environment by import path:
+
+```yaml
+environment:
+  import_path: rho_agent.eval.harbor.daytona_v2:DaytonaV2Environment
+  delete: true
+```
+
+or `harbor run ... -e rho_agent.eval.harbor.daytona_v2:DaytonaV2Environment`.
+`DAYTONA_API_KEY` must be a Daytona v2 key that can write sandboxes and images.
+
+| | |
+|---|---|
+| Supported | Tasks built from a Dockerfile or a `docker_image`; the task's CPU, memory and disk; separate verifier environments; public, no-network and allow-list (hostnames, IPv4) network policies, switched between agent and verifier phases |
+| Not supported | docker-compose (multi-container) tasks, GPUs, Windows, wildcard hostnames in allow lists |
+
+Daytona v2 sizes CPU in cores, and one core is 2 vCPUs. A task's `cpus` are
+vCPUs, so a task asking for 8 gets a 4-core sandbox, which shows 8 CPUs to
+`nproc`. The sandbox is held to the task's CPU, memory and disk (they are set
+as both the request and the limit). The image is pulled or built once per
+content and reused, so `force_build` has no effect.
+
+Each sandbox has a 24-hour wall-clock limit, after which Daytona v2 deletes it.
+It is never stopped for being idle.
+
+Daytona v2 adds its own minimal git as `/usr/local/bin/git` (no
+`git submodule`, among others), ahead of the image's git on `PATH`. When the
+task image has its own git, the environment renames Daytona's to
+`/usr/local/bin/daytona-git` and makes `/usr/local/bin/git` a link to the
+image's git, so tasks and Daytona's git service both use it. For the same
+reason, `install_source: git` installs rho-agent from GitHub's source archive
+of the ref rather than with git.
+
 ## Options
 
 Pass as `--ak key=value` or under `kwargs` in a job config.

@@ -7,6 +7,7 @@ from typing import Any
 from ...base import ToolHandler, ToolInvocation, ToolOutput
 from ._utils import shell_quote
 from .manager import SandboxManager
+from .ops import run
 
 DEFAULT_MAX_MATCHES = 100
 DEFAULT_CONTEXT_LINES = 0
@@ -83,7 +84,7 @@ class DaytonaGrepHandler(ToolHandler):
             return ToolOutput(content="No pattern provided", success=False)
         if not path_str:
             return ToolOutput(content="No path provided", success=False)
-        path_str = self._manager.resolve_path(path_str)
+        path_str = await self._manager.absolute_path(path_str)
 
         try:
             sandbox = await self._manager.get_sandbox()
@@ -99,14 +100,14 @@ class DaytonaGrepHandler(ToolHandler):
                 max_matches,
             )
 
-            response = await sandbox.process.exec(cmd, timeout=30)
+            response = await run(sandbox, cmd, timeout=30)
 
             # Both grep and rg return exit code 1 for "no matches"
             if response.exit_code not in (0, 1):
-                error = response.result or "Unknown error"
+                error = response.output or "Unknown error"
                 return ToolOutput(content=f"Search failed: {error}", success=False)
 
-            output = (response.result or "").strip()
+            output = (response.output or "").strip()
             if not output:
                 return ToolOutput(
                     content="No matches found",
@@ -166,7 +167,7 @@ class DaytonaGrepHandler(ToolHandler):
         """Build the search command, preferring rg if available."""
         # Check if rg is available (cached after first call)
         if self._has_rg is None:
-            check = await sandbox.process.exec("which rg 2>/dev/null", timeout=5)
+            check = await run(sandbox, "which rg 2>/dev/null", timeout=5)
             self._has_rg = check.exit_code == 0
         has_rg = self._has_rg
 

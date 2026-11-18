@@ -31,17 +31,21 @@ async def upload_to_sandbox(
     """Upload local files/directories to the Daytona sandbox.
 
     Each mapping is (local_src, remote_dest). Directories are walked recursively.
-    Uses bulk upload_files() to send batches in a single multipart request.
+    Directories go up in bulk writes of _UPLOAD_BATCH_SIZE files.
     """
-    from daytona import FileUpload
+    from rho_agent.tools.handlers.daytona.ops import upload_paths
 
     if not mappings:
         return
 
     console.print(_markup("Creating sandbox...", THEME.muted))
     sandbox = await session.get_sandbox()
+    manager = session.agent.sandbox_manager
 
     for src_str, dest in mappings:
+        # Relative destinations are under the sandbox working directory; the
+        # v2 file API takes absolute paths only.
+        dest = await manager.absolute_path(dest)
         src = Path(src_str).expanduser().resolve()
         if not src.exists():
             console.print(_markup(f"Upload source not found: {src}", THEME.error))
@@ -49,29 +53,21 @@ async def upload_to_sandbox(
 
         if src.is_dir():
             files = [
-                f for f in src.rglob("*")
-                if f.is_file()
-                and not (_UPLOAD_SKIP_DIRS & set(f.relative_to(src).parts))
+                f
+                for f in src.rglob("*")
+                if f.is_file() and not (_UPLOAD_SKIP_DIRS & set(f.relative_to(src).parts))
             ]
             total = len(files)
-            console.print(
-                _markup(f"Uploading {src_str} → {dest} ({total} files)", THEME.accent)
-            )
+            console.print(_markup(f"Uploading {src_str} → {dest} ({total} files)", THEME.accent))
             done = 0
             for i in range(0, total, _UPLOAD_BATCH_SIZE):
                 batch = files[i : i + _UPLOAD_BATCH_SIZE]
-                uploads = [
-                    FileUpload(
-                        source=str(fp),
-                        destination=f"{dest.rstrip('/')}/{fp.relative_to(src)}",
-                    )
-                    for fp in batch
-                ]
-                await sandbox.fs.upload_files(uploads)
-                done += len(batch)
-                console.print(
-                    _markup(f"  {done}/{total} files uploaded", THEME.muted)
+                await upload_paths(
+                    sandbox,
+                    [(fp, f"{dest.rstrip('/')}/{fp.relative_to(src)}") for fp in batch],
                 )
+                done += len(batch)
+                console.print(_markup(f"  {done}/{total} files uploaded", THEME.muted))
         else:
             console.print(_markup(f"Uploading {src_str} → {dest}", THEME.accent))
             await sandbox.fs.upload_file(str(src), dest)
@@ -86,6 +82,8 @@ async def run_setup_commands(
 
     Raises RuntimeError on non-zero exit to fail fast before the agent starts.
     """
+    from rho_agent.tools.handlers.daytona.ops import run
+
     if not commands:
         return
 
@@ -97,13 +95,11 @@ async def run_setup_commands(
 
     for cmd in commands:
         console.print(_markup(f"setup: {cmd}", THEME.accent))
-        resp = await sandbox.process.exec(cmd, cwd=working_dir, env=env)
-        if resp.result:
-            console.print(_markup(resp.result.rstrip(), THEME.muted))
+        resp = await run(sandbox, cmd, cwd=working_dir, env=env)
+        if resp.output:
+            console.print(_markup(resp.output.rstrip(), THEME.muted))
         if resp.exit_code != 0:
-            raise RuntimeError(
-                f"Setup command failed (exit {resp.exit_code}): {cmd}"
-            )
+            raise RuntimeError(f"Setup command failed (exit {resp.exit_code}): {cmd}")
 
 
 async def run_single(
@@ -132,9 +128,7 @@ async def run_single(
 
         # Run setup commands after upload, before agent starts
         if setup_commands:
-            await run_setup_commands(
-                session, setup_commands, session.agent.config.working_dir
-            )
+            await run_setup_commands(session, setup_commands, session.agent.config.working_dir)
 
         status_ctx = None
         start = monotonic()
@@ -235,9 +229,7 @@ async def run_single_with_output(
 
         # Run setup commands after upload, before agent starts
         if setup_commands:
-            await run_setup_commands(
-                session, setup_commands, session.agent.config.working_dir
-            )
+            await run_setup_commands(session, setup_commands, session.agent.config.working_dir)
 
         status_ctx = None
         start = monotonic()

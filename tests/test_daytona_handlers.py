@@ -7,6 +7,7 @@ requiring a real Daytona API key.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -27,19 +28,18 @@ from rho_agent.tools.handlers.daytona.write import DaytonaWriteHandler
 
 
 def _make_exec_response(result: str = "", exit_code: int = 0):
-    """Create a mock ExecuteResponse."""
-    resp = MagicMock()
-    resp.result = result
-    resp.exit_code = exit_code
-    return resp
+    """Create a mock Daytona v2 ProcessResult."""
+    return SimpleNamespace(
+        output=result, stdout=result, stderr="", exit_code=exit_code, reason="exited"
+    )
 
 
 def _make_sandbox():
-    """Create a mock AsyncSandbox with process and fs interfaces."""
+    """Create a mock Daytona v2 AsyncSandbox with process and fs interfaces."""
     sandbox = AsyncMock()
-    sandbox.process.exec = AsyncMock(return_value=_make_exec_response())
-    sandbox.fs.download_file = AsyncMock(return_value=b"")
-    sandbox.fs.upload_file = AsyncMock()
+    sandbox.process.run = AsyncMock(return_value=_make_exec_response())
+    sandbox.fs.read_bytes = AsyncMock(return_value=b"")
+    sandbox.fs.write_bytes = AsyncMock()
     return sandbox
 
 
@@ -72,21 +72,15 @@ class TestDaytonaBackend:
         assert b.config is None
         assert b.image == "daytonaio/sandbox:latest"
         assert b.resources is None
-        assert b.auto_stop_interval == 0
+        assert b.idle_timeout_minutes == 0
         assert b.env_vars == {}
         assert b.uv_version is None
 
-    def test_snapshot_default_none(self):
-        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+    def test_registered_image(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend, RegisteredImage
 
-        b = DaytonaBackend()
-        assert b.snapshot is None
-
-    def test_snapshot_overrides_image(self):
-        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
-
-        b = DaytonaBackend(snapshot="my-env")
-        assert b.snapshot == "my-env"
+        b = DaytonaBackend(image=RegisteredImage("my-env"))
+        assert b.image == RegisteredImage("my-env")
 
     def test_env_vars(self):
         from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
@@ -94,12 +88,11 @@ class TestDaytonaBackend:
         b = DaytonaBackend(env_vars={"MY_KEY": "val"})
         assert b.env_vars == {"MY_KEY": "val"}
 
-    def test_image_accepts_non_string(self):
-        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+    def test_image_accepts_dockerfile(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend, DockerfileImage
 
-        fake_image = MagicMock()
-        b = DaytonaBackend(image=fake_image)
-        assert b.image is fake_image
+        b = DaytonaBackend(image=DockerfileImage("./Dockerfile"))
+        assert b.image.path == "./Dockerfile"
 
     def test_config_serializes_as_daytona_string(self):
         from rho_agent.core.config import AgentConfig
@@ -130,7 +123,7 @@ class TestSandboxManager:
         backend = DaytonaBackend()
         mgr = SandboxManager.from_backend(backend)
         assert mgr._image == "daytonaio/sandbox:latest"
-        assert mgr._auto_stop_interval == 0
+        assert mgr._idle_timeout_minutes == 0
         assert mgr._api_config is None
         # Default PATH is always set
         assert "/home/daytona/.local/bin" in mgr._env_vars["PATH"]
@@ -142,12 +135,12 @@ class TestSandboxManager:
         backend = DaytonaBackend(
             config=fake_config,
             image="python:3.13",
-            auto_stop_interval=60,
+            idle_timeout_minutes=60,
         )
         mgr = SandboxManager.from_backend(backend, working_dir="/work")
         assert mgr._image == "python:3.13"
         assert mgr._working_dir == "/work"
-        assert mgr._auto_stop_interval == 60
+        assert mgr._idle_timeout_minutes == 60
         assert mgr._api_config is fake_config
 
     def test_from_backend_env_vars_override_defaults(self):
@@ -168,27 +161,12 @@ class TestSandboxManager:
         assert "PATH" in mgr._env_vars
         assert mgr._env_vars["MY_VAR"] == "hello"
 
-    def test_from_backend_image_non_string(self):
-        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
+    def test_from_backend_registered_image(self):
+        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend, RegisteredImage
 
-        fake_image = MagicMock()
-        backend = DaytonaBackend(image=fake_image)
+        backend = DaytonaBackend(image=RegisteredImage("my-env"))
         mgr = SandboxManager.from_backend(backend)
-        assert mgr._image is fake_image
-
-    def test_from_backend_snapshot(self):
-        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
-
-        backend = DaytonaBackend(snapshot="my-env")
-        mgr = SandboxManager.from_backend(backend)
-        assert mgr._snapshot == "my-env"
-
-    def test_from_backend_no_snapshot(self):
-        from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
-
-        backend = DaytonaBackend()
-        mgr = SandboxManager.from_backend(backend)
-        assert mgr._snapshot is None
+        assert mgr._image == RegisteredImage("my-env")
 
     def test_from_backend_uv_version(self):
         from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
@@ -204,17 +182,12 @@ class TestSandboxManager:
         mgr = SandboxManager.from_backend(backend)
         assert mgr._uv_version is None
 
-    def test_from_backend_extracts_resources(self):
+    def test_from_backend_passes_resources_through(self):
         from rho_agent.tools.handlers.daytona.backend import DaytonaBackend
 
-        resources = MagicMock()
-        resources.cpu = 2
-        resources.memory = 4
-        resources.disk = 10
-        resources.gpu = None
-        backend = DaytonaBackend(resources=resources)
-        mgr = SandboxManager.from_backend(backend)
-        assert mgr._resources == {"cpu": 2, "memory": 4, "disk": 10}
+        resources = SimpleNamespace(cpu=2, memory=4, disk=10)  # a daytona.v2.Resources
+        mgr = SandboxManager.from_backend(DaytonaBackend(resources=resources))
+        assert mgr._resources is resources
 
     async def test_close_when_no_sandbox(self):
         mgr = SandboxManager()
@@ -232,7 +205,7 @@ class TestDaytonaBashHandler:
         assert h.name == "bash"
 
     async def test_execute_success(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response("hello\n", 0)
+        sandbox.process.run.return_value = _make_exec_response("hello\n", 0)
         h = DaytonaBashHandler(manager)
         result = await h.handle(_invocation("bash", command="echo hello"))
         assert result.success is True
@@ -241,7 +214,7 @@ class TestDaytonaBashHandler:
         assert data["metadata"]["exit_code"] == 0
 
     async def test_execute_failure(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response("not found", 127)
+        sandbox.process.run.return_value = _make_exec_response("not found", 127)
         h = DaytonaBashHandler(manager)
         result = await h.handle(_invocation("bash", command="badcmd"))
         assert result.success is False
@@ -255,21 +228,21 @@ class TestDaytonaBashHandler:
         assert "No command" in result.content
 
     async def test_timeout_error(self, manager, sandbox):
-        sandbox.process.exec.side_effect = Exception("DaytonaTimeoutError: timed out")
+        sandbox.process.run.side_effect = Exception("DaytonaTimeoutError: timed out")
         h = DaytonaBashHandler(manager)
         result = await h.handle(_invocation("bash", command="sleep 999"))
         assert result.success is False
 
     async def test_custom_working_dir(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response("ok", 0)
+        sandbox.process.run.return_value = _make_exec_response("ok", 0)
         h = DaytonaBashHandler(manager)
         await h.handle(_invocation("bash", command="ls", working_dir="/tmp"))
-        (script,), kwargs = sandbox.process.exec.call_args
+        (script,), kwargs = sandbox.process.run.call_args
         assert "bash -c ls" in script
         assert kwargs["cwd"] == "/tmp"
         # The sandbox-side timeout fires first; the SDK timeout is a backstop.
         assert "timeout -k 5 300 " in script
-        assert kwargs["timeout"] == 330
+        assert kwargs["execution_timeout"] == 330
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +257,7 @@ class TestDaytonaReadHandler:
 
     async def test_read_file(self, manager, sandbox):
         # sed output + wc -l output
-        sandbox.process.exec.return_value = _make_exec_response(
+        sandbox.process.run.return_value = _make_exec_response(
             "line one\nline two\nline three\n3", 0
         )
         h = DaytonaReadHandler(manager)
@@ -300,7 +273,7 @@ class TestDaytonaReadHandler:
         assert "binary" in result.content.lower()
 
     async def test_file_not_found(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response(
+        sandbox.process.run.return_value = _make_exec_response(
             "sed: can't read /nope: No such file or directory", 2
         )
         h = DaytonaReadHandler(manager)
@@ -314,7 +287,7 @@ class TestDaytonaReadHandler:
         assert result.success is False
 
     async def test_empty_file_out_of_range_matches_local_behavior(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response("0\n", 0)
+        sandbox.process.run.return_value = _make_exec_response("0\n", 0)
         h = DaytonaReadHandler(manager)
         result = await h.handle(_invocation("read", path="/home/daytona/empty.txt"))
         assert result.success is False
@@ -332,14 +305,14 @@ class TestDaytonaWriteHandler:
         assert h.name == "write"
 
     async def test_write_file(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response("", 0)
+        sandbox.process.run.return_value = _make_exec_response("", 0)
         h = DaytonaWriteHandler(manager)
         result = await h.handle(
             _invocation("write", path="/home/daytona/hello.py", content="print('hello')\n")
         )
         assert result.success is True
         assert "hello.py" in result.content
-        sandbox.fs.upload_file.assert_called_once()
+        sandbox.fs.write_bytes.assert_called_once()
 
     async def test_no_content(self, manager):
         h = DaytonaWriteHandler(manager)
@@ -348,7 +321,7 @@ class TestDaytonaWriteHandler:
         assert "No content" in result.content
 
     async def test_write_file_quotes_parent_path(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response("", 0)
+        sandbox.process.run.return_value = _make_exec_response("", 0)
         h = DaytonaWriteHandler(manager)
         await h.handle(
             _invocation(
@@ -357,7 +330,7 @@ class TestDaytonaWriteHandler:
                 content="print('hello')\n",
             )
         )
-        mkdir_cmd = sandbox.process.exec.call_args_list[0][0][0]
+        mkdir_cmd = sandbox.process.run.call_args_list[0][0][0]
         assert mkdir_cmd == "mkdir -p '/home/daytona/o'\\''connor'"
 
 
@@ -372,7 +345,7 @@ class TestDaytonaEditHandler:
         assert h.name == "edit"
 
     async def test_edit_exact_match(self, manager, sandbox):
-        sandbox.fs.download_file.return_value = b"hello world\ngoodbye world\n"
+        sandbox.fs.read_bytes.return_value = b"hello world\ngoodbye world\n"
         h = DaytonaEditHandler(manager)
         result = await h.handle(
             _invocation(
@@ -385,12 +358,12 @@ class TestDaytonaEditHandler:
         assert result.success is True
         assert "exact match" in result.content
         # Check uploaded content
-        uploaded = sandbox.fs.upload_file.call_args[0][0]
+        uploaded = sandbox.fs.write_bytes.call_args[0][1]
         assert b"hi world" in uploaded
         assert b"goodbye world" in uploaded
 
     async def test_edit_not_found(self, manager, sandbox):
-        sandbox.fs.download_file.return_value = b"hello world\n"
+        sandbox.fs.read_bytes.return_value = b"hello world\n"
         h = DaytonaEditHandler(manager)
         result = await h.handle(
             _invocation(
@@ -422,7 +395,7 @@ class TestDaytonaGlobHandler:
         assert h.name == "glob"
 
     async def test_find_files(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response(
+        sandbox.process.run.return_value = _make_exec_response(
             "/workspace/src/main.py\n/workspace/src/utils.py\n", 0
         )
         h = DaytonaGlobHandler(manager)
@@ -432,14 +405,14 @@ class TestDaytonaGlobHandler:
         assert "2 files found" in result.content
 
     async def test_no_files(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response("", 0)
+        sandbox.process.run.return_value = _make_exec_response("", 0)
         h = DaytonaGlobHandler(manager)
         result = await h.handle(_invocation("glob", pattern="*.xyz", path="/workspace"))
         assert result.success is True
         assert "No files found" in result.content
 
     async def test_find_error_is_not_silent(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response("", 1)
+        sandbox.process.run.return_value = _make_exec_response("", 1)
         h = DaytonaGlobHandler(manager)
         result = await h.handle(_invocation("glob", pattern="*.py", path="/missing"))
         assert result.success is False
@@ -458,7 +431,7 @@ class TestDaytonaGrepHandler:
 
     async def test_search_with_rg(self, manager, sandbox):
         # First call: which rg -> success, second call: actual search
-        sandbox.process.exec.side_effect = [
+        sandbox.process.run.side_effect = [
             _make_exec_response("/usr/bin/rg", 0),
             _make_exec_response("src/main.py:10:import os\n", 0),
         ]
@@ -469,7 +442,7 @@ class TestDaytonaGrepHandler:
         assert "1 matches" in result.content
 
     async def test_search_no_matches(self, manager, sandbox):
-        sandbox.process.exec.side_effect = [
+        sandbox.process.run.side_effect = [
             _make_exec_response("/usr/bin/rg", 0),
             _make_exec_response("", 1),
         ]
@@ -480,7 +453,7 @@ class TestDaytonaGrepHandler:
 
     async def test_search_fallback_to_grep(self, manager, sandbox):
         # rg not found, falls back to grep
-        sandbox.process.exec.side_effect = [
+        sandbox.process.run.side_effect = [
             _make_exec_response("", 1),  # which rg fails
             _make_exec_response("file.py:5:match\n", 0),
         ]
@@ -488,7 +461,7 @@ class TestDaytonaGrepHandler:
         result = await h.handle(_invocation("grep", pattern="match", path="/workspace"))
         assert result.success is True
         # Verify grep was used (second call)
-        call_args = sandbox.process.exec.call_args_list[1]
+        call_args = sandbox.process.run.call_args_list[1]
         assert "grep" in call_args[0][0]
 
 
@@ -503,7 +476,7 @@ class TestDaytonaListHandler:
         assert h.name == "list"
 
     async def test_list_directory(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response(
+        sandbox.process.run.return_value = _make_exec_response(
             "total 8\ndrwxr-xr-x 2 user user 4096 Jan  1 00:00 src/\n"
             "-rw-r--r-- 1 user user  100 Jan  1 00:00 README.md\n",
             0,
@@ -515,13 +488,13 @@ class TestDaytonaListHandler:
         assert "README.md" in result.content
 
     async def test_empty_directory(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response("total 0\n", 0)
+        sandbox.process.run.return_value = _make_exec_response("total 0\n", 0)
         h = DaytonaListHandler(manager)
         result = await h.handle(_invocation("list", path="/empty"))
         assert result.success is True
 
     async def test_directory_not_found(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response(
+        sandbox.process.run.return_value = _make_exec_response(
             "ls: cannot access '/nope': No such file or directory", 2
         )
         h = DaytonaListHandler(manager)
@@ -590,34 +563,64 @@ class TestRelativePaths:
         assert manager.resolve_path("/etc/hosts") == "/etc/hosts"
         assert manager.resolve_path("~/notes.txt") == "~/notes.txt"
 
+    async def test_home_paths_expand_to_sandbox_home(self, manager, sandbox):
+        async def process_run(command, **kwargs):
+            home = "$HOME" in command
+            return _make_exec_response("/home/daytona" if home else "")
+
+        sandbox.process.run.side_effect = process_run
+        result = await DaytonaWriteHandler(manager).handle(
+            _invocation("write", path="~/notes.txt", content="note\n")
+        )
+        assert result.success is True
+        assert sandbox.fs.write_bytes.call_args.args[0] == "/home/daytona/notes.txt"
+
     async def test_write(self, manager, sandbox):
         result = await DaytonaWriteHandler(manager).handle(
             _invocation("write", path="src/a.py", content="x = 1\n")
         )
         assert result.success is True
-        assert sandbox.fs.upload_file.call_args.args[1] == "/workspace/proj/src/a.py"
-        assert "/workspace/proj/src" in sandbox.process.exec.call_args.args[0]
+        assert sandbox.fs.write_bytes.call_args.args[0] == "/workspace/proj/src/a.py"
+        assert "/workspace/proj/src" in sandbox.process.run.call_args.args[0]
 
     async def test_edit(self, manager, sandbox):
-        sandbox.fs.download_file.return_value = b"x = 1\n"
+        sandbox.fs.read_bytes.return_value = b"x = 1\n"
         result = await DaytonaEditHandler(manager).handle(
             _invocation("edit", path="a.py", old_string="x = 1", new_string="x = 2")
         )
         assert result.success is True
-        sandbox.fs.download_file.assert_called_once_with("/workspace/proj/a.py")
-        assert sandbox.fs.upload_file.call_args.args[1] == "/workspace/proj/a.py"
+        sandbox.fs.read_bytes.assert_called_once_with("/workspace/proj/a.py")
+        assert sandbox.fs.write_bytes.call_args.args[0] == "/workspace/proj/a.py"
 
     async def test_read(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response("one\n1", 0)
+        sandbox.process.run.return_value = _make_exec_response("one\n1", 0)
         result = await DaytonaReadHandler(manager).handle(_invocation("read", path="a.txt"))
         assert result.success is True
-        assert "'/workspace/proj/a.txt'" in sandbox.process.exec.call_args.args[0]
+        assert "'/workspace/proj/a.txt'" in sandbox.process.run.call_args.args[0]
 
     async def test_list_glob_grep(self, manager, sandbox):
-        sandbox.process.exec.return_value = _make_exec_response("", 0)
+        sandbox.process.run.return_value = _make_exec_response("", 0)
         await DaytonaListHandler(manager).handle(_invocation("list", path="."))
-        assert "'/workspace/proj'" in sandbox.process.exec.call_args.args[0]
+        assert "'/workspace/proj'" in sandbox.process.run.call_args.args[0]
         await DaytonaGlobHandler(manager).handle(_invocation("glob", pattern="*.py", path="src"))
-        assert "'/workspace/proj/src'" in sandbox.process.exec.call_args.args[0]
+        assert "'/workspace/proj/src'" in sandbox.process.run.call_args.args[0]
         await DaytonaGrepHandler(manager).handle(_invocation("grep", pattern="x", path="src"))
-        assert any("/workspace/proj/src" in c.args[0] for c in sandbox.process.exec.call_args_list)
+        assert any("/workspace/proj/src" in c.args[0] for c in sandbox.process.run.call_args_list)
+
+
+# ---------------------------------------------------------------------------
+# .rho-agent.toml keys from the v0 backend are refused, not ignored
+# ---------------------------------------------------------------------------
+
+
+def test_toml_snapshot_key_is_refused(tmp_path, monkeypatch):
+    import typer
+
+    from rho_agent.cli.main_cmd import _resolve_daytona_config
+
+    (tmp_path / ".rho-agent.toml").write_text('[sandbox]\nsnapshot = "old"\n')
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(typer.Exit):
+        _resolve_daytona_config(
+            dockerfile=None, registered_image=None, upload=None, working_dir=None
+        )
