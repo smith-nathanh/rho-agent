@@ -328,7 +328,7 @@ class Session:
         await self.close()
 
     async def get_sandbox(self) -> Any:
-        """Return the Daytona sandbox, creating it if needed.
+        """Return the Daytona v2 sandbox (``daytona.v2.AsyncSandbox``), creating it if needed.
 
         Use this to upload/download files before or after ``run()``::
 

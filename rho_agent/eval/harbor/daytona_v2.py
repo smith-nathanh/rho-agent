@@ -41,7 +41,7 @@ from harbor.models.task.config import (
     classify_network_allowlist_entry,
 )
 
-from rho_agent.tools.handlers.daytona.v2 import exit_code_of, prefer_image_git
+from rho_agent.tools.handlers.daytona.ops import exit_code_of, prefer_image_git
 
 ENVIRONMENT_TYPE = "daytona-v2"
 

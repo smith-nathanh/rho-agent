@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ...registry import ToolRegistry
 
-from .backend import DaytonaBackend
+from .backend import DaytonaBackend, DockerfileImage, RegisteredImage
 from .bash import DaytonaBashHandler
 from .edit import DaytonaEditHandler
 from .glob import DaytonaGlobHandler
@@ -28,6 +28,8 @@ __all__ = [
     "DaytonaReadHandler",
     "DaytonaViewImageHandler",
     "DaytonaWriteHandler",
+    "DockerfileImage",
+    "RegisteredImage",
     "SandboxManager",
     "register_daytona_tools",
 ]

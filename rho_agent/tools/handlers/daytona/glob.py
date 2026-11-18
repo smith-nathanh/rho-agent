@@ -7,6 +7,7 @@ from typing import Any
 from ...base import ToolHandler, ToolInvocation, ToolOutput
 from ._utils import shell_quote
 from .manager import SandboxManager
+from .ops import run
 
 DEFAULT_MAX_RESULTS = 100
 
@@ -95,17 +96,17 @@ class DaytonaGlobHandler(ToolHandler):
                 f"{exclude}"
             )
 
-            response = await sandbox.process.exec(cmd, timeout=30)
+            response = await run(sandbox, cmd, timeout=30)
 
             if response.exit_code != 0:
-                output = (response.result or "").strip()
+                output = (response.output or "").strip()
                 if "No such file" in output:
                     return ToolOutput(content=f"Directory not found: {path_str}", success=False)
                 return ToolOutput(
                     content=f"Find failed: {output or 'Unknown error'}", success=False
                 )
 
-            output = response.result.strip()
+            output = response.output.strip()
             if not output:
                 return ToolOutput(
                     content="No files found matching pattern",

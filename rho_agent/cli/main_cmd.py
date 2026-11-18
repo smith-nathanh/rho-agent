@@ -58,7 +58,7 @@ _PROMPT_FIELDS = ("access", "working_dir", "backend")
 def _resolve_daytona_config(
     *,
     dockerfile: str | None,
-    snapshot: str | None,
+    registered_image: str | None,
     upload: list[str] | None,
     working_dir: str | None,
 ) -> tuple[DaytonaBackend, list[tuple[str, str]], str, list[str]]:
@@ -68,7 +68,7 @@ def _resolve_daytona_config(
     """
     import tomllib
 
-    from ..tools.handlers.daytona.backend import DaytonaBackend
+    from ..tools.handlers.daytona.backend import DaytonaBackend, DockerfileImage, RegisteredImage
 
     # Walk up from CWD to find .rho-agent.toml (like .gitignore discovery)
     cwd = Path.cwd()
@@ -93,28 +93,25 @@ def _resolve_daytona_config(
 
     sandbox_cfg = toml_config.get("sandbox", {})
 
-    # Resolve image/snapshot — CLI flags override toml
-    image: str | object = "daytonaio/sandbox:latest"
-    resolved_snapshot: str | None = snapshot or sandbox_cfg.get("snapshot")
-
-    if not resolved_snapshot:
-        dockerfile_path_str = dockerfile or sandbox_cfg.get("dockerfile")
-        if dockerfile_path_str:
-            df_path = Path(dockerfile_path_str)
-            if not df_path.is_absolute():
-                df_path = project_root / df_path
-            df_path = df_path.resolve()
-            if not df_path.exists():
-                console.print(_markup(f"Dockerfile not found: {df_path}", THEME.error))
-                raise typer.Exit(1)
-            from rho_agent.tools.handlers.daytona.backend import DockerfileImage
-
-            # Built on Daytona v2; the build context is the Dockerfile's directory.
-            image = DockerfileImage(str(df_path))
-        else:
-            toml_image = sandbox_cfg.get("image")
-            if toml_image:
-                image = toml_image
+    # Resolve the image — CLI flags override toml. One of: a registered v2
+    # image, a Dockerfile to build, or a registry reference (default).
+    image: str | DockerfileImage | RegisteredImage = "daytonaio/sandbox:latest"
+    registered = registered_image or sandbox_cfg.get("registered_image")
+    dockerfile_path_str = dockerfile or sandbox_cfg.get("dockerfile")
+    if registered:
+        image = RegisteredImage(registered)
+    elif dockerfile_path_str:
+        df_path = Path(dockerfile_path_str)
+        if not df_path.is_absolute():
+            df_path = project_root / df_path
+        df_path = df_path.resolve()
+        if not df_path.exists():
+            console.print(_markup(f"Dockerfile not found: {df_path}", THEME.error))
+            raise typer.Exit(1)
+        # Built on Daytona v2; the build context is the Dockerfile's directory.
+        image = DockerfileImage(str(df_path))
+    elif sandbox_cfg.get("image"):
+        image = sandbox_cfg["image"]
 
     # Environment variables from toml
     env_vars = {}
@@ -123,7 +120,6 @@ def _resolve_daytona_config(
 
     backend = DaytonaBackend(
         image=image,
-        snapshot=resolved_snapshot,
         env_vars=env_vars,
         uv_version=sandbox_cfg.get("uv_version"),
     )
@@ -414,11 +410,12 @@ def main(
             help="Path to Dockerfile for building a custom sandbox image (Daytona backend)",
         ),
     ] = None,
-    snapshot: Annotated[
+    registered_image: Annotated[
         str | None,
         typer.Option(
-            "--snapshot",
-            help="Named Daytona snapshot to create sandbox from (faster than --dockerfile)",
+            "--registered-image",
+            help="Image already registered on Daytona v2, by name or img_ id "
+            "(faster than --dockerfile)",
         ),
     ] = None,
     compact_threshold: Annotated[
@@ -450,22 +447,24 @@ def main(
     directory and asks before going outside it (see --access)."""
     # --- Daytona sandbox configuration ---
     # When --backend daytona, read .rho-agent.toml from the project root.
-    # CLI flags (--dockerfile, --snapshot, --upload, --working-dir) override the toml.
+    # CLI flags (--dockerfile, --registered-image, --upload, --working-dir) override the toml.
     daytona_backend = None
     upload_mappings: list[tuple[str, str]] = []
     setup_commands: list[str] = []
 
-    if backend == "daytona" or (dockerfile or snapshot):
-        if backend == "local" and (dockerfile or snapshot):
-            backend = "daytona"  # --dockerfile/--snapshot implies daytona
+    if backend == "daytona" or (dockerfile or registered_image):
+        if backend == "local" and (dockerfile or registered_image):
+            backend = "daytona"  # --dockerfile/--registered-image implies daytona
 
-        if dockerfile and snapshot:
-            console.print(_markup("Cannot use both --dockerfile and --snapshot", THEME.error))
+        if dockerfile and registered_image:
+            console.print(
+                _markup("Cannot use both --dockerfile and --registered-image", THEME.error)
+            )
             raise typer.Exit(1)
 
         daytona_backend, upload_mappings, working_dir, setup_commands = _resolve_daytona_config(
             dockerfile=dockerfile,
-            snapshot=snapshot,
+            registered_image=registered_image,
             upload=upload,
             working_dir=working_dir,
         )

@@ -78,7 +78,7 @@ class DaytonaEditHandler(ToolHandler):
             sandbox = await self._manager.get_sandbox()
 
             # Download the file
-            file_bytes = await sandbox.fs.download_file(path_str)
+            file_bytes = await sandbox.fs.read_bytes(path_str)
             content = file_bytes.decode("utf-8")
 
             # Apply edit using shared fuzzy match logic
@@ -88,7 +88,7 @@ class DaytonaEditHandler(ToolHandler):
                 return ToolOutput(content=match_info, success=False)
 
             # Upload the modified file
-            await sandbox.fs.upload_file(new_content.encode("utf-8"), path_str)
+            await sandbox.fs.write_bytes(path_str, new_content.encode("utf-8"))
 
             return ToolOutput(
                 content=f"Edited {path_str}: {match_info}",

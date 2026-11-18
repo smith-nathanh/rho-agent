@@ -70,9 +70,9 @@ image = "daytonaio/sandbox:latest"
 # the build context is the Dockerfile's directory)
 # dockerfile = "Dockerfile"
 
-# OR boot an image already registered on Daytona v2, by name or img_ id
-# (Daytona v0 snapshots appear on v2 as images of the same name)
-# snapshot = "my-snapshot-name"
+# OR boot an image already registered in your Daytona v2 project, by name or
+# img_ id (fastest startup)
+# registered_image = "my-image"
 
 # Working directory inside the sandbox (default: /home/daytona/<project-name>)
 working_dir = "/home/daytona/myapp/backend"
@@ -183,14 +183,14 @@ For an image with dependencies baked in, point the backend at a Dockerfile. Dayt
 
 ```python
 from rho_agent.tools.handlers.daytona import DaytonaBackend
-from rho_agent.tools.handlers.daytona.backend import DockerfileImage
+from rho_agent.tools.handlers.daytona import DockerfileImage
 
 backend = DaytonaBackend(image=DockerfileImage("./Dockerfile"), env_vars={"MY_KEY": "..."})
 ```
 
 ### Uploading and downloading files
 
-Use `get_sandbox()` to reach the sandbox's files. It returns a `SandboxV2` handle whose `fs.upload_file`, `fs.download_file`, `fs.upload_files` and `process.exec` keep the shape of the 0.x SDK; the SDK's own v2 sandbox is `sandbox.raw`:
+Use `get_sandbox()` to reach the sandbox. It returns the SDK's Daytona v2 sandbox (`daytona.v2.AsyncSandbox`), with its `fs`, `process`, `git` and other services:
 
 ```python
 async with Session(Agent(AgentConfig(backend=backend))) as s:
@@ -211,10 +211,12 @@ async with Session(Agent(AgentConfig(backend=backend))) as s:
 @dataclass
 class DaytonaBackend:
     config: DaytonaConfig | None = None   # SDK auth config (None = DAYTONA_API_KEY)
-    image: str | DockerfileImage = "daytonaio/sandbox:latest"  # Registry ref, pulled; or a Dockerfile to build
-    snapshot: str | None = None           # Registered v2 image name or id (overrides image)
-    resources: Resources | None = None    # cores, memory GiB, disk GiB (no GPUs)
-    auto_stop_interval: int = 0           # Delete after N minutes idle (0 = never)
+    image: str | DockerfileImage | RegisteredImage = "daytonaio/sandbox:latest"
+        # str: registry reference, pulled into Daytona v2
+        # DockerfileImage(path): built on Daytona v2 from a local Dockerfile
+        # RegisteredImage(name): an image already in your Daytona v2 project
+    resources: Resources | None = None    # daytona.v2.Resources: cores, memory GiB, disk GiB
+    idle_timeout_minutes: int = 0         # Delete after N minutes idle (0 = never)
     env_vars: dict[str, str] = {}         # Environment variables set on the sandbox
 ```
 

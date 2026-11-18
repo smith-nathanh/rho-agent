@@ -7,6 +7,7 @@ from typing import Any
 from ...base import ToolHandler, ToolInvocation, ToolOutput
 from ._utils import shell_quote
 from .manager import SandboxManager
+from .ops import run
 
 
 class DaytonaListHandler(ToolHandler):
@@ -84,17 +85,17 @@ class DaytonaListHandler(ToolHandler):
                 hidden_flag = "-la" if show_hidden else "-l"
                 cmd = f"ls {hidden_flag} {shell_quote(path_str)}"
 
-            response = await sandbox.process.exec(cmd, timeout=30)
+            response = await run(sandbox, cmd, timeout=30)
 
             if response.exit_code != 0:
-                error = response.result or "Unknown error"
+                error = response.output or "Unknown error"
                 if "No such file" in error or "not found" in error.lower():
                     return ToolOutput(content=f"Directory not found: {path_str}", success=False)
                 if "Not a directory" in error:
                     return ToolOutput(content=f"Not a directory: {path_str}", success=False)
                 return ToolOutput(content=f"Error listing directory: {error}", success=False)
 
-            output = (response.result or "").strip()
+            output = (response.output or "").strip()
             if not output:
                 return ToolOutput(
                     content="(empty directory)",

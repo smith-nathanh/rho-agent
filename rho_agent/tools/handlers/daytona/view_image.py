@@ -39,7 +39,7 @@ class DaytonaViewImageHandler(ToolHandler):
         path_str = self._manager.resolve_path(path_str)
         try:
             sandbox = await self._manager.get_sandbox()
-            data = await sandbox.fs.download_file(path_str)
+            data = await sandbox.fs.read_bytes(path_str)
         except Exception as e:
             return ToolOutput(content=f"Error reading image {path_str}: {e}", success=False)
         return encode_image(path_str, bytes(data or b""))

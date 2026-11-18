@@ -24,8 +24,15 @@ from rho_agent.tools.handlers.daytona.manager import SandboxManager
 
 
 class _LocalProcess:
-    async def exec(
-        self, command: str, cwd: str | None = None, env: Any = None, timeout: int | None = None
+    """Stands in for a Daytona v2 sandbox's ``process``, running bash locally."""
+
+    async def run(
+        self,
+        command: str,
+        cwd: str | None = None,
+        env: Any = None,
+        execution_timeout: float | None = None,
+        timeout: float | None = None,
     ) -> SimpleNamespace:
         proc = await asyncio.create_subprocess_exec(
             "bash",
@@ -36,7 +43,10 @@ class _LocalProcess:
             stderr=asyncio.subprocess.STDOUT,
         )
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        return SimpleNamespace(result=out.decode(), exit_code=proc.returncode)
+        text = out.decode()
+        return SimpleNamespace(
+            output=text, stdout=text, stderr="", exit_code=proc.returncode, reason="exited"
+        )
 
 
 @pytest.fixture
