@@ -107,11 +107,10 @@ def _resolve_daytona_config(
             if not df_path.exists():
                 console.print(_markup(f"Dockerfile not found: {df_path}", THEME.error))
                 raise typer.Exit(1)
-            from daytona import Image
+            from rho_agent.tools.handlers.daytona.backend import DockerfileImage
 
-            # The build context is the Dockerfile's directory (the SDK's
-            # `context_dir` argument no longer exists).
-            image = Image.from_dockerfile(str(df_path))
+            # Built on Daytona v2; the build context is the Dockerfile's directory.
+            image = DockerfileImage(str(df_path))
         else:
             toml_image = sandbox_cfg.get("image")
             if toml_image:

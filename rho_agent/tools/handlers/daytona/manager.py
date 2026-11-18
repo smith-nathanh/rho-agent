@@ -1,4 +1,4 @@
-"""Sandbox lifecycle manager for Daytona cloud VMs.
+"""Sandbox lifecycle manager for Daytona cloud VMs (Daytona v2, SDK 2.x).
 
 Shared by all Daytona handlers. Lazily creates a sandbox on first tool call
 and tears it down on session close.
@@ -8,10 +8,17 @@ from __future__ import annotations
 
 import asyncio
 import posixpath
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from .backend import DaytonaBackend
+
+# Seconds to wait for an image pull or build.
+_BUILD_TIMEOUT = 1800.0
+# Daytona v2 always applies a wall-clock limit to a sandbox; a session's
+# sandbox is deleted after this long even if close() never runs.
+_SANDBOX_MAX_SECONDS = 24 * 3600
 
 
 class SandboxManager:
@@ -72,46 +79,47 @@ class SandboxManager:
             if self._sandbox is not None:
                 return self._sandbox
 
-            from daytona import (
-                AsyncDaytona,
-                CreateSandboxFromImageParams,
-                CreateSandboxFromSnapshotParams,
-                Resources,
-            )
+            from daytona import AsyncDaytona
+            from daytona.v2 import Resources
+
+            from .v2 import SandboxV2, prefer_image_git
 
             if self._api_config is not None:
                 self._client = AsyncDaytona(self._api_config)
             else:
                 self._client = AsyncDaytona()
+            v2 = self._client.v2
 
-            if self._snapshot:
-                params = CreateSandboxFromSnapshotParams(
-                    snapshot=self._snapshot,
-                    env_vars=self._env_vars if self._env_vars else None,
-                    auto_stop_interval=self._auto_stop_interval,
-                )
-            else:
-                params = CreateSandboxFromImageParams(
-                    image=self._image,
-                    env_vars=self._env_vars if self._env_vars else None,
-                    auto_stop_interval=self._auto_stop_interval,
-                )
-
-            # Resources only apply to image-based sandboxes; a snapshot fixes them.
-            if self._resources and not self._snapshot:
-                params.resources = Resources(
+            image_id = await self._resolve_image(v2)
+            resources = None
+            if self._resources:
+                if self._resources.get("gpu"):
+                    raise ValueError("GPU sandboxes are not supported on the Daytona v2 backend")
+                resources = Resources(
                     cpu=self._resources.get("cpu"),
                     memory=self._resources.get("memory"),
                     disk=self._resources.get("disk"),
-                    gpu=self._resources.get("gpu"),
                 )
 
-            self._sandbox = await self._client.create(params, timeout=120)
+            raw = await v2.create(
+                image_id,
+                env=self._env_vars or None,
+                resources=resources,
+                lifecycle_policy=self._lifecycle_policy(),
+                labels={"created-by": "rho-agent"},
+                wait_seconds=120,
+            )
+            state = getattr(raw.state, "value", raw.state)
+            if state != "started":
+                try:
+                    await raw.delete()
+                finally:
+                    raise RuntimeError(f"Daytona sandbox {raw.id} did not start (state: {state})")
+            await prefer_image_git(raw)
+            self._sandbox = SandboxV2(raw)
 
             # Ensure uv is available (not pre-installed in daytonaio/sandbox)
-            check = await self._sandbox.process.exec(
-                "which uv 2>/dev/null", timeout=10
-            )
+            check = await self._sandbox.process.exec("which uv 2>/dev/null", timeout=10)
             if check.exit_code != 0:
                 uv_path = f"uv/{self._uv_version}" if self._uv_version else "uv"
                 await self._sandbox.process.exec(
@@ -122,11 +130,43 @@ class SandboxManager:
 
             return self._sandbox
 
+    async def _resolve_image(self, v2: Any) -> str:
+        """Return the v2 image (name or id) to boot, pulling or building it if needed."""
+        from .backend import DockerfileImage
+
+        if self._snapshot:
+            return self._snapshot
+        if isinstance(self._image, DockerfileImage):
+            dockerfile = Path(self._image.path)
+            submitted = await v2.images.build_from_context(
+                str(dockerfile.parent), dockerfile=dockerfile.name
+            )
+            image = await v2.images.get(submitted.id, wait="ready", timeout=_BUILD_TIMEOUT)
+        elif isinstance(self._image, str):
+            image = await v2.images.pull(self._image, timeout=_BUILD_TIMEOUT)
+        else:
+            raise TypeError(
+                "DaytonaBackend.image must be a registry reference (str) or a DockerfileImage, "
+                f"got {type(self._image).__name__}"
+            )
+        status = getattr(image.status, "value", image.status)
+        if status != "ready":
+            raise RuntimeError(f"Daytona image {image.id} is not ready (status: {status})")
+        return image.id
+
+    def _lifecycle_policy(self) -> dict[str, Any]:
+        """Wall-clock limit for the sandbox, plus the idle timeout when one is set."""
+        policy: dict[str, Any] = {"timeout_seconds": _SANDBOX_MAX_SECONDS, "on_timeout": "delete"}
+        if self._auto_stop_interval > 0:
+            policy["idle_expiry_seconds"] = self._auto_stop_interval * 60
+            policy["on_idle_timeout"] = "delete"
+        return policy
+
     async def close(self) -> None:
         """Delete the sandbox and close the client."""
         if self._sandbox is not None:
             try:
-                await self._client.delete(self._sandbox, timeout=30)
+                await self._sandbox.delete()
             except Exception:
                 pass  # Best-effort cleanup
             self._sandbox = None

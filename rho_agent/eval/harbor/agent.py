@@ -198,10 +198,20 @@ class RhoAgent(BaseInstalledAgent):
     # --- install ---
 
     def _package_spec(self) -> str:
-        """The requirement passed to ``uv pip install``."""
+        """The requirement passed to ``uv pip install``.
+
+        For a GitHub repository the git source installs from GitHub's source
+        archive of the ref, which needs no git in the sandbox. Daytona v2 puts
+        its own minimal git first on PATH, and that git cannot run the
+        ``git submodule`` step of uv's git install.
+        """
         if self.options.install_source == "git":
+            repo = self.options.repo_url
+            if repo.startswith("https://github.com/"):
+                base = repo.removesuffix("/").removesuffix(".git")
+                return f"rho-agent @ {base}/archive/{self._version or 'HEAD'}.tar.gz"
             ref = f"@{self._version}" if self._version else ""
-            return f"rho-agent @ git+{self.options.repo_url}{ref}"
+            return f"rho-agent @ git+{repo}{ref}"
         pin = f"=={self._version}" if self._version else ""
         return f"rho-agent{pin}"
 

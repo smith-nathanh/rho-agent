@@ -67,8 +67,11 @@ evals = []
 # Harbor (Terminal-Bench harness). Harbor requires Python >=3.12.
 harbor = ["harbor>=0.25.0; python_version >= '3.12'"]
 
-# Optional: Daytona cloud sandbox integration
-daytona = ["daytona>=0.200.0"]
+# Optional: Daytona cloud sandbox integration, on Daytona v2 (SDK 2.x).
+# Pinned exactly: SDK 2.x is a pre-release and its API still changes.
+# SDK 2.x disables Harbor's built-in `daytona` environment; Harbor jobs use
+# rho_agent.eval.harbor.daytona_v2:DaytonaV2Environment instead.
+daytona = ["daytona==2.0.0a13"]
 
 # OpenTelemetry trace export over OTLP/HTTP protobuf (http/json needs nothing)
 otel = ["opentelemetry-proto>=1.30.0"]

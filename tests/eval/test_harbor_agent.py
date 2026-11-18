@@ -84,6 +84,13 @@ def test_package_spec_for_pypi_and_git(tmp_path: Path) -> None:
     assert _agent(tmp_path, version="0.2.0")._package_spec() == "rho-agent==0.2.0"
     git = _agent(tmp_path, install_source="git", version="abc123", repo_url="https://x/y.git")
     assert git._package_spec() == "rho-agent @ git+https://x/y.git@abc123"
+    # GitHub repos install from the source archive, which needs no git in the sandbox.
+    gh = _agent(tmp_path, install_source="git", version="abc123")
+    assert gh._package_spec() == (
+        "rho-agent @ https://github.com/smith-nathanh/rho-agent/archive/abc123.tar.gz"
+    )
+    head = _agent(tmp_path, install_source="git")
+    assert head._package_spec().endswith("/archive/HEAD.tar.gz")
 
 
 async def test_install_builds_a_private_virtualenv(tmp_path: Path) -> None:
@@ -93,7 +100,7 @@ async def test_install_builds_a_private_virtualenv(tmp_path: Path) -> None:
     install = env.calls[-1]["command"]
     assert "uv python install 3.12" in install
     assert 'uv venv --python 3.12 "$HOME/.rho-agent/venv"' in install
-    assert "rho-agent @ git+" in install and "@main" in install
+    assert "rho-agent @ https://github.com/smith-nathanh/rho-agent/archive/main.tar.gz" in install
     assert "import rho_agent.eval.harbor.runner" in install
     assert env.calls[-1].get("user") is None  # runs as the agent user, not root
 

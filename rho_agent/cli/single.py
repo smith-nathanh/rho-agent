@@ -31,9 +31,9 @@ async def upload_to_sandbox(
     """Upload local files/directories to the Daytona sandbox.
 
     Each mapping is (local_src, remote_dest). Directories are walked recursively.
-    Uses bulk upload_files() to send batches in a single multipart request.
+    Uses bulk upload_files() to send files in batches.
     """
-    from daytona import FileUpload
+    from rho_agent.tools.handlers.daytona.v2 import FileUpload
 
     if not mappings:
         return

@@ -6,9 +6,11 @@ order: 10
 
 The Daytona backend routes shell and file tool execution to a remote cloud sandbox managed by [Daytona](https://daytona.io). The agent process stays on your machine — only tool calls run remotely. The remote VM is the boundary, so the agent has `full` access inside it.
 
+rho-agent uses **Daytona v2** (`api.daytona.com`, dashboard at [app.daytona.com](https://app.daytona.com)) through Daytona SDK 2.x. A v2 sandbox can have up to 16 cores and 32 GiB of memory; the older v0 platform caps sandboxes at 4 vCPU / 8 GiB / 10 GiB.
+
 ## Setup
 
-Install the SDK extra and set your API key:
+Install the SDK extra and set your API key. The key needs to write and delete sandboxes and images on Daytona v2 (create it in the `default` project at app.daytona.com; keys from Daytona v0 are synced there but may have sandbox permissions only):
 
 ```bash
 uv tool install 'rho-agent[daytona] @ git+https://github.com/smith-nathanh/rho-agent'
@@ -61,13 +63,15 @@ rho-agent main --backend daytona "run the tests"
 
 ```toml
 [sandbox]
-# Container image (default: "daytonaio/sandbox:latest")
+# Container image, pulled into Daytona v2 (default: "daytonaio/sandbox:latest")
 image = "daytonaio/sandbox:latest"
 
-# OR build from a Dockerfile (relative to project root)
+# OR build from a Dockerfile on Daytona v2 (relative to project root;
+# the build context is the Dockerfile's directory)
 # dockerfile = "Dockerfile"
 
-# OR use a pre-built Daytona snapshot (fastest startup)
+# OR boot an image already registered on Daytona v2, by name or img_ id
+# (Daytona v0 snapshots appear on v2 as images of the same name)
 # snapshot = "my-snapshot-name"
 
 # Working directory inside the sandbox (default: /home/daytona/<project-name>)
@@ -156,14 +160,15 @@ async with Session(Agent(config)) as session:
 Pass a `DaytonaBackend` for control over the container image, resources, environment variables, and auth:
 
 ```python
-from daytona import DaytonaConfig, Resources
+from daytona import DaytonaConfig
+from daytona.v2 import Resources
 from rho_agent import Agent, AgentConfig, Session
 from rho_agent.tools.handlers.daytona import DaytonaBackend
 
 backend = DaytonaBackend(
     config=DaytonaConfig(api_key="..."),
     image="python:3.13",
-    resources=Resources(cpu=2, memory=4, disk=10),
+    resources=Resources(cpu=8, memory=16, disk=20),  # cores, GiB, GiB
     env_vars={"MY_API_KEY": "...", "NODE_ENV": "development"},
 )
 
@@ -172,26 +177,20 @@ async with Session(Agent(AgentConfig(backend=backend))) as s:
     print(result.text)
 ```
 
-### Using `Image` objects
+### Building from a Dockerfile
 
-For pre-built sandbox images with dependencies baked in, pass a Daytona `Image` object instead of a string:
+For an image with dependencies baked in, point the backend at a Dockerfile. Daytona v2 builds it, with the Dockerfile's directory as the build context:
 
 ```python
-from daytona import Image
 from rho_agent.tools.handlers.daytona import DaytonaBackend
+from rho_agent.tools.handlers.daytona.backend import DockerfileImage
 
-image = (
-    Image.debian_slim("3.13")
-    .pip_install_from_pyproject("./pyproject.toml", optional_deps=["dev"])
-    .workdir("/home/daytona/myapp")
-)
-
-backend = DaytonaBackend(image=image, env_vars={"MY_KEY": "..."})
+backend = DaytonaBackend(image=DockerfileImage("./Dockerfile"), env_vars={"MY_KEY": "..."})
 ```
 
 ### Uploading and downloading files
 
-Use `get_sandbox()` to access the Daytona filesystem API directly:
+Use `get_sandbox()` to reach the sandbox's files. It returns a `SandboxV2` handle whose `fs.upload_file`, `fs.download_file`, `fs.upload_files` and `process.exec` keep the shape of the 0.x SDK; the SDK's own v2 sandbox is `sandbox.raw`:
 
 ```python
 async with Session(Agent(AgentConfig(backend=backend))) as s:
@@ -211,11 +210,11 @@ async with Session(Agent(AgentConfig(backend=backend))) as s:
 ```python
 @dataclass
 class DaytonaBackend:
-    config: DaytonaConfig | None = None   # SDK auth config (None = env vars)
-    image: str | Image = "daytonaio/sandbox:latest"  # Container image string or Image object
-    snapshot: str | None = None           # Create from snapshot instead of image
-    resources: Resources | None = None    # CPU, memory, disk, GPU
-    auto_stop_interval: int = 0           # Auto-stop after N seconds idle (0 = never)
+    config: DaytonaConfig | None = None   # SDK auth config (None = DAYTONA_API_KEY)
+    image: str | DockerfileImage = "daytonaio/sandbox:latest"  # Registry ref, pulled; or a Dockerfile to build
+    snapshot: str | None = None           # Registered v2 image name or id (overrides image)
+    resources: Resources | None = None    # cores, memory GiB, disk GiB (no GPUs)
+    auto_stop_interval: int = 0           # Delete after N minutes idle (0 = never)
     env_vars: dict[str, str] = {}         # Environment variables set on the sandbox
 ```
 
@@ -226,7 +225,9 @@ A sane default `PATH` (including `~/.local/bin`) is always set on the sandbox. I
 | Variable | Default | Description |
 |---|---|---|
 | `DAYTONA_API_KEY` | — | API key (required, read by Daytona SDK) |
-| `DAYTONA_API_URL` | Daytona default | API endpoint override (read by Daytona SDK) |
+| `DAYTONA_V2_API_URL` | `https://api.daytona.com` | Daytona v2 endpoint override (regional endpoint or test environment) |
+
+SDK 2.x ignores `DAYTONA_API_URL`, the 0.x SDK's variable.
 
 ## How it works
 
@@ -236,4 +237,6 @@ Database tools always run locally regardless of the backend setting.
 
 ### Sandbox lifecycle
 
-The sandbox is lazily provisioned on the first tool call and deleted when the session closes (via `session.close()` or the async context manager). If the process crashes, the sandbox may remain — use the Daytona dashboard to clean up orphaned sandboxes.
+The sandbox is lazily provisioned on the first tool call and deleted when the session closes (via `session.close()` or the async context manager). Daytona v2 also deletes every sandbox after a wall-clock limit, which rho-agent sets to 24 hours, so a crashed process does not leave one running for long; the Daytona dashboard lists any that remain.
+
+Daytona v2 also adds its own minimal git as `/usr/local/bin/git`, ahead of the image's git on `PATH`. When the image has its own git (the default `daytonaio/sandbox` does), rho-agent moves Daytona's to `/usr/local/bin/daytona-git` so the agent gets the full git.
