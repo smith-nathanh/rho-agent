@@ -6,6 +6,7 @@ Usage: python mcp_test_server.py [stdio | sse PORT | streamable-http PORT]
 from __future__ import annotations
 
 import base64
+import os
 import sys
 
 from mcp.server.fastmcp import Context, FastMCP, Image
@@ -33,6 +34,11 @@ def screenshot() -> Image:
 @server.tool(description="Always fails.")
 def explode() -> str:
     raise RuntimeError("kaboom")
+
+
+@server.tool(description="Return the server's process ID.")
+def pid() -> int:
+    return os.getpid()
 
 
 @server.tool(description="Return the request's X-Test-Token header.")

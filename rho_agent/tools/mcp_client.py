@@ -73,6 +73,10 @@ class MCPUnavailableError(RuntimeError):
     """The ``mcp`` package is not installed."""
 
 
+class MCPConfigError(ValueError):
+    """A server entry cannot work as written; retrying will not help."""
+
+
 @dataclass(frozen=True)
 class MCPServerConfig:
     """One MCP server to connect to."""
@@ -176,7 +180,7 @@ def _expand_env(value: str, env: Mapping[str, str]) -> str:
     def replace(match: re.Match[str]) -> str:
         var = match.group(1)
         if var not in env:
-            raise ValueError(f"environment variable {var} is not set")
+            raise MCPConfigError(f"environment variable {var} is not set")
         return env[var]
 
     return _ENV_REF.sub(replace, value)
@@ -210,6 +214,30 @@ def _server_errlog() -> Any:
         except (AttributeError, OSError, ValueError):
             continue
     return subprocess.DEVNULL
+
+
+def _connection_lost(error: BaseException) -> str | None:
+    """Whether a failed request means the connection is gone.
+
+    Returns ``"not_sent"`` when the request cannot have reached the server
+    (safe to send again), ``"maybe_sent"`` when it may have run, and None when
+    the connection is fine and the error is the tool's own.
+    """
+    while isinstance(error, BaseExceptionGroup) and len(error.exceptions) == 1:
+        error = error.exceptions[0]
+    import anyio
+    from mcp.shared.exceptions import McpError
+
+    # Writing to a transport whose streams closed when the server went away.
+    if isinstance(error, (anyio.ClosedResourceError, anyio.BrokenResourceError)):
+        return "not_sent"
+    if isinstance(error, McpError):
+        message = getattr(error.error, "message", "") or ""
+        if message == "Session terminated":  # streamable HTTP: the server forgot the session
+            return "not_sent"
+        if message == "Connection closed":  # the stream ended while waiting for a reply
+            return "maybe_sent"
+    return None
 
 
 def _env_seconds(name: str, default: float) -> float:
@@ -376,7 +404,7 @@ class MCPServerConnection:
             except BaseException as e:
                 if isinstance(e, (KeyboardInterrupt, SystemExit)):
                     raise
-                if isinstance(e, ValueError) or deadline - loop.time() <= _RETRY_DELAY:
+                if isinstance(e, MCPConfigError) or deadline - loop.time() <= _RETRY_DELAY:
                     raise  # a bad config does not get better with retries
                 logger.info(
                     "MCP server '%s' not reachable yet (%s); retrying",
@@ -386,16 +414,39 @@ class MCPServerConnection:
                 await asyncio.sleep(_RETRY_DELAY)
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        """Call one of the server's tools, reconnecting first if the connection dropped."""
-        async with self._lock:
-            if not self.connected:
-                logger.warning("MCP server '%s' is not connected; reconnecting", self.config.name)
-                await self.connect()
-            session = self._session
-        assert session is not None
-        return await session.call_tool(
-            name, arguments, read_timeout_seconds=timedelta(seconds=self.call_timeout)
-        )
+        """Call one of the server's tools, reconnecting if the connection dropped.
+
+        The SDK does not end the session when a server goes away; the next
+        request fails instead. Such a failure closes the connection, so the
+        next call reconnects. When the request cannot have reached the server,
+        it is sent again once on a new connection.
+        """
+        for attempt in range(2):
+            async with self._lock:
+                if not self.connected:
+                    logger.warning(
+                        "MCP server '%s' is not connected; reconnecting", self.config.name
+                    )
+                    await self.connect()
+                session = self._session
+            assert session is not None
+            try:
+                return await session.call_tool(
+                    name, arguments, read_timeout_seconds=timedelta(seconds=self.call_timeout)
+                )
+            except Exception as e:
+                lost = _connection_lost(e)
+                if lost is None:
+                    raise
+                logger.warning(
+                    "MCP server '%s' disconnected: %s", self.config.name, _describe_error(e)
+                )
+                async with self._lock:
+                    if self._session is session:
+                        await self.close()
+                if lost == "maybe_sent" or attempt:
+                    raise
+        raise AssertionError("unreachable")
 
     async def close(self) -> None:
         task, stop = self._task, self._stop
@@ -413,11 +464,35 @@ class MCPServerConnection:
                 await task
 
 
+# Keywords that model APIs refuse at the top level of a function's parameters.
+# One such tool would make every request fail, so they are flattened away.
+_TOP_LEVEL_COMBINATORS = ("anyOf", "oneOf", "allOf", "not", "enum", "const")
+
+
 def _input_schema(tool: Any) -> dict[str, Any]:
+    """The tool's argument schema, shaped as a plain ``type: object`` schema.
+
+    A top-level ``anyOf``/``oneOf``/``allOf`` (common for generated union
+    schemas) is replaced by the union of its branches' properties. Only the
+    top level's own ``required`` list is kept; the server still checks the
+    arguments it receives.
+    """
     schema = getattr(tool, "inputSchema", None)
     schema = dict(schema) if isinstance(schema, Mapping) else {}
+    properties = schema.get("properties")
+    properties = dict(properties) if isinstance(properties, Mapping) else {}
+    for key in _TOP_LEVEL_COMBINATORS:
+        if key not in schema:
+            continue
+        branches = schema.pop(key)
+        if key in ("anyOf", "oneOf", "allOf") and isinstance(branches, list):
+            for branch in branches:
+                branch_props = branch.get("properties") if isinstance(branch, Mapping) else None
+                if isinstance(branch_props, Mapping):
+                    for name, prop in branch_props.items():
+                        properties.setdefault(name, prop)
     schema["type"] = "object"
-    schema.setdefault("properties", {})
+    schema["properties"] = properties
     return schema
 
 
@@ -476,17 +551,41 @@ def _image(data: str, media_type: str, label: str) -> tuple[dict[str, str] | Non
     """An image attachment for the session, or None and a reason it was left out."""
     from .handlers.view_image import MAX_IMAGE_BYTES, _shrink
 
+    # A model API rejects the whole request for an image it cannot read, and
+    # that error ends the run, so only well-formed images of a supported type
+    # are attached. The type comes from the bytes, not the server's label.
     try:
-        raw = base64.b64decode(data, validate=False)
+        raw = base64.b64decode("".join((data or "").split()), validate=True)
     except (binascii.Error, ValueError):
         return None, "invalid base64"
+    if not raw:
+        return None, "empty image"
     if len(raw) > MAX_IMAGE_BYTES:
         shrunk = _shrink(raw)
         if shrunk is None:
             return None, f"{len(raw) / 1e6:.1f} MB, too large to attach"
-        raw, media_type, _ = shrunk
-        data = base64.b64encode(raw).decode("ascii")
-    return {"path": label, "media_type": media_type, "data": data}, ""
+        raw, _, _ = shrunk
+    sniffed = _sniff_image_type(raw)
+    if sniffed is None:
+        return None, "not a PNG, JPEG, GIF or WebP image"
+    return {
+        "path": label,
+        "media_type": sniffed,
+        "data": base64.b64encode(raw).decode("ascii"),
+    }, ""
+
+
+def _sniff_image_type(raw: bytes) -> str | None:
+    """The media type of PNG, JPEG, GIF or WebP bytes, from their signature."""
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if raw.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 
 def result_to_output(result: Any, *, label: str, attach_images: bool = True) -> ToolOutput:

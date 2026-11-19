@@ -144,9 +144,14 @@ def skill_dirs(working_dir: str | Path | None) -> list[Path]:
 
 def discover_skills(working_dir: str | Path | None) -> list[Skill]:
     """Skills visible from ``working_dir``. A project skill hides a personal one of the same name."""
+    return skills_in(skill_dirs(working_dir))
+
+
+def skills_in(dirs: list[Path]) -> list[Skill]:
+    """Skills in these folders; an earlier folder's skill hides a later one of the same name."""
     skills: dict[str, Skill] = {}
     seen_files: set[Path] = set()
-    for directory in skill_dirs(working_dir):
+    for directory in dirs:
         if not directory.is_dir():
             continue
         try:

@@ -216,6 +216,12 @@ async def test_runner_lists_skills_only_when_the_task_has_them(
     monkeypatch.setenv("RHO_AGENT_CONFIRM_DONE", "0")
     if task_skills:
         monkeypatch.setenv("RHO_AGENT_TASK_SKILLS", "1")
+    # A skill shipped inside the task's repository is never listed.
+    repo_skill = work / ".claude" / "skills" / "repo-skill"
+    repo_skill.mkdir(parents=True)
+    (repo_skill / "SKILL.md").write_text(
+        "---\nname: repo-skill\ndescription: From the repo.\n---\n"
+    )
     _FakeModelClient.script = [[StreamEvent(type="text", content="done"), _done(0.1)]]
 
     await runner.run_task("task", str(work), bash_only=True)
@@ -224,6 +230,7 @@ async def test_runner_lists_skills_only_when_the_task_has_them(
     [setup] = [e for e in events if e["type"] == "system_prompt"]
     listed = "cls-audit: Measure cumulative layout shift." in setup["content"]
     assert listed is task_skills
+    assert "repo-skill" not in setup["content"]
 
 
 async def test_runner_connects_mcp_servers_and_calls_their_tools(
@@ -270,5 +277,5 @@ async def test_runner_connects_mcp_servers_and_calls_their_tools(
     [result] = [m for m in state.messages if m["role"] == "tool"]
     assert result["content"] == "42"
     err = capsys.readouterr().err
-    assert "MCP server calc: 4 tools" in err
+    assert "MCP server calc: 5 tools" in err
     assert "MCP server down unavailable" in err

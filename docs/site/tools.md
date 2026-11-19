@@ -259,7 +259,9 @@ mcp_servers:
     args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
 ```
 
-The servers are connected when the first `run()` starts, and each tool is offered to the model as `mcp__<server>__<tool>`. Images a tool returns are shown to the model when `view_image` is among the agent's tools, and replaced by a note otherwise. A server that cannot be reached within `RHO_AGENT_MCP_CONNECT_TIMEOUT` seconds (default 60) is skipped with a warning; a call that takes longer than `RHO_AGENT_MCP_CALL_TIMEOUT` seconds (default 600) fails. `Session.close()` disconnects the servers.
+The servers are connected when the first `run()` starts, and each tool is offered to the model as `mcp__<server>__<tool>`. Images a tool returns are shown to the model when `view_image` is among the agent's tools, and replaced by a note otherwise. A server that cannot be reached within `RHO_AGENT_MCP_CONNECT_TIMEOUT` seconds (default 60) is skipped with a warning; a call that takes longer than `RHO_AGENT_MCP_CALL_TIMEOUT` seconds (default 600) fails. If a server goes away mid-run, the next call to it reconnects. `Session.close()` disconnects the servers.
+
+MCP tools are added whatever `tools` lists, and rho-agent's access modes and approvals don't apply to them: a `read-only` agent can still call a server's tools that write, and a stdio server runs outside the OS sandbox. Only configure servers you would let the agent use freely.
 
 ## Sub-agent tools
 

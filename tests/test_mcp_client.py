@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import importlib.util
+import os
+import signal
 import socket
 import subprocess
 import sys
@@ -138,6 +142,52 @@ def test_result_errors_and_structured_content() -> None:
     assert '"total": 3' in structured.content
 
 
+def test_images_are_checked_before_they_reach_the_model() -> None:
+    def image(data: str, mime: str = "image/png") -> SimpleNamespace:
+        return SimpleNamespace(
+            isError=False,
+            structuredContent=None,
+            content=[_content("image", data=data, mimeType=mime)],
+        )
+
+    # The type comes from the bytes; base64 split over lines is accepted.
+    labelled_wrong = result_to_output(
+        image(PNG_B64[:20] + "\n" + PNG_B64[20:], "image/bmp"), label="x"
+    )
+    assert labelled_wrong.images[0]["media_type"] == "image/png"
+    assert labelled_wrong.images[0]["data"] == PNG_B64
+
+    svg = base64.b64encode(b"<svg xmlns='http://www.w3.org/2000/svg'/>").decode()
+    for data, reason in (
+        (svg, "not a PNG, JPEG, GIF or WebP"),
+        ("", "empty image"),
+        ("not base64!", "invalid base64"),
+    ):
+        output = result_to_output(image(data, "image/svg+xml"), label="x")
+        assert output.images == [] and reason in output.content
+
+
+def test_union_schemas_are_flattened_to_a_plain_object() -> None:
+    from rho_agent.tools.mcp_client import _input_schema
+
+    tool = SimpleNamespace(
+        inputSchema={
+            "type": "object",
+            "properties": {"mode": {"type": "string"}},
+            "required": ["mode"],
+            "oneOf": [
+                {"properties": {"url": {"type": "string"}}, "required": ["url"]},
+                {"properties": {"path": {"type": "string"}}},
+            ],
+        }
+    )
+    schema = _input_schema(tool)
+    assert "oneOf" not in schema and schema["type"] == "object"
+    assert set(schema["properties"]) == {"mode", "url", "path"}
+    assert schema["required"] == ["mode"]
+    assert _input_schema(SimpleNamespace(inputSchema=None)) == {"type": "object", "properties": {}}
+
+
 # --- live servers ---
 
 needs_mcp = pytest.mark.skipif(
@@ -189,6 +239,7 @@ async def test_stdio_server_tools_are_registered_and_called() -> None:
         assert sorted(servers.registered) == [
             "mcp__calc__add",
             "mcp__calc__explode",
+            "mcp__calc__pid",
             "mcp__calc__screen_shot",
             "mcp__calc__whoami",
         ]
@@ -289,21 +340,50 @@ async def test_agent_connects_once_and_session_close_disconnects() -> None:
 
 
 @needs_mcp
-async def test_dropped_connection_reconnects_on_the_next_call() -> None:
+async def test_a_killed_stdio_server_is_restarted_on_the_next_call() -> None:
     registry = ToolRegistry()
     servers = MCPServers(parse_mcp_servers([_stdio_config()]), connect_timeout=30)
     await servers.connect(registry)
     try:
-        connection = servers.connections["calc"]
-        # Simulate the server going away.
-        task = connection._task
-        assert task is not None
-        task.cancel()
-        try:
-            await task
-        except BaseException:
-            pass
-        assert not connection.connected
-        assert (await _call(registry, "mcp__calc__add", a=4, b=5)).content == "9"
+        first_pid = int((await _call(registry, "mcp__calc__pid")).content)
+        os.kill(first_pid, signal.SIGKILL)
+        await asyncio.sleep(0.5)
+        # The SDK does not notice; the next call does, and reconnects.
+        added = await _call(registry, "mcp__calc__add", a=4, b=5)
+        assert added.success and added.content == "9"
+        assert int((await _call(registry, "mcp__calc__pid")).content) != first_pid
     finally:
         await servers.close(registry)
+
+
+def _start_http_server(transport: str, port: int) -> subprocess.Popen[bytes]:
+    return subprocess.Popen(
+        [sys.executable, str(SERVER), transport, str(port)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+@needs_mcp
+@pytest.mark.parametrize("transport", ["sse", "streamable-http"])
+async def test_a_restarted_http_server_is_reconnected(transport: str) -> None:
+    port = _free_port()
+    path = "/sse" if transport == "sse" else "/mcp"
+    proc = _start_http_server(transport, port)
+    registry = ToolRegistry()
+    config = {"name": "web", "transport": transport, "url": f"http://127.0.0.1:{port}{path}"}
+    servers = MCPServers(parse_mcp_servers([config]), connect_timeout=30)
+    try:
+        await servers.connect(registry)
+        assert (await _call(registry, "mcp__web__add", a=1, b=2)).content == "3"
+        proc.terminate()
+        proc.wait(timeout=10)
+        proc = _start_http_server(transport, port)
+        await asyncio.sleep(3)  # let the new server start listening
+
+        added = await _call(registry, "mcp__web__add", a=2, b=2)
+        assert added.success and added.content == "4"
+    finally:
+        await servers.close(registry)
+        proc.terminate()
+        proc.wait(timeout=10)

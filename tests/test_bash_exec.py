@@ -52,6 +52,15 @@ async def test_model_api_key_is_hidden_from_commands(tmp_path: Path, monkeypatch
     assert os.environ["RHO_AGENT_API_KEY"] == "sk-test-hidden"
 
 
+async def test_mcp_credentials_are_hidden_from_commands(tmp_path: Path, monkeypatch) -> None:
+    # Harbor passes MCP server headers in MCP_AUTH_* variables.
+    monkeypatch.setenv("MCP_AUTH_ABC123_0_0", "Bearer mcp-secret")
+    handler = BashHandler(working_dir=str(tmp_path))
+    out, _ = await _run(handler, command="env")
+    assert "mcp-secret" not in out.content and "PATH=" in out.content
+    assert os.environ["MCP_AUTH_ABC123_0_0"] == "Bearer mcp-secret"
+
+
 async def test_model_api_key_is_hidden_from_background_jobs(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("RHO_AGENT_API_KEY", "sk-test-hidden")
     handler = BashHandler(working_dir=str(tmp_path))

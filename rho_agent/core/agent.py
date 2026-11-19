@@ -6,6 +6,7 @@ Immutable once a Session starts.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from ..client.model import ModelClient
@@ -38,6 +39,7 @@ class Agent:
         self._registry = self._build_registry()
         # Connected on the first run (see connect_mcp); None without servers.
         self._mcp: Any | None = None
+        self._mcp_lock = asyncio.Lock()
         self._system_prompt: str | None = None  # lazily resolved
 
     def _build_registry(self) -> ToolRegistry:
@@ -103,17 +105,18 @@ class Agent:
         """
         if not self._config.mcp_servers:
             return None
-        if self._mcp is None:
-            from ..tools.mcp_client import MCPServers, parse_mcp_servers
+        async with self._mcp_lock:  # two sessions starting at once connect once
+            if self._mcp is None:
+                from ..tools.mcp_client import MCPServers, parse_mcp_servers
 
-            wanted = self._config.tools
-            mcp = MCPServers(
-                parse_mcp_servers(self._config.mcp_servers),
-                attach_images=wanted is None or "view_image" in wanted,
-            )
-            await mcp.connect(self._registry)
-            self._mcp = mcp
-        return self._mcp
+                wanted = self._config.tools
+                mcp = MCPServers(
+                    parse_mcp_servers(self._config.mcp_servers),
+                    attach_images=wanted is None or "view_image" in wanted,
+                )
+                await mcp.connect(self._registry)
+                self._mcp = mcp
+            return self._mcp
 
     async def close_mcp(self) -> None:
         """Disconnect MCP servers and remove their tools from the registry."""
