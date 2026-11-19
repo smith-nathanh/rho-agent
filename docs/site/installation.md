@@ -47,6 +47,7 @@ If you need optional features, add extras to the dependency:
 uv add 'rho-agent[db] @ git+https://github.com/smith-nathanh/rho-agent'
 uv add 'rho-agent[daytona] @ git+https://github.com/smith-nathanh/rho-agent'
 uv add 'rho-agent[otel] @ git+https://github.com/smith-nathanh/rho-agent'   # OpenTelemetry export
+uv add 'rho-agent[mcp] @ git+https://github.com/smith-nathanh/rho-agent'    # MCP server tools
 ```
 
 ## Install from source (development)

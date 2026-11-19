@@ -6,6 +6,7 @@ Immutable once a Session starts.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from ..client.model import ModelClient
@@ -36,6 +37,9 @@ class Agent:
         self._config = config or AgentConfig()
         self._sandbox_manager: Any | None = None
         self._registry = self._build_registry()
+        # Connected on the first run (see connect_mcp); None without servers.
+        self._mcp: Any | None = None
+        self._mcp_lock = asyncio.Lock()
         self._system_prompt: str | None = None  # lazily resolved
 
     def _build_registry(self) -> ToolRegistry:
@@ -91,6 +95,34 @@ class Agent:
         for handler in local._handlers.values():
             registry.register(handler)
         return registry
+
+    async def connect_mcp(self) -> Any | None:
+        """Connect the configured MCP servers and register their tools.
+
+        Idempotent: later calls return the same ``MCPServers`` until
+        ``close_mcp``. Unreachable servers are logged and skipped. Returns None
+        when no servers are configured.
+        """
+        if not self._config.mcp_servers:
+            return None
+        async with self._mcp_lock:  # two sessions starting at once connect once
+            if self._mcp is None:
+                from ..tools.mcp_client import MCPServers, parse_mcp_servers
+
+                wanted = self._config.tools
+                mcp = MCPServers(
+                    parse_mcp_servers(self._config.mcp_servers),
+                    attach_images=wanted is None or "view_image" in wanted,
+                )
+                await mcp.connect(self._registry)
+                self._mcp = mcp
+            return self._mcp
+
+    async def close_mcp(self) -> None:
+        """Disconnect MCP servers and remove their tools from the registry."""
+        mcp, self._mcp = self._mcp, None
+        if mcp is not None:
+            await mcp.close(self._registry)
 
     @property
     def sandbox_manager(self) -> Any | None:

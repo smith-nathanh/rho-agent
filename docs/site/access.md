@@ -33,7 +33,7 @@ In `read-only` and `workspace`:
 - Commands can read everything except credentials: `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.azure`, `~/.config/gcloud`, `~/.config/gh`, `~/.kube`, `~/.docker/config.json`, `~/.netrc`, `~/.git-credentials`. Add your own with `deny_read` (see [Settings](#settings)).
 - `.git/hooks` and `.git/config` stay read-only even inside the project. A planted hook or setting would otherwise run outside the sandbox the next time you use git. Commits work, including from a git worktree.
 - Commands can't connect to local services over Unix sockets: Docker, ssh-agent, tmux, D-Bus and the like. Those services run outside the sandbox, so reaching one would be a way out (`docker run -v ~:/host ...` can change anything). DNS lookups still work.
-- API keys (`*_API_KEY`, `RHO_AGENT_*`, AWS secrets) are removed from commands' environment.
+- API keys (`*_API_KEY`, `RHO_AGENT_*`, AWS secrets) and MCP server credentials (`MCP_AUTH_*`) are removed from commands' environment.
 - Network access is on. Turn it off with `network: false`.
 
 The agent is told its limits in the default system prompt. When a command fails because of the sandbox, a note saying so is added to its output.

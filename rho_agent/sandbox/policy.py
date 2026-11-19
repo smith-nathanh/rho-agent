@@ -83,6 +83,7 @@ DEFAULT_WRITABLE_CACHES: tuple[str, ...] = (
 DEFAULT_ENV_SCRUB: tuple[str, ...] = (
     "RHO_AGENT_*",
     "*_API_KEY",
+    "MCP_AUTH_*",  # MCP server credentials from Harbor; only rho-agent reads them
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",
 )

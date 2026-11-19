@@ -147,6 +147,13 @@ trial still has them:
 - Every task gets the same system prompt: the runner does not read an
   `AGENTS.md`, `CLAUDE.md` or skills folder that a task ships with. The exact
   prompt and tool list are recorded as a `system_prompt` event in `trace.jsonl`.
+- Skills: when a task sets `environment.skills_dir`, the adapter copies it to
+  `~/.agents/skills` and the runner lists those skills in the prompt.
+- MCP servers: a task's `environment.mcp_servers` (sse, streamable-http or
+  stdio, with headers) reach the runner as JSON in `RHO_AGENT_MCP_SERVERS`,
+  and the `mcp` extra is installed. Their tools are offered as
+  `mcp__<server>__<tool>`; a server that cannot be reached is skipped with a
+  warning in `stdout.txt`.
 
 - `qemu-*` tasks were not reliable under Docker on ARM Macs in earlier runs.
 - The `delegate` tool is disabled in this runner: a run measures one agent.

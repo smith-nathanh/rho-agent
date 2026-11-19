@@ -71,6 +71,9 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "RHO_AGENT_COMPACT_THRESHOLD",
         "RHO_AGENT_COMPACT_AT_TOKENS",
         "RHO_AGENT_REQUEST_TIMEOUT",
+        "RHO_AGENT_TASK_SKILLS",
+        "RHO_AGENT_MCP_SERVERS",
+        "RHO_AGENT_MCP_CONNECT_TIMEOUT",
     ):
         monkeypatch.delenv(name, raising=False)
     _FakeModelClient.instances = []
@@ -191,3 +194,88 @@ async def test_runner_runs_an_unpriced_model_without_a_ceiling(
     await runner.run_task("say done", str(work), bash_only=True)
 
     assert len(_FakeModelClient.instances[0].prompts) == 1
+
+
+def _skill_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = tmp_path / "home"
+    skill = home / ".agents" / "skills" / "cls-audit"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: cls-audit\ndescription: Measure cumulative layout shift.\n---\nSteps."
+    )
+    monkeypatch.setenv("HOME", str(home))
+
+
+@pytest.mark.parametrize("task_skills", [True, False])
+async def test_runner_lists_skills_only_when_the_task_has_them(
+    harness, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, task_skills: bool
+) -> None:
+    logs, work = harness
+    _skill_home(tmp_path, monkeypatch)
+    monkeypatch.setenv("RHO_AGENT_SKILLS", "1")  # ignored: only the task decides
+    monkeypatch.setenv("RHO_AGENT_CONFIRM_DONE", "0")
+    if task_skills:
+        monkeypatch.setenv("RHO_AGENT_TASK_SKILLS", "1")
+    # A skill shipped inside the task's repository is never listed.
+    repo_skill = work / ".claude" / "skills" / "repo-skill"
+    repo_skill.mkdir(parents=True)
+    (repo_skill / "SKILL.md").write_text(
+        "---\nname: repo-skill\ndescription: From the repo.\n---\n"
+    )
+    _FakeModelClient.script = [[StreamEvent(type="text", content="done"), _done(0.1)]]
+
+    await runner.run_task("task", str(work), bash_only=True)
+
+    events = [json.loads(line) for line in (logs / "trace.jsonl").read_text().splitlines()]
+    [setup] = [e for e in events if e["type"] == "system_prompt"]
+    listed = "cls-audit: Measure cumulative layout shift." in setup["content"]
+    assert listed is task_skills
+    assert "repo-skill" not in setup["content"]
+
+
+async def test_runner_connects_mcp_servers_and_calls_their_tools(
+    harness, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pytest.importorskip("mcp", reason="mcp extra not installed")
+    import sys
+
+    logs, work = harness
+    server = Path(__file__).parent.parent / "fixtures" / "mcp_test_server.py"
+    monkeypatch.setenv("RHO_AGENT_CONFIRM_DONE", "0")
+    monkeypatch.setenv(
+        "RHO_AGENT_MCP_SERVERS",
+        json.dumps(
+            [
+                {
+                    "name": "calc",
+                    "transport": "stdio",
+                    "command": sys.executable,
+                    "args": [str(server)],
+                },
+                {"name": "down", "transport": "sse", "url": "http://127.0.0.1:1/sse"},
+            ]
+        ),
+    )
+    monkeypatch.setenv("RHO_AGENT_MCP_CONNECT_TIMEOUT", "3")
+    _FakeModelClient.script = [
+        [
+            StreamEvent(
+                type="tool_call",
+                tool_call=ToolCall(id="m1", name="mcp__calc__add", arguments={"a": 20, "b": 22}),
+            ),
+            _done(0.1),
+        ],
+        [StreamEvent(type="text", content="42"), _done(0.1)],
+    ]
+
+    await runner.run_task("add", str(work), bash_only=True)
+
+    client = _FakeModelClient.instances[0]
+    offered = [t["function"]["name"] for t in client.prompts[0].tools]
+    assert "bash" in offered and "mcp__calc__add" in offered
+    state = State.from_jsonl((logs / "trace.jsonl").read_bytes())
+    [result] = [m for m in state.messages if m["role"] == "tool"]
+    assert result["content"] == "42"
+    err = capsys.readouterr().err
+    assert "MCP server calc: 5 tools" in err
+    assert "MCP server down unavailable" in err

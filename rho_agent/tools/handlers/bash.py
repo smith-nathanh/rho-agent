@@ -25,15 +25,22 @@ MAX_INLINE_OUTPUT_TOKENS = MAX_OUTPUT_TOKENS - 500
 
 DEFAULT_TIMEOUT = 300  # seconds
 
-# rho-agent's own model key. Commands never need it, and one that prints the
-# environment (``env``, ``printenv``) would copy it into the transcript and
-# the saved trace. Sandboxed commands lose it through the sandbox's scrub list.
+# rho-agent's own model key, and the MCP server credentials Harbor passes in
+# ``MCP_AUTH_*`` variables (rho-agent's MCP client reads them itself).
+# Commands never need them, and one that prints the environment (``env``,
+# ``printenv``) would copy them into the transcript and the saved trace.
+# Sandboxed commands lose them through the sandbox's scrub list.
 _HIDDEN_ENV = frozenset({API_KEY_ENV})
+_HIDDEN_ENV_PREFIXES = ("MCP_AUTH_",)
 
 
 def unsandboxed_env() -> dict[str, str]:
     """Environment for a command run without the OS sandbox."""
-    return {name: value for name, value in os.environ.items() if name not in _HIDDEN_ENV}
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name not in _HIDDEN_ENV and not name.startswith(_HIDDEN_ENV_PREFIXES)
+    }
 
 
 class BashHandler(ToolHandler):

@@ -76,8 +76,11 @@ daytona = ["daytona==2.0.0a13"]
 # OpenTelemetry trace export over OTLP/HTTP protobuf (http/json needs nothing)
 otel = ["opentelemetry-proto>=1.30.0"]
 
+# MCP servers as agent tools (sse, streamable-http, stdio)
+mcp = ["mcp>=1.9,<2"]
+
 # Everything
-all = ["rho-agent[db,excel,daytona,evals,harbor,otel]"]
+all = ["rho-agent[db,excel,daytona,evals,harbor,mcp,otel]"]
 
 [dependency-groups]
 dev = [

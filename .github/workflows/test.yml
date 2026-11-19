@@ -34,8 +34,9 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Install dependencies
-        # The daytona extra, so the Daytona v2 tests (SDK mocked) run.
-        run: uv sync --group dev --extra daytona --frozen
+        # The daytona extra, so the Daytona v2 tests (SDK mocked) run, and the
+        # mcp extra for the MCP client tests.
+        run: uv sync --group dev --extra daytona --extra mcp --frozen
 
       - name: Run tests with coverage
         run: uv run pytest --cov=rho_agent --cov-report=term-missing --cov-fail-under=35

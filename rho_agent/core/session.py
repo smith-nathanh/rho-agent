@@ -347,7 +347,8 @@ class Session:
         return await manager.get_sandbox()
 
     async def close(self) -> None:
-        """Clean up resources (Daytona sandbox teardown, etc.)."""
+        """Clean up resources (MCP connections, Daytona sandbox teardown, etc.)."""
+        await self._agent.close_mcp()
         manager = self._agent.sandbox_manager
         if manager is not None:
             await manager.close()
@@ -378,6 +379,8 @@ class Session:
         # built, the trace must not keep a run_start and user message for a run
         # that never reached the model.
         _ = self._agent.system_prompt
+        # MCP tools must be in the registry before the tool list is recorded.
+        await self._agent.connect_mcp()
         # Live OTLP export when RHO_AGENT_OTLP_ENDPOINT is set.
         from ..export.otlp_observer import maybe_attach_otlp_observer
 

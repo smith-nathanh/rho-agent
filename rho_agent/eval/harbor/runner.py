@@ -16,9 +16,11 @@ from dotenv import load_dotenv
 from rho_agent.client.model import ModelClient, default_model
 from rho_agent.core import Agent, AgentConfig, Session
 from rho_agent.core.events import AgentEvent, CompletionGate
+from rho_agent.core.project_context import render_skills, skills_in
 from rho_agent.core.state import State
 from rho_agent.export.atif import trace_to_atif
 from rho_agent.prompts import load_prompt, prepare_prompt
+from rho_agent.tools.mcp_client import MCP_SERVERS_ENV, parse_mcp_servers
 
 # Load .env file - try multiple locations
 # 1. Current directory
@@ -256,6 +258,12 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
     if view_image:
         wanted = view_image not in ("0", "false", "no", "off")
         tools = [t for t in tools if t != "view_image"] + (["view_image"] if wanted else [])
+    # Skills are listed only when the task declares a skills directory, which
+    # the Harbor agent copies to ~/.agents/skills. Only that folder is read.
+    if os.environ.get("RHO_AGENT_TASK_SKILLS") == "1":
+        listing = render_skills(skills_in([Path.home() / ".agents" / "skills"]))
+        if listing:
+            system_prompt = f"{system_prompt}\n\n{listing}"
     agent = Agent(
         AgentConfig(
             system_prompt=system_prompt,
@@ -264,11 +272,23 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
             tools=tools,
             working_dir=working_dir,
             # Every task gets the same prompt: an AGENTS.md or skills folder
-            # shipped with a task would otherwise be appended to it.
+            # shipped with a task would otherwise be appended to it. The
+            # task's declared skills are added to the prompt above instead.
             project_instructions=False,
             skills=False,
+            # The task's MCP servers, as JSON from the Harbor agent.
+            mcp_servers=parse_mcp_servers(os.environ.get(MCP_SERVERS_ENV)) or None,
         )
     )
+
+    # Connect MCP servers now so their tools are listed below. A server that
+    # cannot be reached is skipped with a warning.
+    mcp = await agent.connect_mcp()
+    if mcp is not None:
+        for name, connection in mcp.connections.items():
+            print(f"[rho-agent] MCP server {name}: {len(connection.tools)} tools", file=sys.stderr)
+        for name, error in mcp.failed.items():
+            print(f"[rho-agent] MCP server {name} unavailable: {error}", file=sys.stderr)
 
     # Log available tools for debugging
     tool_names = [h.name for h in agent.registry._handlers.values()]
@@ -433,6 +453,7 @@ async def run_task(instruction: str, working_dir: str = "/app", bash_only: bool 
             )
     finally:
         write_trajectory(force=True)
+        await session.close()
 
     print()  # Final newline
 
