@@ -82,6 +82,10 @@ class AgentConfig:
     )
     response_format: dict[str, Any] | None = None
     databases: dict[str, dict[str, Any]] | None = None
+    # MCP servers whose tools the agent gets, as mappings with name, transport
+    # ("sse", "streamable-http" or "stdio"), url or command/args, and optional
+    # headers. Needs the mcp extra. See rho_agent.tools.mcp_client.
+    mcp_servers: list[dict[str, Any]] | None = None
     # Context management. Compaction replaces older history with a summary
     # once the input grows past a threshold.
     #   auto_compact       turn automatic compaction on or off
@@ -128,6 +132,7 @@ class AgentConfig:
             "reasoning_effort",
             "response_format",
             "databases",
+            "mcp_servers",
             "auto_compact",
             "compact_threshold",
             "compact_at_tokens",
@@ -145,6 +150,11 @@ class AgentConfig:
         from .models import validate_compaction_settings
 
         self.access = Access.from_value(self.access)
+        if self.mcp_servers is not None:
+            from ..tools.mcp_client import parse_mcp_servers
+
+            # Validate now; keep plain mappings so the config stays serializable.
+            self.mcp_servers = [s.to_dict() for s in parse_mcp_servers(self.mcp_servers)]
         if self.tools is not None:
             self.tools = [str(name) for name in self.tools]
 
@@ -209,6 +219,8 @@ class AgentConfig:
             data["response_format"] = self.response_format
         if self.databases:
             data["databases"] = self.databases
+        if self.mcp_servers:
+            data["mcp_servers"] = [dict(server) for server in self.mcp_servers]
         if not self.auto_compact:
             data["auto_compact"] = False
         if not self.project_instructions:

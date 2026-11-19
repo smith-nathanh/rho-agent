@@ -241,6 +241,26 @@ When the Daytona backend is active (`--backend daytona`), all file and shell too
 
 See the [Daytona](daytona/) guide for setup, configuration, and file upload/download.
 
+## MCP server tools
+
+An agent can use the tools of [MCP](https://modelcontextprotocol.io) servers. Install the extra (`uv pip install -e ".[mcp]"`) and list the servers in `mcp_servers`:
+
+```yaml
+# agents/browser.yaml
+mcp_servers:
+  - name: playwright
+    transport: sse                 # sse, streamable-http (or http), stdio
+    url: http://playwright-mcp:3080/sse
+    headers:
+      Authorization: "Bearer ${PLAYWRIGHT_TOKEN}"   # read from the environment
+  - name: files
+    transport: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+```
+
+The servers are connected when the first `run()` starts, and each tool is offered to the model as `mcp__<server>__<tool>`. Images a tool returns are shown to the model when `view_image` is among the agent's tools, and replaced by a note otherwise. A server that cannot be reached within `RHO_AGENT_MCP_CONNECT_TIMEOUT` seconds (default 60) is skipped with a warning; a call that takes longer than `RHO_AGENT_MCP_CALL_TIMEOUT` seconds (default 600) fails. `Session.close()` disconnects the servers.
+
 ## Sub-agent tools
 
 rho-agent supports two patterns for spawning child agents. Both create independent sessions and disable further delegation to prevent unbounded recursion.

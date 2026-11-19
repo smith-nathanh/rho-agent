@@ -160,7 +160,16 @@ class RhoAgent(BaseInstalledAgent):
     options_model = RhoAgentOptions
     options: RhoAgentOptions
 
-    capabilities = AgentCapabilities(base_url=True, reasoning_effort=True, atif=True)
+    capabilities = AgentCapabilities(
+        base_url=True,
+        reasoning_effort=True,
+        atif=True,
+        # Skills are copied to ~/.agents/skills, where rho-agent looks for them.
+        skills=True,
+        # MCP servers reach the runner as JSON in RHO_AGENT_MCP_SERVERS.
+        mcp_servers=True,
+        mcp_http_headers=True,
+    )
 
     # The runner uses rho-agent's own ModelClient: the Responses API, falling
     # back to Chat Completions on servers without it. Harbor hands the
@@ -218,17 +227,20 @@ class RhoAgent(BaseInstalledAgent):
         archive of the ref, which needs no git in the sandbox. Daytona v2 puts
         its own minimal git first on PATH, and that git cannot run the
         ``git submodule`` step of uv's git install.
+
+        The ``mcp`` extra is added when the task has MCP servers.
         """
+        name = "rho-agent[mcp]" if self.mcp_servers else "rho-agent"
         if self.options.install_source == "git":
             repo = self.options.repo_url
             github = _github_repo(repo)
             if github is not None:
                 ref = quote(self._version or "HEAD", safe="/")
-                return f"rho-agent @ https://github.com/{github}/archive/{ref}.tar.gz"
+                return f"{name} @ https://github.com/{github}/archive/{ref}.tar.gz"
             ref = f"@{self._version}" if self._version else ""
-            return f"rho-agent @ git+{repo}{ref}"
+            return f"{name} @ git+{repo}{ref}"
         pin = f"=={self._version}" if self._version else ""
-        return f"rho-agent{pin}"
+        return f"{name}{pin}"
 
     @override
     async def install(self, environment: BaseEnvironment) -> None:
@@ -253,6 +265,47 @@ class RhoAgent(BaseInstalledAgent):
                 f'"{VENV_DIR}/bin/python" -c "import rho_agent.eval.harbor.runner"'
             ),
         )
+
+    # --- skills and MCP ---
+
+    def _skills_command(self) -> str | None:
+        """Copy the task's skills to ``~/.agents/skills``, where rho-agent finds them.
+
+        ``cp -R dir/.`` copies hidden files and does not fail on an empty
+        folder. A failed copy is reported and the agent runs without the skills.
+        """
+        if not self.skills_dir:
+            return None
+        # Built as a string: PurePosixPath drops a trailing ".".
+        source = shlex.quote(str(self.skills_dir).rstrip("/") + "/.")
+        return (
+            'mkdir -p "$HOME/.agents/skills" && '
+            f'cp -R {source} "$HOME/.agents/skills/" || '
+            f"echo 'rho-agent: could not copy skills from '{source} >&2"
+        )
+
+    def _mcp_servers_json(self) -> str | None:
+        """The task's MCP servers as JSON for the runner.
+
+        Header values are replaced by ``${VAR}`` references to Harbor's private
+        variables (passed in the exec env), so no credential is in the JSON.
+        """
+        if not self.mcp_servers:
+            return None
+        header_refs = self.mcp_header_env.refs
+        servers = []
+        for server in self.mcp_servers:
+            entry: dict[str, object] = {"name": server.name, "transport": server.transport}
+            if server.transport == "stdio":
+                entry["command"] = server.command
+                entry["args"] = list(server.args)
+            else:
+                entry["url"] = server.url
+                refs = header_refs.get(server.name)
+                if refs:
+                    entry["headers"] = {name: f"${{{var}}}" for name, var in refs.items()}
+            servers.append(entry)
+        return json.dumps(servers)
 
     # --- run ---
 
@@ -291,6 +344,11 @@ class RhoAgent(BaseInstalledAgent):
             env["RHO_AGENT_COMPACT_THRESHOLD"] = str(opts.compact_threshold)
         if opts.compact_at_tokens is not None:
             env["RHO_AGENT_COMPACT_AT_TOKENS"] = str(opts.compact_at_tokens)
+        if self.skills_dir:
+            env["RHO_AGENT_TASK_SKILLS"] = "1"
+        if servers := self._mcp_servers_json():
+            env["RHO_AGENT_MCP_SERVERS"] = servers
+            env.update(self.mcp_header_env.env)
         return env
 
     def _model_id(self) -> str:
@@ -317,7 +375,7 @@ class RhoAgent(BaseInstalledAgent):
         env = self._runner_env()
         self.logger.info(
             "Running rho-agent: model=%s bash_only=%s confirm_done=%s reviewer=%s "
-            "effort=%s cost_ceiling_usd=%s max_wall_seconds=%s",
+            "effort=%s cost_ceiling_usd=%s max_wall_seconds=%s skills=%s mcp_servers=%s",
             env["RHO_AGENT_MODEL"],
             self.options.bash_only,
             self.options.enable_confirm_done,
@@ -325,7 +383,11 @@ class RhoAgent(BaseInstalledAgent):
             self.options.reasoning_effort,
             self.options.cost_ceiling_usd,
             self.options.max_wall_seconds,
+            bool(self.skills_dir),
+            [server.name for server in self.mcp_servers],
         )
+        if skills_command := self._skills_command():
+            await self.exec_as_agent(environment, command=skills_command)
         await self.exec_as_agent(environment, command=self._run_command(instruction), env=env)
 
     # --- results ---

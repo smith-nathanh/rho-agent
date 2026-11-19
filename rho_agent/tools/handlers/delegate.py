@@ -128,6 +128,8 @@ class DelegateHandler(ToolHandler):
             system_prompt=parent_system_prompt or "",
             max_cost_usd=None,
             max_wall_seconds=None,
+            # The child uses the parent's MCP connections (added below).
+            mcp_servers=None,
         )
         child_agent = Agent(child_config)
         if parent_system_prompt is not None:
@@ -136,6 +138,12 @@ class DelegateHandler(ToolHandler):
         if "delegate" in child_agent.registry:
             child_agent.registry.unregister("delegate")
         share_sandbox(parent, child_agent)
+        if parent is not None:
+            from ..mcp_client import MCPToolHandler
+
+            for handler in list(parent.registry._handlers.values()):
+                if isinstance(handler, MCPToolHandler):
+                    child_agent.registry.register(handler)
 
         child_session = Session(
             child_agent, **child_session_kwargs(parent, child_state, share_client=True)

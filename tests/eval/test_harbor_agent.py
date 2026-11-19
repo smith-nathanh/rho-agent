@@ -281,3 +281,81 @@ def test_usage_falls_back_to_the_trace_when_tokens_json_is_missing(tmp_path: Pat
         230,
     )
     assert abs(context.cost_usd - 0.3) < 1e-9
+
+
+def test_skills_and_mcp_capabilities_are_on() -> None:
+    caps = RhoAgent.capabilities
+    assert caps.skills and caps.mcp_servers and caps.mcp_http_headers
+
+
+async def test_run_copies_skills_before_the_runner(tmp_path: Path) -> None:
+    env = _FakeEnvironment()
+    await _agent(tmp_path, skills_dir="/opt/task skills").run("task", env, AgentContext())
+
+    copy, run = env.calls[-2], env.calls[-1]
+    assert copy["command"].endswith(
+        'mkdir -p "$HOME/.agents/skills" && '
+        "cp -R '/opt/task skills/.' \"$HOME/.agents/skills/\" || "
+        "echo 'rho-agent: could not copy skills from ''/opt/task skills/.' >&2"
+    )
+    assert copy.get("user") is None  # as the agent user, whose HOME the runner reads
+    assert "-m rho_agent.eval.harbor.runner" in run["command"]
+    assert run["env"]["RHO_AGENT_TASK_SKILLS"] == "1"
+
+
+async def test_run_without_skills_or_mcp_adds_nothing(tmp_path: Path) -> None:
+    env = _FakeEnvironment()
+    await _agent(tmp_path).run("task", env, AgentContext())
+
+    assert len(env.calls) == 1
+    assert "RHO_AGENT_TASK_SKILLS" not in env.calls[0]["env"]
+    assert "RHO_AGENT_MCP_SERVERS" not in env.calls[0]["env"]
+    assert "[mcp]" not in _agent(tmp_path, install_source="git")._package_spec()
+
+
+async def test_run_passes_mcp_servers_as_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from harbor.models.task.config import MCPServerConfig
+
+    monkeypatch.setenv("PW_TOKEN", "secret-token")
+    servers = [
+        MCPServerConfig(name="playwright", transport="sse", url="http://playwright-mcp:3080/sse"),
+        MCPServerConfig(
+            name="api",
+            transport="http",
+            url="http://api:8080/mcp",
+            headers={"Authorization": "Bearer ${PW_TOKEN}"},
+        ),
+        MCPServerConfig(name="local", transport="stdio", command="npx", args=["srv"]),
+    ]
+    env = _FakeEnvironment()
+    agent = _agent(tmp_path, mcp_servers=servers, install_source="git", version="main")
+    await agent.run("task", env, AgentContext())
+
+    run_env = env.calls[-1]["env"]
+    passed = json.loads(run_env["RHO_AGENT_MCP_SERVERS"])
+    assert passed[0] == {
+        "name": "playwright",
+        "transport": "sse",
+        "url": "http://playwright-mcp:3080/sse",
+    }
+    assert passed[2] == {"name": "local", "transport": "stdio", "command": "npx", "args": ["srv"]}
+    # The header names a private variable that carries the resolved value.
+    [(header, ref)] = passed[1]["headers"].items()
+    assert passed[1]["transport"] == "streamable-http" and header == "Authorization"
+    variable = ref.removeprefix("${").removesuffix("}")
+    assert run_env[variable] == "Bearer secret-token"
+    assert "secret-token" not in run_env["RHO_AGENT_MCP_SERVERS"]
+    assert "secret-token" not in env.calls[-1]["command"]
+
+    # The runner reads the JSON back into the same servers.
+    from rho_agent.tools.mcp_client import parse_mcp_servers
+
+    assert [s.name for s in parse_mcp_servers(run_env["RHO_AGENT_MCP_SERVERS"])] == [
+        "playwright",
+        "api",
+        "local",
+    ]
+    # The mcp extra is installed only when there are servers.
+    assert agent._package_spec().startswith("rho-agent[mcp] @ https://github.com/")
