@@ -276,6 +276,8 @@ The sandbox stops an agent changing things outside the project by mistake. It do
 
 The built-in tools cover shell, file reading and editing, search, images and Excel files, plus query tools for SQLite, PostgreSQL, MySQL, Oracle and Vertica. See [Tools](docs/site/tools.md).
 
+An agent can also use the tools of any [MCP](https://modelcontextprotocol.io) server, over stdio, SSE or streamable HTTP. List the servers in `mcp_servers` in the agent's config and each tool appears as `mcp__<server>__<tool>`. A server that can't be reached is skipped with a warning. This needs the `mcp` extra (`uv pip install -e ".[mcp]"`). See [MCP server tools](docs/site/tools.md#mcp-server-tools).
+
 With `--backend daytona`, the shell and file tools run in a [Daytona](docs/site/daytona.md) cloud sandbox instead of on your machine.
 
 Every session writes a `trace.jsonl` of each model call, tool call and result. You can read it with `jq`, replay it in Python, or [export it](rho_agent/export/README.md) to Harbor's ATIF trajectory format. See [Observability](docs/site/observability.md).
