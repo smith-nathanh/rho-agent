@@ -30,7 +30,7 @@ from .errors import (
     InvalidModeError,
     PromptLoadError,
 )
-from .events import ApprovalHandler, announce_queued_approval
+from .events import ApprovalHandler
 from .formatting import (
     _is_interactive_terminal,
     _markup,
@@ -661,9 +661,10 @@ def main(
 
     # Set up approval handler
     approval_handler = ApprovalHandler()
+    approval_handler.working_dir = resolved_working_dir
     if queue_approvals or not sys.stdin.isatty():
         # Nobody can answer a prompt here; the monitor answers instead.
-        approval_handler.queue = ApprovalQueue(session, on_request=announce_queued_approval)
+        approval_handler.queue = ApprovalQueue(session, on_request=approval_handler.announce_queued)
     session.approval_callback = approval_handler.check_approval
 
     if run_prompt_text:
@@ -676,6 +677,7 @@ def main(
                     output,
                     upload_mappings=upload_mappings,
                     setup_commands=setup_commands,
+                    approval_handler=approval_handler,
                 )
             )
         else:
@@ -685,6 +687,7 @@ def main(
                     run_prompt_text,
                     upload_mappings=upload_mappings,
                     setup_commands=setup_commands,
+                    approval_handler=approval_handler,
                 )
             )
     else:

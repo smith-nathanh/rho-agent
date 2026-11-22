@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import re
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,6 +47,7 @@ _MAX_DIFF_LINES = 18
 
 # Exploration tools whose raw output is verbose; show a compact 1-line summary on success
 _COMPACT_TOOLS = frozenset({"read", "list", "glob"})
+_HAS_DURATION_RE = re.compile(r"\b\d+(?:\.\d+)?s\b")
 
 
 class _MinimalHeading(Heading):
@@ -276,7 +278,10 @@ def _compact_arg_target(
         limit = tool_args.get("limit")
         detail = ""
         if offset is not None and limit is not None:
-            detail = f"{offset}–{int(offset) + int(limit) - 1}"
+            try:
+                detail = f"{int(offset)}–{int(offset) + int(limit) - 1}"
+            except (TypeError, ValueError):
+                detail = f"{offset}+{limit}"
         elif offset is not None:
             detail = f"from {offset}"
         elif limit is not None:
@@ -416,7 +421,8 @@ def render_tool_end(
     else:
         status_row.append(f"× {error_text}", style=THEME.error)
 
-    if elapsed is not None and elapsed >= 0.05 and (not summary or "s" not in summary):
+    has_duration = bool(summary and _HAS_DURATION_RE.search(summary))
+    if elapsed is not None and elapsed >= 0.05 and not has_duration:
         status_row.append(f"  {_format_duration(elapsed)}", style=THEME.muted)
 
     rows.append(status_row)
@@ -770,9 +776,9 @@ def render_saved_sessions_table(
             row.append(str(idx))
         row.extend(
             [
-                info.id,
+                Text(info.id, style=THEME.primary),
                 Text(f"{glyph} {info.status}", style=color),
-                info.model,
+                Text(info.model, style=THEME.muted),
                 age,
                 _format_cost(info.cost_usd),
                 Text(info.display_preview, style=THEME.subtle),
@@ -827,7 +833,9 @@ class TurnRenderer:
 
         # Active in-flight tools keyed by tool_call_id -> (name, args, start_time)
         self._active_tools: dict[str, tuple[str | None, dict[str, Any] | None, float]] = {}
+        self._tool_seq = 0
         self._had_output = False
+        self._in_text_stream = False
         self._in_tool_section = False
         self._showed_agent_anchor = False
 
@@ -839,6 +847,8 @@ class TurnRenderer:
     def stop(self) -> None:
         """Cleanly finalize any open live displays and stop background timers."""
         self._stop_spinner()
+        self._active_tools.clear()
+        self._flush_text_stream()
         self._flush_markdown(final=True)
 
     def _spinner_renderable(self) -> RenderableType:
@@ -875,21 +885,21 @@ class TurnRenderer:
             self._spinner_live = Live(
                 self._spinner_renderable(),
                 console=self._console,
-                refresh_per_second=6,
+                auto_refresh=False,
                 transient=True,
             )
-            self._spinner_live.start()
+            self._spinner_live.start(refresh=True)
             with suppress(RuntimeError):
                 loop = asyncio.get_running_loop()
                 self._ticker_task = loop.create_task(self._tick_loop())
         else:
-            self._spinner_live.update(self._spinner_renderable())
+            self._spinner_live.update(self._spinner_renderable(), refresh=True)
 
     async def _tick_loop(self) -> None:
         try:
             while self._spinner_live is not None:
                 self._frame_idx = (self._frame_idx + 1) % len(_SPINNER_FRAMES)
-                self._spinner_live.update(self._spinner_renderable())
+                self._spinner_live.update(self._spinner_renderable(), refresh=True)
                 await asyncio.sleep(0.25)
         except asyncio.CancelledError:
             pass
@@ -914,6 +924,12 @@ class TurnRenderer:
             self._console.print(render_agent_divider(after_tools=False))
             self._showed_agent_anchor = True
 
+    def _flush_text_stream(self) -> None:
+        """Terminate an in-progress raw (non-Markdown) text stream with a newline."""
+        if self._in_text_stream:
+            print(flush=True)
+            self._in_text_stream = False
+
     def _update_markdown(self) -> None:
         combined = "".join(self._text_chunks)
         if not combined.strip():
@@ -927,6 +943,7 @@ class TurnRenderer:
                 console=self._console,
                 refresh_per_second=12,
                 transient=False,
+                vertical_overflow="visible",
             )
             self._md_live.start()
             self._last_md_refresh = now
@@ -956,7 +973,19 @@ class TurnRenderer:
     def pause_for_prompt(self) -> None:
         """Suspend live displays cleanly before interactive approval input."""
         self._stop_spinner()
+        self._flush_text_stream()
         self._flush_markdown(final=True)
+
+    def resume_after_prompt(self) -> None:
+        """Resume live spinner cleanly after an approval prompt finishes."""
+        now = monotonic()
+        if self._active_tools:
+            # Reset start timers so waiting on the user isn't billed as tool execution time
+            for key, (tname, targs, _started) in list(self._active_tools.items()):
+                self._active_tools[key] = (tname, targs, now)
+            self._set_spinner("Running")
+        else:
+            self._set_spinner("Thinking")
 
     def _pop_tool(
         self, event: AgentEvent
@@ -986,8 +1015,10 @@ class TurnRenderer:
                 self._text_chunks.append(chunk)
                 self._update_markdown()
             else:
-                if not self._had_output:
-                    self._ensure_response_header()
+                if not self._in_text_stream:
+                    if self._interactive_tty:
+                        self._ensure_response_header()
+                    self._in_text_stream = True
                 self._had_output = True
                 print(chunk, end="", flush=True)
             return
@@ -1003,10 +1034,12 @@ class TurnRenderer:
             "error",
             "cancelled",
         ):
+            self._flush_text_stream()
             self._flush_markdown(final=True)
 
         if etype == "tool_start":
-            key = event.tool_call_id or f"{event.tool_name}:{len(self._active_tools)}"
+            self._tool_seq += 1
+            key = event.tool_call_id or f"{event.tool_name}:{self._tool_seq}"
             self._active_tools[key] = (event.tool_name, event.tool_args, monotonic())
             if self._interactive_tty:
                 # Show all in-flight tools live; commit atomically on tool_end
@@ -1057,20 +1090,28 @@ class TurnRenderer:
         elif etype == "tool_blocked":
             self._stop_spinner()
             tname, targs, elapsed = self._pop_tool(event)
+            # Remaining sibling tool calls in the same batch are skipped by Session
+            self._active_tools.clear()
             self._in_tool_section = True
             self._had_output = True
-            self._console.print(
-                render_tool_block(
-                    tname,
-                    targs,
-                    None,
-                    None,
-                    working_dir=self._working_dir,
-                    elapsed=elapsed,
-                    blocked=True,
+            if self._interactive_tty:
+                self._console.print(
+                    render_tool_block(
+                        tname,
+                        targs,
+                        None,
+                        None,
+                        working_dir=self._working_dir,
+                        elapsed=elapsed,
+                        blocked=True,
+                    )
                 )
-            )
-            self._set_spinner("Thinking")
+                self._set_spinner("Thinking")
+            else:
+                footer = Text()
+                footer.append("  └ ", style=THEME.rail)
+                footer.append("rejected by user", style=THEME.warning)
+                self._console.print(footer)
 
         elif etype == "retry":
             self._stop_spinner()
@@ -1099,10 +1140,13 @@ class TurnRenderer:
                 )
             )
 
+        elif etype == "cancelled":
+            self._stop_spinner()
+            self._active_tools.clear()
+
         elif etype == "turn_complete":
             self._stop_spinner()
-            if not self._render_markdown and self._had_output:
-                print()
+            self._active_tools.clear()
             if self._token_status:
                 self._token_status.update(event.usage)
             if self._show_turn_footer:
@@ -1118,6 +1162,7 @@ class TurnRenderer:
 
         elif etype == "error":
             self._stop_spinner()
+            self._active_tools.clear()
             self._console.print(
                 Panel(
                     _markup(str(event.content or "Unknown error"), THEME.error),

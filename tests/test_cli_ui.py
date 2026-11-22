@@ -289,3 +289,202 @@ def test_parallel_tools_commit_atomically_without_interleaving() -> None:
     lines = [ln.strip() for ln in cap.get().splitlines() if ln.strip()]
     assert any("a.py" in ln and "lines 1–10 of 10" in ln for ln in lines)
     assert any("list" in ln and "5 items" in ln for ln in lines)
+
+
+def test_tool_end_shows_elapsed_when_summary_contains_letter_s() -> None:
+    out = _render_to_str(render_tool_end("grep", {"matches": 5}, "a\nb", elapsed=0.3))
+    assert "5 matches" in out
+    assert "0.3s" in out
+
+    # Does not duplicate when summary already includes a duration
+    bash_out = _render_to_str(
+        render_tool_end(
+            "bash", {"exit_code": 0, "duration_seconds": 0.4}, '{"exit_code": 0}', elapsed=0.5
+        )
+    )
+    assert "0.4s" in bash_out
+    assert "0.5s" not in bash_out
+
+
+def test_malformed_read_offset_does_not_crash() -> None:
+    out = _render_to_str(
+        render_tool_start("read", {"path": "foo.py", "offset": "bad", "limit": "ten"})
+    )
+    assert "foo.py" in out
+
+
+def test_markup_injection_safety_in_tables(tmp_path: Path) -> None:
+    from rho_agent.cli import monitor, session_table
+    from rho_agent.cli.ui import render_saved_sessions_table
+
+    store = SessionStore(tmp_path / "sessions")
+    sdir = store.base_dir / "deadbeef"
+    sdir.mkdir(parents=True)
+    now = datetime.now(UTC).isoformat()
+    (sdir / "meta.json").write_text(
+        json.dumps(
+            {
+                "id": "deadbeef",
+                "status": "waiting_approval",
+                "model": "gpt[v2]/[/bold]",
+                "access": "workspace",
+                "cwd": str(tmp_path / "[bracket-dir]"),
+                "pid": os.getpid(),
+                "host": socket.gethostname(),
+                "user": "u[/red]",
+                "first_prompt": "run pytest tests/test_x.py[param]",
+                "cost_usd": 0.01,
+                "started_at": now,
+                "last_activity": now,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (sdir / "approvals").mkdir()
+    (sdir / "approvals" / "req1.json").write_text(
+        json.dumps(
+            {
+                "id": "req1",
+                "session_id": "deadbeef",
+                "tool_name": "bash",
+                "tool_args": {"command": 'echo "[/bold]" && pytest test.py[param]'},
+                "requested_at": now,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    sessions = store.list()
+    # None of these should raise MarkupError or strip literal brackets
+    saved_out = _render_to_str(render_saved_sessions_table(sessions))
+    assert "gpt[v2]/[/bold]" in saved_out
+
+    with session_table.console.capture() as cap:
+        session_table.print_sessions(sessions)
+    assert "[bracket-dir]" in cap.get()
+
+    mon = monitor.MonitorSession(store.base_dir)
+    with monitor.console.capture() as cap:
+        mon._cmd_approvals()
+    out = cap.get()
+    assert "[/bold]" in out
+    assert "test.py[param]" in out
+
+
+def test_read_key_nonblocking_drains_long_escape_sequences() -> None:
+    from rho_agent.cli.monitor_live import _read_key_nonblocking
+
+    r_fd, w_fd = os.pipe()
+    try:
+        # Shift+Up (\x1b[1;2A) followed by 'q': trailing 'A' must NOT leak as approve-all
+        os.write(w_fd, b"\x1b[1;2Aq")
+        assert _read_key_nonblocking(0.1, fd=r_fd) == "ESC_SEQ"
+        assert _read_key_nonblocking(0.1, fd=r_fd) == "q"
+
+        # Standard CSI and SS3 arrow sequences
+        os.write(w_fd, b"\x1b[A\x1b[B\x1bOA\x1bOB")
+        assert _read_key_nonblocking(0.1, fd=r_fd) == "UP"
+        assert _read_key_nonblocking(0.1, fd=r_fd) == "DOWN"
+        assert _read_key_nonblocking(0.1, fd=r_fd) == "UP"
+        assert _read_key_nonblocking(0.1, fd=r_fd) == "DOWN"
+    finally:
+        os.close(r_fd)
+        os.close(w_fd)
+
+
+def test_turn_renderer_clears_active_tools_and_non_tty_blocked() -> None:
+    # Interactive tool_blocked clears sibling active tools
+    c = Console(width=100, force_terminal=False, color_system=None)
+    r = TurnRenderer(console=c, interactive_tty=True, render_markdown=True)
+    with c.capture() as cap:
+        r.on_event(
+            AgentEvent(
+                type="tool_start",
+                tool_name="bash",
+                tool_call_id="t1",
+                tool_args={"command": "rm -rf /"},
+            )
+        )
+        r.on_event(
+            AgentEvent(
+                type="tool_start", tool_name="read", tool_call_id="t2", tool_args={"path": "x.py"}
+            )
+        )
+        r.on_event(AgentEvent(type="tool_blocked", tool_name="bash", tool_call_id="t1"))
+        assert r._active_tools == {}
+        r.on_event(AgentEvent(type="text", content="Understood, stopping."))
+        r.on_event(AgentEvent(type="turn_complete", usage={}))
+        r.stop()
+    out = cap.get()
+    assert "rejected by user" in out
+    assert "ρ" in out
+    assert "Understood, stopping." in out
+
+    # Non-TTY tool_blocked does not print tool header twice
+    c2 = Console(width=100, force_terminal=False, color_system=None)
+    r2 = TurnRenderer(console=c2, interactive_tty=False, render_markdown=False)
+    with c2.capture() as cap2:
+        r2.on_event(
+            AgentEvent(
+                type="tool_start",
+                tool_name="bash",
+                tool_call_id="t1",
+                tool_args={"command": "echo hi"},
+            )
+        )
+        r2.on_event(AgentEvent(type="tool_blocked", tool_name="bash", tool_call_id="t1"))
+        r2.stop()
+    out2 = cap2.get()
+    assert out2.count("echo hi") == 1
+    assert "rejected by user" in out2
+
+
+def test_tail_trace_lines_bounded_seek_and_narrow_mission_control(tmp_path: Path) -> None:
+    from rho_agent.cli.monitor_live import _tail_trace_lines
+
+    store = SessionStore(tmp_path / "sessions")
+    now = datetime.now(UTC).isoformat()
+
+    # Create 18 sessions to exercise viewport scrolling and narrow layout
+    for i in range(18):
+        sid = f"aa0000{i:02x}"
+        sdir = store.base_dir / sid
+        sdir.mkdir(parents=True)
+        (sdir / "meta.json").write_text(
+            json.dumps(
+                {
+                    "id": sid,
+                    "status": "running" if i == 0 else "completed",
+                    "model": "gpt-6.1-terra",
+                    "cwd": str(tmp_path),
+                    "pid": os.getpid(),
+                    "host": socket.gethostname(),
+                    "first_prompt": f"Task {i}",
+                    "started_at": now,
+                    "last_activity": now,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    # Write > 80KB trace on the first session to test bounded EOF seek
+    big_dir = store.base_dir / "aa000000"
+    with open(big_dir / "trace.jsonl", "w", encoding="utf-8") as f:
+        for i in range(1200):
+            f.write(
+                json.dumps(
+                    {"type": "message", "role": "assistant", "content": f"line-{i} " + ("x" * 60)}
+                )
+                + "\n"
+            )
+
+    tailed = _tail_trace_lines(big_dir, limit=5)
+    assert len(tailed) == 5
+    assert "line-1199" in tailed[-1]
+
+    mc = MissionControl(store)
+    mc._move_selection(10)
+    c = Console(width=70, height=16, force_terminal=False, color_system=None)
+    with c.capture() as cap:
+        c.print(mc.build_layout())
+    assert "Fleet" in cap.get()

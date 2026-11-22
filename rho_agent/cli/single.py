@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ..core.events import AgentEvent
 from ..core.session import Session
-from .events import handle_event
+from .events import ApprovalHandler, handle_event
 from .formatting import (
     _is_interactive_terminal,
     _markup,
@@ -110,6 +110,7 @@ async def run_single(
     *,
     upload_mappings: list[tuple[str, str]] | None = None,
     setup_commands: list[str] | None = None,
+    approval_handler: ApprovalHandler | None = None,
 ) -> None:
     """Run a single prompt and exit."""
     loop = asyncio.get_event_loop()
@@ -133,11 +134,17 @@ async def run_single(
     def on_cancel() -> None:
         if renderer is not None:
             renderer.pause_for_prompt()
-        console.print(f"\n{_markup('⊘ Cancelling…', THEME.warning)}")
+        console.print(f"\n{_markup('Cancelling…', THEME.warning)}")
         session.cancel()
 
     if platform.system() != "Windows":
         loop.add_signal_handler(signal.SIGINT, on_cancel)
+
+    prev_before = approval_handler.before_prompt if approval_handler else None
+    prev_after = approval_handler.after_prompt if approval_handler else None
+    if approval_handler is not None and renderer is not None:
+        approval_handler.before_prompt = renderer.pause_for_prompt
+        approval_handler.after_prompt = renderer.resume_after_prompt
 
     try:
         # Upload files to sandbox before running
@@ -156,7 +163,7 @@ async def run_single(
             if renderer is not None:
                 if event.type == "cancelled":
                     renderer.stop()
-                    console.print(_markup("⊘ Cancelled", THEME.muted))
+                    console.print(_markup("Cancelled", THEME.muted))
                     return
                 renderer.on_event(event)
                 return
@@ -176,6 +183,9 @@ async def run_single(
     finally:
         if renderer is not None:
             renderer.stop()
+        if approval_handler is not None:
+            approval_handler.before_prompt = prev_before
+            approval_handler.after_prompt = prev_after
         if platform.system() != "Windows":
             loop.remove_signal_handler(signal.SIGINT)
         await session.close()
@@ -188,6 +198,7 @@ async def run_single_with_output(
     *,
     upload_mappings: list[tuple[str, str]] | None = None,
     setup_commands: list[str] | None = None,
+    approval_handler: ApprovalHandler | None = None,
 ) -> bool:
     """Run a single prompt and write final response to file.
 
@@ -226,11 +237,17 @@ async def run_single_with_output(
     def on_cancel() -> None:
         if renderer is not None:
             renderer.pause_for_prompt()
-        console.print(f"\n{_markup('⊘ Cancelling…', THEME.warning)}")
+        console.print(f"\n{_markup('Cancelling…', THEME.warning)}")
         session.cancel()
 
     if platform.system() != "Windows":
         loop.add_signal_handler(signal.SIGINT, on_cancel)
+
+    prev_before = approval_handler.before_prompt if approval_handler else None
+    prev_after = approval_handler.after_prompt if approval_handler else None
+    if approval_handler is not None and renderer is not None:
+        approval_handler.before_prompt = renderer.pause_for_prompt
+        approval_handler.after_prompt = renderer.resume_after_prompt
 
     collected_text: list[str] = []
     cancelled = False
@@ -278,6 +295,9 @@ async def run_single_with_output(
     finally:
         if renderer is not None:
             renderer.stop()
+        if approval_handler is not None:
+            approval_handler.before_prompt = prev_before
+            approval_handler.after_prompt = prev_after
         if platform.system() != "Windows":
             loop.remove_signal_handler(signal.SIGINT)
         await session.close()

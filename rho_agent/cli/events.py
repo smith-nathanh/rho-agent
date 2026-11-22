@@ -35,15 +35,25 @@ class ApprovalHandler:
     def __init__(self) -> None:
         # When set, requests go to the monitor instead of this terminal.
         self.queue: ApprovalQueue | None = None
-        # Optional hook called right before printing an interactive prompt
-        # (used by TurnRenderer to pause live spinners cleanly).
+        # Optional hooks called around interactive prompts or queued announcements
+        # (used by TurnRenderer to pause and resume live spinners cleanly).
         self.before_prompt: Callable[[], None] | None = None
+        self.after_prompt: Callable[[], None] | None = None
         self.working_dir: str | None = None
+
+    def announce_queued(self, request: ApprovalRequest) -> None:
+        """Pause any active live display and announce a queued approval."""
+        if self.before_prompt is not None:
+            self.before_prompt()
+        announce_queued_approval(request, working_dir=self.working_dir)
 
     async def check_approval(self, tool_name: str, tool_args: dict[str, Any]) -> bool:
         """Ask the user. Returns True if approved."""
         if self.queue is not None:
-            return await self.queue(tool_name, tool_args)
+            approved = await self.queue(tool_name, tool_args)
+            if approved and self.after_prompt is not None:
+                self.after_prompt()
+            return approved
 
         if self.before_prompt is not None:
             self.before_prompt()
@@ -57,15 +67,23 @@ class ApprovalHandler:
             response = input().strip().lower()
         except (EOFError, KeyboardInterrupt):
             return False
-        return response in ("y", "yes")
+        approved = response in ("y", "yes")
+        if approved and self.after_prompt is not None:
+            self.after_prompt()
+        return approved
 
 
-def announce_queued_approval(request: ApprovalRequest) -> None:
+def announce_queued_approval(
+    request: ApprovalRequest,
+    *,
+    working_dir: str | None = None,
+) -> None:
     """Tell the user a tool call is waiting for an answer in the monitor."""
     panel, _ = render_approval_card(
         request.tool_name,
         request.tool_args,
         request_id=request.id,
+        working_dir=working_dir,
     )
     console.print()
     console.print(panel)

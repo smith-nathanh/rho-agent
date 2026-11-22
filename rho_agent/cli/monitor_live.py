@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
+import os
+import select
+import signal
 import sys
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -11,10 +13,16 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None  # type: ignore[assignment]
+
 from rich import box
 from rich.console import Group, RenderableType
 from rich.layout import Layout
 from rich.live import Live
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -26,12 +34,43 @@ from .formatting import (
     _format_cost,
     _format_token_count,
     _format_tool_signature,
+    _is_interactive_terminal,
     _shorten_path,
 )
 from .session_table import _ago, _project_label, build_fleet_summary, fleet_counts
 from .state import console
 from .theme import THEME, status_style, tool_visual
 from .ui import _build_edit_diff, _compact_arg_target
+
+_TAIL_CHUNK_BYTES = 64 * 1024
+# Cache of (path, limit) -> (mtime_ns, size, lines)
+_TRACE_TAIL_CACHE: dict[tuple[Path, int], tuple[int, int, list[str]]] = {}
+
+
+def write_directive(session_dir: Path, text: str) -> tuple[bool, str, str]:
+    """Append a directive for ``session_dir``.
+
+    Returns ``(ok, detail_message, effective_session_status)``.
+    """
+    meta = read_meta(session_dir)
+    status = effective_status(meta) if meta else "running"
+    if status not in LIVE_STATUSES and meta.get("parent_session_id"):
+        return False, f"{session_dir.name} has finished ({status}); nothing to steer", status
+
+    path = session_dir / "directives.jsonl"
+    entry = json.dumps({"text": text}) + "\n"
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            if fcntl is not None:
+                fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                f.write(entry)
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(f, fcntl.LOCK_UN)
+        return True, f"directive queued for {session_dir.name}", status
+    except OSError as exc:
+        return False, f"Failed to write directive: {exc}", status
 
 
 def _event_timestamp(event: dict[str, Any]) -> str:
@@ -254,25 +293,54 @@ def _flatten_fleet(
 
 
 def _tail_trace_lines(session_dir: Path | None, limit: int = 24) -> list[str]:
-    """Read the last ``limit`` non-empty lines of a session's ``trace.jsonl``."""
+    """Read the last ``limit`` non-empty lines of ``trace.jsonl`` via bounded EOF seek + cache."""
     if session_dir is None:
         return []
     trace_path = session_dir / "trace.jsonl"
-    if not trace_path.exists():
-        return []
     try:
-        lines = [ln for ln in trace_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-        return lines[-limit:]
+        st = trace_path.stat()
+    except OSError:
+        return []
+
+    cache_key = (trace_path, limit)
+    cached = _TRACE_TAIL_CACHE.get(cache_key)
+    if cached is not None and cached[0] == st.st_mtime_ns and cached[1] == st.st_size:
+        return cached[2]
+
+    try:
+        with open(trace_path, "rb") as f:
+            size = st.st_size
+            if size <= _TAIL_CHUNK_BYTES:
+                data = f.read()
+                lines = [
+                    ln for ln in data.decode("utf-8", errors="replace").splitlines() if ln.strip()
+                ]
+            else:
+                f.seek(size - _TAIL_CHUNK_BYTES)
+                data = f.read(_TAIL_CHUNK_BYTES)
+                text = data.decode("utf-8", errors="replace")
+                # Drop potentially partial first line from mid-file seek
+                first_nl = text.find("\n")
+                if first_nl != -1:
+                    text = text[first_nl + 1 :]
+                lines = [ln for ln in text.splitlines() if ln.strip()]
+        result = lines[-limit:]
+        if len(_TRACE_TAIL_CACHE) > 64:
+            _TRACE_TAIL_CACHE.clear()
+        _TRACE_TAIL_CACHE[cache_key] = (st.st_mtime_ns, st.st_size, result)
+        return result
     except OSError:
         return []
 
 
-def _read_key_nonblocking(timeout: float) -> str | None:
-    """Read a single keypress (including arrow escape sequences) within ``timeout`` seconds."""
-    import os
-    import select
+def _read_key_nonblocking(timeout: float, *, fd: int | None = None) -> str | None:
+    """Read a single keypress within ``timeout`` seconds, draining full escape sequences.
 
-    fd = sys.stdin.fileno()
+    Properly drains multi-byte CSI/SS3 sequences (e.g. Shift+Arrow ``\\x1b[1;2A``,
+    PgUp ``\\x1b[5~``, F-keys) so trailing bytes never leak as hotkeys.
+    """
+    if fd is None:
+        fd = sys.stdin.fileno()
     ready, _, _ = select.select([fd], [], [], timeout)
     if not ready:
         return None
@@ -282,13 +350,42 @@ def _read_key_nonblocking(timeout: float) -> str | None:
     ch = raw.decode("utf-8", errors="ignore")
     if ch == "\x1b":
         more, _, _ = select.select([fd], [], [], 0.03)
-        if more:
-            seq = os.read(fd, 2).decode("utf-8", errors="ignore")
-            if seq == "[A":
+        if not more:
+            return "ESC"
+        second = os.read(fd, 1)
+        if not second:
+            return "ESC"
+        seq = bytearray(second)
+        if second == b"[":
+            # CSI sequence: read until final byte in 0x40..0x7E (or max 16 bytes)
+            for _ in range(15):
+                nxt, _, _ = select.select([fd], [], [], 0.02)
+                if not nxt:
+                    break
+                b = os.read(fd, 1)
+                if not b:
+                    break
+                seq.extend(b)
+                if 0x40 <= b[0] <= 0x7E:
+                    break
+            decoded = seq.decode("utf-8", errors="ignore")
+            if decoded == "[A":
                 return "UP"
-            if seq == "[B":
+            if decoded == "[B":
                 return "DOWN"
-        return "ESC"
+            return "ESC_SEQ"
+        if second == b"O":
+            # SS3 sequence (application cursor mode arrows, F1-F4)
+            nxt, _, _ = select.select([fd], [], [], 0.02)
+            if nxt:
+                seq.extend(os.read(fd, 1))
+            decoded = seq.decode("utf-8", errors="ignore")
+            if decoded == "OA":
+                return "UP"
+            if decoded == "OB":
+                return "DOWN"
+            return "ESC_SEQ"
+        return "ESC_SEQ"
     return ch
 
 
@@ -458,20 +555,32 @@ class MissionControl:
             table.add_column("Task", ratio=1, no_wrap=True, overflow="ellipsis")
 
         now = datetime.now(UTC)
-        last_cwd: str | None = None
         extra_cols = int(show_active) + int(show_cost) + int(show_task)
+
+        # Build all display rows first so we can apply clean viewport scrolling
+        rendered_rows: list[tuple[list[Any], str, bool]] = []
+        last_cwd: str | None = None
+        selected_row_idx = 0
 
         for info, branches in flat:
             if not branches and info.cwd != last_cwd:
                 last_cwd = info.cwd
-                table.add_row(
-                    "",
-                    Text(_project_label(info.cwd), style=f"bold {THEME.secondary}"),
-                    "",
-                    *([""] * extra_cols),
+                rendered_rows.append(
+                    (
+                        [
+                            "",
+                            Text(_project_label(info.cwd), style=f"bold {THEME.secondary}"),
+                            "",
+                            *([""] * extra_cols),
+                        ],
+                        "",
+                        False,
+                    )
                 )
 
             is_sel = selected is not None and info.id == selected.id
+            if is_sel:
+                selected_row_idx = len(rendered_rows)
             cursor = Text("›", style=f"bold {THEME.accent}") if is_sel else Text(" ")
 
             id_cell = Text()
@@ -519,11 +628,32 @@ class MissionControl:
                 )
 
             row_style = f"on {THEME.selection_bg}" if is_sel else ""
+            rendered_rows.append((row_cells, row_style, is_sel))
+
+        # Viewport slicing around selected row when fleet exceeds terminal height
+        # Chrome: header(3) + footer(2) + panel borders(2) + table header(1) = 8 rows
+        max_visible = max(console.height - 9, 5)
+        total_rows = len(rendered_rows)
+        start = 0
+        end = total_rows
+        if total_rows > max_visible:
+            half = max_visible // 2
+            start = max(0, min(selected_row_idx - half, total_rows - max_visible))
+            end = start + max_visible
+
+        scroll_tag = ""
+        if start > 0 or end < total_rows:
+            scroll_tag = f" [{THEME.muted}]{start + 1}–{end}/{total_rows}[/{THEME.muted}]"
+
+        for row_cells, row_style, _ in rendered_rows[start:end]:
             table.add_row(*row_cells, style=row_style)
 
         return Panel(
             table,
-            title=f"[{THEME.primary}]Fleet[/{THEME.primary}] [{THEME.muted}]({len(flat)})[/{THEME.muted}]",
+            title=(
+                f"[{THEME.primary}]Fleet[/{THEME.primary}] "
+                f"[{THEME.muted}]({len(flat)})[/{THEME.muted}]{scroll_tag}"
+            ),
             title_align="left",
             box=box.SQUARE,
             border_style=THEME.border_active,
@@ -581,14 +711,14 @@ class MissionControl:
             req_body = Text()
             req_body.append(sig, style=THEME.primary)
             req_body.append("\n")
-            req_body.append("a approve   x deny", style=THEME.warning)
+            req_body.append("a approve   A all   x deny", style=THEME.warning)
             if len(sel_reqs) > 1:
                 req_body.append(f"   (+{len(sel_reqs) - 1} more)", style=THEME.muted)
             blocks.append(Text(""))
             blocks.append(
                 Panel(
                     req_body,
-                    title=f"[{THEME.warning}]Approval · {req.id}[/{THEME.warning}]",
+                    title=f"[{THEME.warning}]Approval · {escape(req.id)}[/{THEME.warning}]",
                     title_align="left",
                     box=box.SQUARE,
                     border_style=THEME.warning,
@@ -620,7 +750,10 @@ class MissionControl:
 
         return Panel(
             Group(*blocks),
-            title=f"[{THEME.primary}]Inspector[/{THEME.primary}] [{THEME.muted}]#{selected.id}[/{THEME.muted}]",
+            title=(
+                f"[{THEME.primary}]Inspector[/{THEME.primary}] "
+                f"[{THEME.muted}]#{escape(selected.id)}[/{THEME.muted}]"
+            ),
             title_align="left",
             box=box.SQUARE,
             border_style=THEME.border,
@@ -639,22 +772,38 @@ class MissionControl:
                 style=THEME.muted,
             )
 
-        keys = (
-            [
+        width = console.width
+        if width < 82:
+            keys = [
                 ("↑↓", "nav"),
                 ("a", "ok"),
                 ("x", "deny"),
                 ("p", "pause"),
+                ("c", "stop"),
+                ("d", "dir"),
+                (":", "sh"),
+                ("q", "quit"),
+            ]
+            sep = " "
+        elif width < 112:
+            keys = [
+                ("↑↓", "nav"),
+                ("a", "ok"),
+                ("x", "deny"),
+                ("p", "pause"),
+                ("c", "cancel"),
                 ("d", "dir"),
                 ("w", "watch"),
-                ("f", "filter"),
+                ("f", "live"),
                 (":", "shell"),
                 ("q", "quit"),
             ]
-            if console.width < 105
-            else [
+            sep = "  "
+        else:
+            keys = [
                 ("↑↓", "select"),
                 ("a", "approve"),
+                ("A", "all"),
                 ("x", "deny"),
                 ("p", "pause"),
                 ("d", "directive"),
@@ -664,11 +813,12 @@ class MissionControl:
                 (":", "shell"),
                 ("q", "quit"),
             ]
-        )
+            sep = "   "
+
         bar = Text("  ")
         for idx, (k, label) in enumerate(keys):
             if idx:
-                bar.append("   " if console.width >= 105 else "  ", style="")
+                bar.append(sep, style="")
             bar.append(k, style=THEME.primary)
             bar.append(f" {label}", style=THEME.muted)
         return Group(toast_line, bar)
@@ -720,27 +870,19 @@ class MissionControl:
     def _write_directive(self, session: SessionInfo, text: str) -> None:
         if session.path is None:
             return
-        meta = read_meta(session.path)
-        status = effective_status(meta) if meta else session.status
-        if status not in LIVE_STATUSES and meta.get("parent_session_id"):
-            self._set_toast(f"#{session.id} child has finished ({status})", THEME.error)
-            return
-        path = session.path / "directives.jsonl"
-        entry = json.dumps({"text": text}) + "\n"
-        try:
-            with open(path, "a", encoding="utf-8") as f:
-                fcntl.flock(f, fcntl.LOCK_EX)
-                try:
-                    f.write(entry)
-                finally:
-                    fcntl.flock(f, fcntl.LOCK_UN)
+        ok, msg, status = write_directive(session.path, text)
+        if not ok:
+            self._set_toast(msg, THEME.error)
+        elif status not in LIVE_STATUSES:
+            self._set_toast(
+                f"Directive queued for #{session.id} (will read on resume)", THEME.warning
+            )
+        else:
             self._set_toast(f"Directive sent to #{session.id}", THEME.secondary)
-        except OSError as exc:
-            self._set_toast(f"Failed to send directive: {exc}", THEME.error)
 
     def run(self, *, on_watch: Any = None) -> str:
         """Run the interactive Mission Control dashboard."""
-        if not sys.stdin.isatty():
+        if not _is_interactive_terminal():
             console.print(self.build_layout())
             return "quit"
 
@@ -752,8 +894,22 @@ class MissionControl:
             return "quit"
 
         fd = sys.stdin.fileno()
-        old_attrs = termios.tcgetattr(fd)
+        try:
+            old_attrs = termios.tcgetattr(fd)
+        except termios.error:
+            console.print(self.build_layout())
+            return "quit"
+
         exit_mode = "quit"
+        prev_sigterm = None
+
+        def _handle_sigterm(_signum: int, _frame: Any) -> None:
+            with suppress(Exception):
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+            raise SystemExit(143)
+
+        with suppress(ValueError, OSError):
+            prev_sigterm = signal.signal(signal.SIGTERM, _handle_sigterm)
 
         try:
             tty.setcbreak(fd)
@@ -763,72 +919,81 @@ class MissionControl:
                 screen=True,
                 auto_refresh=False,
             ) as live:
-                while True:
-                    live.update(self.build_layout(), refresh=True)
-                    key = _read_key_nonblocking(0.4)
-                    if key is None:
-                        continue
-                    if key in ("q", "Q", "\x03", "\x04", "EOF"):
-                        exit_mode = "quit"
-                        break
-                    if key == ":":
-                        exit_mode = "shell"
-                        break
-                    if key in ("DOWN", "j"):
-                        self._move_selection(1)
-                    elif key in ("UP", "k"):
-                        self._move_selection(-1)
-                    elif key == "f":
-                        self._live_only = not self._live_only
-                        label = "Filter: live only" if self._live_only else "Filter: all sessions"
-                        self._set_toast(label, THEME.secondary)
-                    elif key == "a":
-                        self._answer_selected_or_first(approved=True)
-                    elif key == "A":
-                        self._answer_selected_or_first(approved=True, all_pending=True)
-                    elif key == "x":
-                        self._answer_selected_or_first(approved=False)
-                    elif key == "p":
-                        self._toggle_pause()
-                    elif key == "c":
-                        self._cancel_selected()
-                    elif key == "d":
-                        _, _, _, selected = self._snapshot()
-                        if selected is not None:
-                            live.stop()
-                            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
-                            try:
-                                console.print(
-                                    f"\n[{THEME.primary}]Directive for #{selected.id}[/{THEME.primary}] "
-                                    f"[{THEME.muted}](blank to cancel):[/{THEME.muted}] ",
-                                    end="",
-                                )
-                                text = input().strip()
-                                if text:
-                                    self._write_directive(selected, text)
-                            except (EOFError, KeyboardInterrupt):
-                                pass
-                            finally:
-                                tty.setcbreak(fd)
-                                live.start()
-                    elif key == "w" and on_watch is not None:
-                        _, _, _, selected = self._snapshot()
-                        if selected is not None:
-                            live.stop()
-                            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
-                            try:
-                                on_watch(selected.id, "20")
-                                console.print(
-                                    f"\n[{THEME.muted}]Press Enter to return…[/{THEME.muted}]",
-                                    end="",
-                                )
-                                with suppress(EOFError, KeyboardInterrupt):
-                                    input()
-                            finally:
-                                tty.setcbreak(fd)
-                                live.start()
+                try:
+                    while True:
+                        live.update(self.build_layout(), refresh=True)
+                        key = _read_key_nonblocking(0.4, fd=fd)
+                        if key is None or key == "ESC_SEQ":
+                            continue
+                        if key in ("q", "Q", "\x03", "\x04", "EOF"):
+                            exit_mode = "quit"
+                            break
+                        if key == ":":
+                            exit_mode = "shell"
+                            break
+                        if key in ("DOWN", "j"):
+                            self._move_selection(1)
+                        elif key in ("UP", "k"):
+                            self._move_selection(-1)
+                        elif key == "f":
+                            self._live_only = not self._live_only
+                            label = (
+                                "Filter: live only" if self._live_only else "Filter: all sessions"
+                            )
+                            self._set_toast(label, THEME.secondary)
+                        elif key == "a":
+                            self._answer_selected_or_first(approved=True)
+                        elif key == "A":
+                            self._answer_selected_or_first(approved=True, all_pending=True)
+                        elif key == "x":
+                            self._answer_selected_or_first(approved=False)
+                        elif key == "p":
+                            self._toggle_pause()
+                        elif key == "c":
+                            self._cancel_selected()
+                        elif key == "d":
+                            _, _, _, selected = self._snapshot()
+                            if selected is not None:
+                                live.stop()
+                                termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+                                try:
+                                    sid = escape(selected.id)
+                                    console.print(
+                                        f"\n[{THEME.primary}]Directive for #{sid}[/{THEME.primary}] "
+                                        f"[{THEME.muted}](blank to cancel):[/{THEME.muted}] ",
+                                        end="",
+                                    )
+                                    text = input().strip()
+                                    if text:
+                                        self._write_directive(selected, text)
+                                except (EOFError, KeyboardInterrupt):
+                                    pass
+                                finally:
+                                    tty.setcbreak(fd)
+                                    live.start()
+                        elif key == "w" and on_watch is not None:
+                            _, _, _, selected = self._snapshot()
+                            if selected is not None:
+                                live.stop()
+                                termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+                                try:
+                                    on_watch(selected.id, "20")
+                                    console.print(
+                                        f"\n[{THEME.muted}]Press Enter to return…[/{THEME.muted}]",
+                                        end="",
+                                    )
+                                    with suppress(EOFError, KeyboardInterrupt):
+                                        input()
+                                finally:
+                                    tty.setcbreak(fd)
+                                    live.start()
+                except KeyboardInterrupt:
+                    exit_mode = "quit"
         finally:
             with suppress(Exception):
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+            if prev_sigterm is not None:
+                with suppress(ValueError, OSError):
+                    signal.signal(signal.SIGTERM, prev_sigterm)
 
         return exit_mode

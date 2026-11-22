@@ -108,17 +108,6 @@ def _format_cost(cost_usd: float) -> str:
     return f"${cost_usd:.2f}"
 
 
-def _context_bar(used: int, window: int, width: int = 8) -> tuple[str, float]:
-    """Return ``(bar_glyphs, ratio)`` for a context-window fill gauge."""
-    if window <= 0 or used <= 0:
-        return "░" * width, 0.0
-    ratio = min(used / window, 1.0)
-    filled = round(ratio * width)
-    if filled == 0 and used > 0:
-        filled = 1
-    return ("▓" * filled) + ("░" * (width - filled)), ratio
-
-
 class TokenStatus:
     """Session token metrics for persistent status display."""
 

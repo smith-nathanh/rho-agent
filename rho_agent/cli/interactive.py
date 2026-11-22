@@ -13,6 +13,7 @@ from typing import Any
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
+from rich.markup import escape
 
 from ..core.events import AgentEvent
 from ..core.session import Session
@@ -202,10 +203,11 @@ class InteractiveSession:
             self.session.set_status(self.session_status)
             await self.session.close()
             if self.session.state.messages:
+                sid = escape(str(self.session.id))
                 console.print(
                     f"\n[{THEME.muted}]Session saved ·[/{THEME.muted}] "
-                    f"[{THEME.primary}]{self.session.id}[/{THEME.primary}] "
-                    f"[{THEME.muted}](rho-agent -r {self.session.id})[/{THEME.muted}]"
+                    f"[{THEME.primary}]{sid}[/{THEME.primary}] "
+                    f"[{THEME.muted}](rho-agent -r {sid})[/{THEME.muted}]"
                 )
             else:
                 console.print(_markup("\nGoodbye!", THEME.muted))
@@ -290,8 +292,10 @@ class InteractiveSession:
         if platform.system() != "Windows":
             loop.add_signal_handler(signal.SIGINT, on_cancel)
 
-        prev_hook = self.approval_handler.before_prompt
+        prev_before = self.approval_handler.before_prompt
+        prev_after = self.approval_handler.after_prompt
         self.approval_handler.before_prompt = renderer.pause_for_prompt
+        self.approval_handler.after_prompt = renderer.resume_after_prompt
         try:
             renderer.start()
 
@@ -316,7 +320,8 @@ class InteractiveSession:
             await self.session.run(user_input, on_event=on_event)
         finally:
             renderer.stop()
-            self.approval_handler.before_prompt = prev_hook
+            self.approval_handler.before_prompt = prev_before
+            self.approval_handler.after_prompt = prev_after
             if platform.system() != "Windows":
                 loop.remove_signal_handler(signal.SIGINT)
 

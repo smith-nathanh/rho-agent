@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import builtins
-import fcntl
-import json
 import shlex
 from datetime import UTC, datetime
 from pathlib import Path
-from time import sleep
+from time import monotonic, sleep
 from typing import Annotated
 
 import typer
@@ -16,14 +14,15 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from rich import box
 from rich.console import Group, RenderableType
+from rich.markup import escape
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
-from ..core.approvals import pending_requests, respond
+from ..core.approvals import ApprovalRequest, pending_requests, respond
 from ..core.session_meta import LIVE_STATUSES, effective_status, read_meta
-from ..core.session_store import SessionStore
+from ..core.session_store import SessionInfo, SessionStore
 from .completion import MonitorCompleter
 from .formatting import (
     _format_cost,
@@ -33,7 +32,7 @@ from .formatting import (
     _markup,
     _shorten_path,
 )
-from .monitor_live import MissionControl, _tail_trace_lines, render_trace_event
+from .monitor_live import MissionControl, _tail_trace_lines, render_trace_event, write_directive
 from .session_table import _project_label, fleet_counts, print_sessions
 from .state import CONFIG_DIR, MONITOR_HISTORY_FILE, SESSIONS_DIR, app, console
 from .theme import PTK_STYLE, THEME, status_style
@@ -48,6 +47,21 @@ class MonitorSession:
     def __init__(self, sessions_dir: Path) -> None:
         self._dir = sessions_dir
         self._store = SessionStore(sessions_dir)
+        # Short-TTL snapshot shared between _prompt_tokens and _toolbar_tokens
+        self._snap_cache: (
+            tuple[float, list[SessionInfo], list[tuple[SessionInfo, ApprovalRequest]]] | None
+        ) = None
+
+    def _cached_snapshot(
+        self, ttl: float = 0.8
+    ) -> tuple[list[SessionInfo], list[tuple[SessionInfo, ApprovalRequest]]]:
+        now = monotonic()
+        if self._snap_cache is not None and (now - self._snap_cache[0]) < ttl:
+            return self._snap_cache[1], self._snap_cache[2]
+        sessions = self._store.list(limit=50)
+        pending = self._store.pending_approvals()
+        self._snap_cache = (now, sessions, pending)
+        return sessions, pending
 
     def _use_ptk(self) -> bool:
         """Use prompt_toolkit in real interactive TTYs; fall back to input() when mocked/piped."""
@@ -60,9 +74,9 @@ class MonitorSession:
             ("class:prompt.monitor", "monitor"),
         ]
         try:
-            sessions = self._store.list(limit=50)
+            sessions, pending = self._cached_snapshot()
             counts, _, _ = fleet_counts(sessions)
-            pending_n = len(self._store.pending_approvals())
+            pending_n = len(pending)
             badges: list[tuple[str, str]] = []
             if counts["running"]:
                 badges.append(("class:prompt.badge.live", f"●{counts['running']}"))
@@ -83,9 +97,9 @@ class MonitorSession:
         """Quiet auto-refreshing bottom status bar for the monitor shell."""
         parts: list[tuple[str, str]] = [("class:toolbar.muted", " ")]
         try:
-            sessions = self._store.list(limit=50)
+            sessions, pending = self._cached_snapshot()
             counts, total_cost, _ = fleet_counts(sessions)
-            pending_n = len(self._store.pending_approvals())
+            pending_n = len(pending)
 
             if counts["running"]:
                 parts.append(("class:toolbar.accent", f"● {counts['running']} running"))
@@ -395,7 +409,7 @@ class MonitorSession:
         console.print(
             Panel(
                 Group(*blocks),
-                title=f"[{THEME.primary}]Session #{info.id}[/{THEME.primary}]",
+                title=f"[{THEME.primary}]Session #{escape(info.id)}[/{THEME.primary}]",
                 title_align="left",
                 box=box.SQUARE,
                 border_style=THEME.border,
@@ -427,7 +441,12 @@ class MonitorSession:
             except (ValueError, TypeError):
                 waiting = "?"
             signature = _format_tool_signature(request.tool_name, request.tool_args)
-            table.add_row(request.id, info.id, waiting, signature)
+            table.add_row(
+                Text(request.id, style=THEME.warning),
+                Text(info.id, style=THEME.primary),
+                Text(waiting, style=THEME.muted),
+                Text(signature, style=THEME.subtle),
+            )
         console.print(table)
         console.print(
             f"[{THEME.muted}]review · approve <id> · approve all · deny <id>[/{THEME.muted}]"
@@ -607,35 +626,19 @@ class MonitorSession:
         session_dir = self._resolve_single_dir(prefix)
         if not session_dir:
             return
-        meta = read_meta(session_dir)
-        status = effective_status(meta) if meta else "running"
-        if status not in LIVE_STATUSES and meta.get("parent_session_id"):
+        ok, msg, status = write_directive(session_dir, text)
+        if not ok:
+            console.print(_markup(msg, THEME.error))
+            return
+        console.print(_markup(msg, THEME.secondary))
+        if status not in LIVE_STATUSES:
             console.print(
                 _markup(
-                    f"{session_dir.name} has finished ({status}); nothing to steer", THEME.error
+                    f"{session_dir.name} is not running ({status}). It will read this when "
+                    f"it is resumed: rho-agent -r {session_dir.name}",
+                    THEME.warning,
                 )
             )
-            return
-        path = session_dir / "directives.jsonl"
-        entry = json.dumps({"text": text}) + "\n"
-        try:
-            with open(path, "a", encoding="utf-8") as f:
-                fcntl.flock(f, fcntl.LOCK_EX)
-                try:
-                    f.write(entry)
-                finally:
-                    fcntl.flock(f, fcntl.LOCK_UN)
-            console.print(_markup(f"directive queued for {session_dir.name}", THEME.secondary))
-            if status not in LIVE_STATUSES:
-                console.print(
-                    _markup(
-                        f"{session_dir.name} is not running ({status}). It will read this when "
-                        f"it is resumed: rho-agent -r {session_dir.name}",
-                        THEME.warning,
-                    )
-                )
-        except OSError as exc:
-            console.print(_markup(f"Failed to write directive: {exc}", THEME.error))
 
 
 @app.command()

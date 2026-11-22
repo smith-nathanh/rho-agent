@@ -159,7 +159,6 @@ def build_ptk_style(theme: CliTheme = THEME) -> PtkStyle:
     return PtkStyle.from_dict(
         {
             # Prompt tokens
-            "prompt.rho": theme.muted,
             "prompt.arrow": f"bold {theme.prompt}",
             "prompt.readonly": theme.secondary,
             "prompt.full": theme.warning,
@@ -181,7 +180,6 @@ def build_ptk_style(theme: CliTheme = THEME) -> PtkStyle:
             "toolbar.warn": f"bg:{theme.toolbar_bg} {theme.warning} noreverse",
             "toolbar.err": f"bg:{theme.toolbar_bg} {theme.error} noreverse",
             "toolbar.accent": f"bg:{theme.toolbar_bg} {theme.accent} noreverse",
-            "toolbar.subagent": f"bg:{theme.toolbar_bg} {theme.toolbar_muted} noreverse",
             # Minimal completion dropdown
             "completion-menu": f"bg:{theme.toolbar_bg} {theme.toolbar_fg}",
             "completion-menu.completion": f"bg:{theme.toolbar_bg} {theme.primary}",

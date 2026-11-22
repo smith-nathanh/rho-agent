@@ -16,19 +16,6 @@ from .formatting import _format_cost, _format_elapsed
 from .state import console
 from .theme import THEME, status_style
 
-STATUS_COLORS = {
-    "created": THEME.muted,
-    "running": THEME.accent,
-    "waiting_input": THEME.secondary,
-    "waiting_approval": THEME.warning,
-    "paused": THEME.muted,
-    "completed": THEME.muted,
-    "cancelled": THEME.muted,
-    "error": THEME.error,
-    "dead": THEME.error,
-    "unknown": THEME.muted,
-}
-
 
 def _ago(iso: str, now: datetime) -> str:
     try:
@@ -145,9 +132,8 @@ def print_sessions(
 
     def new_table(title: str) -> Table:
         table = Table(
-            title=title,
+            title=Text(title, style=f"bold {THEME.primary}"),
             title_justify="left",
-            title_style=f"bold {THEME.primary}",
             show_header=True,
             header_style=THEME.muted,
             box=box.SIMPLE_HEAD,
@@ -195,9 +181,10 @@ def print_sessions(
         row: list[object] = [id_cell, status_cell]
         if wide:
             row.append(_access_short(info.access))
-        row.append(info.model)
+        row.append(Text(info.model, style=THEME.muted))
         if show_owner:
-            row.append(f"{info.user}@{info.host}" if info.host else info.user)
+            owner = f"{info.user}@{info.host}" if info.host else info.user
+            row.append(Text(owner, style=THEME.muted))
         if wide:
             row.append(_ago(info.created_at, now))
         row += [

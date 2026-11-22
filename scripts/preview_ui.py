@@ -10,6 +10,7 @@ Usage:
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import sys
@@ -26,7 +27,7 @@ if str(_REPO_ROOT) not in sys.path:
 from rich.rule import Rule
 from rich.text import Text
 
-from rho_agent.cli.formatting import TokenStatus, _markup
+from rho_agent.cli.formatting import TokenStatus, _get_version, _markup
 from rho_agent.cli.monitor import MonitorSession
 from rho_agent.cli.monitor_live import MissionControl
 from rho_agent.cli.state import console
@@ -101,7 +102,7 @@ def preview_cli() -> None:
     wd = str(_REPO_ROOT)
 
     # Welcome banner
-    console.print(render_welcome_banner(session, wd, "0.2.0-ui"))
+    console.print(render_welcome_banner(session, wd, _get_version()))
     console.print()
 
     # Simulated user prompt bar
@@ -298,7 +299,7 @@ def _create_mock_fleet(base_dir: Path) -> SessionStore:
             "cwd": cwd,
             "pid": pid,
             "host": host,
-            "user": "nate",
+            "user": getpass.getuser(),
             "first_prompt": prompt,
             "cost_usd": cost,
             "started_at": (now - timedelta(seconds=started_ago)).isoformat(),
@@ -439,6 +440,7 @@ def _create_mock_fleet(base_dir: Path) -> SessionStore:
         ],
         approval={
             "id": "47e7d3",
+            "session_id": "51c09e7a",
             "tool_name": "request_access",
             "tool_args": {
                 "path": str(Path.home() / "proj" / "shared-schemas"),
@@ -573,6 +575,7 @@ def _create_mock_fleet(base_dir: Path) -> SessionStore:
         ],
         approval={
             "id": "9c21ab",
+            "session_id": "f019a2bb",
             "tool_name": "bash",
             "tool_args": {
                 "command": "docker compose up -d postgres",
@@ -593,7 +596,7 @@ def preview_monitor(*, interactive_live: bool = False) -> None:
         store = _create_mock_fleet(base_dir)
 
         if interactive_live:
-            MissionControl(store).run(on_watch=MonitorSession(base_dir)._cmd_watch)
+            MonitorSession(base_dir).run(start_live=True)
             return
 
         console.print(Rule("[bold]2 · Monitor CLI (rho-agent monitor)[/bold]", style=THEME.border))

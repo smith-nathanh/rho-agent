@@ -151,7 +151,7 @@ class InlinePathCompleter(Completer):
                     display=display,
                     display_meta="dir" if entry.is_dir() else "file",
                 )
-        except PermissionError:
+        except OSError:
             return
 
 
