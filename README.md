@@ -9,17 +9,58 @@ rho-agent runs AI agents that read code, run commands and edit files. Agents run
 
 ## Benchmark results
 
-| Benchmark | Model | Score | Model cost |
-|---|---|---|---|
-| [Terminal-Bench 2.1](https://tbench.ai/leaderboard/terminal-bench/2.1), all 89 tasks | GPT-6.1 Sol, medium reasoning effort | **79 / 89 (88.8%)** | $10.23 |
+Both benchmarks were run with the same setup:
 
-This is a single eval run (November 2026): one attempt per task, so the score
-has a standard error of about 3 points. It is not an official leaderboard
-submission, which needs at least 5 attempts per task. The run used Harbor on
-Daytona with each task's own time limit, rho-agent's full tool set and a $4
-cost cap per task; no task timed out. Two of the 10 failures were requests
-that OpenAI's cybersecurity filter refused, and they count as failures.
-Design, per-task results and costs: [experiment E007](experiments/E007-full-terminal-bench-2.1/).
+| Harness | Model | Reasoning effort | Tools |
+|---|---|---|---|
+| **rho-agent** | **GPT-6.1 Sol** | **medium** | `bash`, `read`, `write`, `edit`, `glob`, `grep`, `list`, `view_image` |
+
+### [Terminal-Bench 2.1](https://tbench.ai/leaderboard/terminal-bench/2.1)
+
+Terminal-Bench is a leading benchmark for agents that work in a terminal. Each
+task drops the agent into a Linux container with a real job and no further
+help, such as building POV-Ray from source, installing Windows 3.11, cracking a
+password-protected 7z archive or training a fastText model, and hidden tests
+then check the result. We ran all 89 tasks of version 2.1.
+
+| Category | Score | Model cost |
+|---|---|---|
+| Software engineering | **24 / 26 (92.3%)** | $3.84 |
+| Data science and processing | **12 / 13 (92.3%)** | $1.43 |
+| System administration | **7 / 9 (77.8%)** | $1.05 |
+| Scientific computing | **7 / 8 (87.5%)** | $0.74 |
+| Security | **6 / 8 (75.0%)** | $0.54 |
+| Machine learning and model training | **7 / 7 (100%)** | $0.94 |
+| Debugging | **5 / 5 (100%)** | $0.42 |
+| File operations | **4 / 5 (80.0%)** | $0.82 |
+| Mathematics and optimization | **4 / 5 (80.0%)** | $0.25 |
+| Other (chess, scheduling, video) | **3 / 3 (100%)** | $0.21 |
+| **Total** | **79 / 89 (88.8%)** | $10.23 |
+
+One attempt per task (November 2026). Details: [experiment E007](experiments/E007-full-terminal-bench-2.1/).
+
+### [Embodied First Exam](https://www.embodied-first-exam.ai/leaderboard/)
+
+The Embodied First Exam asks a coding agent to operate a simulated robot (an
+arm, a five-finger hand or a kitchen robot) toward a goal such as "open the jar"
+or "swap the remote's batteries". The agent sees only through the robot's
+cameras and acts only by writing code that sends motor commands, so it works in
+a loop of moving, looking at camera images and adjusting, against a 30–60
+minute clock. We ran 39 of the 456 core tasks in the leaderboard's
+Standard setting.
+
+| Segment | Score | Model cost |
+|---|---|---|
+| DexHand | **11 / 23 (47.8%)** | $63.22 |
+| RoboCasa, RoboCasa365, RoboCasa-GR1 | **5 / 8 (62.5%)** | $16.49 |
+| DexJoCo, LIBERO-MAX, MetaWorld+, VLABench | **5 / 8 (62.5%)** | $5.88 |
+| **Total** | **21 / 39 (53.8%)** | $85.59 |
+
+One attempt per task (November 2026).
+
+![DexHand remote battery swap, solved: a five-finger robot hand slides open a TV remote's battery door, moves the old AA cell to a tray, seats the new one and slides the door shut](docs/demo/efe-dexhand-remote-battery-swap.gif)
+
+DexHand remote battery swap, solved in 18.7 minutes for $0.84. rho-agent drove the hand by writing Python that sends joint-angle targets to the simulator, looking at camera images between moves. The replay shows the graded episode (after one reset) at about 4× real time.
 
 ## Install
 

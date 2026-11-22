@@ -15,3 +15,7 @@ E008,2026-11-15,Sol on 7 TB 2.1 tasks GPT-5.2 always failed,openai/gpt-6.1-sol,7
 E009,2026-11-15,Reviewer replay on E008 traces (v1 and v2 prompts x 3 samples),openai/gpt-6.1-sol,42,0.3870,experiments/E009-reviewer-replay/reviews.jsonl cost_usd
 E007,2026-11-16,Full Terminal-Bench 2.1 (89 trials; 86 ran),openai/gpt-6.1-sol,89,9.8647,jobs/e007-tb21/2026-11-15__22-26-05 trial result.json agent_result.cost_usd (Daytona compute not included)
 E007,2026-11-16,Full Terminal-Bench 2.1: rerun of 3 setup failures in the same job,openai/gpt-6.1-sol,3,0.3609,jobs/e007-tb21/2026-11-15__22-26-05 trial result.json agent_result.cost_usd for gpt2-codegolf qemu-startup qemu-alpine-ssh (Daytona compute not included)
+E011,2026-11-19,EFE pilot: dexhand-book-page-turn-i00 and ese-a01-i04 (Standard),openai/gpt-6.1-sol,2,0.6368,jobs/e011-efe-pilot/2026-11-19__14-56-34/result.json stats.cost_usd (GCP VM not included)
+E011,2026-11-19,EFE segment mujoco-small (8 tasks: DexJoCo LIBERO-MAX MetaWorld+ VLABench),openai/gpt-6.1-sol,8,5.8770,jobs/e011-mujoco-small/2026-11-19__17-26-44/result.json stats.cost_usd (GCP VM not included)
+E011,2026-11-19,EFE segment robocasa (8 tasks: RoboCasa365 RoboCasa RoboCasa-GR1),openai/gpt-6.1-sol,8,16.4869,jobs/e011-robocasa/2026-11-19__19-19-56/result.json stats.cost_usd (GCP VM not included)
+E011,2026-11-20,EFE segment dexhand (23 DexHand tasks; book-page-turn rerun from the pilot),openai/gpt-6.1-sol,23,63.2223,jobs/e011-dexhand/2026-11-20__22-25-07/result.json stats.cost_usd (GCP VM not included)

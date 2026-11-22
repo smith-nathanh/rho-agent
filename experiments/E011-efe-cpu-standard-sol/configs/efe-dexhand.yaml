@@ -1,0 +1,71 @@
+# E011 segment `dexhand` (not run): DexHand: all 23 tasks.
+# Embodied First Exam, Standard setting, CPU-only core tasks. One of four segments that
+# together cover all 89 CPU-only core tasks; results are combined afterwards with
+# ../combine.py. Run on the VM by ../sky/efe-segment.yaml with SEGMENT=dexhand, from
+# ~/rho-agent; dataset paths are relative to it (Harbor does not expand ~).
+# Expected: about 2.5-3 h at 8 at once; 4.5 h if every trial ran to its cutoff. Model: about $60-90,
+# at most $230 with the $10 cap.
+jobs_dir: jobs/e011-dexhand
+n_attempts: 1
+
+# Docker CPU and memory limits are caps, not reservations. In the pilot a DexHand trial peaked at about 3 CPUs and 2.7 GB (caps 4.5 CPUs, 15 GB);
+# 8 at once fit the 32-vCPU, 128 GB VM.
+n_concurrent_trials: 8
+
+# Infrastructure start failures are rerun; the agent's own cutoff is a result and is not
+# (EFE's rule, docs/protocol/running.md).
+retry:
+  max_retries: 2
+  include_exceptions: [EnvironmentStartTimeoutError]
+  min_wait_sec: 60
+  max_wait_sec: 300
+
+environment:
+  type: docker
+  delete: true
+
+# Same agent, model and settings as the pilot (configs/efe-pilot.yaml), except the cost
+# cap: $10 per trial here, $6 in the pilot (raised 2026-11-19).
+agents:
+  - import_path: rho_agent.eval.harbor.agent:RhoAgent
+    model_name: openai/gpt-6.1-sol
+    kwargs:
+      install_source: git
+      version: f9354038686fea71ebca0a95aec26af2d8ea130b   # main after smith-nathanh/rho-agent#38
+      bash_only: false             # full tool set, view_image on
+      reasoning_effort: medium
+      enable_confirm_done: true
+      confirm_done_max: 3
+      enable_reviewer: false
+      cost_ceiling_usd: 10.0        # per trial; trials that hit it are flagged by combine.py
+      max_wall_seconds: 0          # each task's own cutoff (1800 or 3600 s)
+      max_call_seconds: 1200
+      auto_compact: true
+      compact_at_tokens: 240000    # 32K below Sol's 272K price tier
+
+datasets:
+  - path: ../efe/tasks/dexhand   # 23 tasks
+    task_names:
+      - dexhand-assemble-hamburger-i00-standard
+      - dexhand-batter-whisk-i00-standard
+      - dexhand-bicycle-pump-stroke-i00-standard
+      - dexhand-binder-page-load-i00-standard
+      - dexhand-book-page-turn-i00-standard
+      - dexhand-boot-sole-brush-i00-standard
+      - dexhand-drying-rack-unfold-i00-standard
+      - dexhand-envelope-letter-insert-i00-standard
+      - dexhand-essential-cube-reorient-i00-standard
+      - dexhand-essential-pen-regrasp-i00-standard
+      - dexhand-essential-rotary-gait-i00-standard
+      - dexhand-essential-two-object-i00-standard
+      - dexhand-fan-guard-install-i00-standard
+      - dexhand-grinder-crank-i00-standard
+      - dexhand-jar-lid-open-i00-standard
+      - dexhand-pancake-serve-i00-standard
+      - dexhand-picture-hang-i00-standard
+      - dexhand-ram-module-install-i00-standard
+      - dexhand-remote-battery-swap-i00-standard
+      - dexhand-stool-brace-insert-i00-standard
+      - dexhand-sweep-dustpan-i00-standard
+      - dexhand-usb-plug-insert-i00-standard
+      - dexhand-vacuum-bin-reseat-i00-standard

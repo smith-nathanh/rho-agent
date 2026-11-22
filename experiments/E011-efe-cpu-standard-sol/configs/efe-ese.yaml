@@ -1,0 +1,98 @@
+# E011 segment `ese` (not run): Embodied Safety Exam: all 50 tasks.
+# Embodied First Exam, Standard setting, CPU-only core tasks. One of four segments that
+# together cover all 89 CPU-only core tasks; results are combined afterwards with
+# ../combine.py. Run on the VM by ../sky/efe-segment.yaml with SEGMENT=ese, from
+# ~/rho-agent; dataset paths are relative to it (Harbor does not expand ~).
+# Expected: about 2.5-3.5 h at 8 at once; 8 h if every trial ran to its cutoff. Model: about $40-80
+# (leaderboard tokens repriced at Sol's rates), at most $500 with the $10 cap.
+jobs_dir: jobs/e011-ese
+n_attempts: 1
+
+# Docker CPU and memory limits are caps, not reservations. In the pilot an ESE trial peaked at about 2 CPUs and 0.7 GB (caps 10.5 CPUs, 14 GB);
+# 8 at once fit the 32-vCPU, 128 GB VM.
+n_concurrent_trials: 8
+
+# Infrastructure start failures are rerun; the agent's own cutoff is a result and is not
+# (EFE's rule, docs/protocol/running.md).
+retry:
+  max_retries: 2
+  include_exceptions: [EnvironmentStartTimeoutError]
+  min_wait_sec: 60
+  max_wait_sec: 300
+
+environment:
+  type: docker
+  delete: true
+
+# Same agent, model and settings as the pilot (configs/efe-pilot.yaml), except the cost
+# cap: $10 per trial here, $6 in the pilot (raised 2026-11-19).
+agents:
+  - import_path: rho_agent.eval.harbor.agent:RhoAgent
+    model_name: openai/gpt-6.1-sol
+    kwargs:
+      install_source: git
+      version: f9354038686fea71ebca0a95aec26af2d8ea130b   # main after smith-nathanh/rho-agent#38
+      bash_only: false             # full tool set, view_image on
+      reasoning_effort: medium
+      enable_confirm_done: true
+      confirm_done_max: 3
+      enable_reviewer: false
+      cost_ceiling_usd: 10.0        # per trial; trials that hit it are flagged by combine.py
+      max_wall_seconds: 0          # each task's own cutoff (1800 or 3600 s)
+      max_call_seconds: 1200
+      auto_compact: true
+      compact_at_tokens: 240000    # 32K below Sol's 272K price tier
+
+datasets:
+  - path: ../efe/tasks/embodied-safety-exam   # 50 tasks
+    task_names:
+      - ese-a01-i01-standard
+      - ese-a01-i02-standard
+      - ese-a01-i04-standard
+      - ese-a01-i08-standard
+      - ese-a02-i03-standard
+      - ese-a04-i00-standard
+      - ese-a06-i01-standard
+      - ese-a06-i03-standard
+      - ese-a08-i01-standard
+      - ese-a17-i00-standard
+      - ese-a26-i02-standard
+      - ese-a27-i06-standard
+      - ese-a28-i00-standard
+      - ese-a28-i01-standard
+      - ese-a28-i03-standard
+      - ese-a29-i00-standard
+      - ese-a29-i01-standard
+      - ese-a29-i03-standard
+      - ese-a33-i01-standard
+      - ese-a33-i04-standard
+      - ese-a34-i07-standard
+      - ese-a34-i09-standard
+      - ese-a34-i11-standard
+      - ese-b06-i01-standard
+      - ese-b06-i02-standard
+      - ese-b11-i00-standard
+      - ese-b11-i01-standard
+      - ese-b11-i03-standard
+      - ese-b12-i04-standard
+      - ese-b12-i06-standard
+      - ese-b12-i07-standard
+      - ese-c02-i00-standard
+      - ese-c02-i01-standard
+      - ese-c04-i01-standard
+      - ese-c05-i01-standard
+      - ese-c05-i02-standard
+      - ese-c16-i00-standard
+      - ese-d12-i04-standard
+      - ese-e06-i00-standard
+      - ese-e06-i03-standard
+      - ese-f01-i00-standard
+      - ese-f04-i01-standard
+      - ese-f04-i02-standard
+      - ese-f05-i00-standard
+      - ese-f05-i01-standard
+      - ese-f06-i00-standard
+      - ese-f06-i01-standard
+      - ese-f08-i00-standard
+      - ese-f09-i00-standard
+      - ese-f11-i00-standard
