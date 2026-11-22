@@ -15,6 +15,7 @@ from .theme import THEME
 # Config directory for rho-agent data
 CONFIG_DIR = Path.home() / ".config" / "rho-agent"
 HISTORY_FILE = CONFIG_DIR / "history"
+MONITOR_HISTORY_FILE = CONFIG_DIR / "monitor_history"
 SESSIONS_DIR = CONFIG_DIR / "sessions"
 DEFAULT_PROMPT_FILE = CONFIG_DIR / "default.md"
 
@@ -28,30 +29,33 @@ RENDER_MARKDOWN = os.getenv("RHO_AGENT_RENDER_MARKDOWN", "1").lower() not in (
     "no",
 )
 
-# Rich console for all output
-console = Console()
-
 MARKDOWN_THEME = Theme(
     {
         "markdown": THEME.primary,
         "markdown.paragraph": THEME.primary,
         "markdown.text": THEME.primary,
         "markdown.item": THEME.primary,
-        "markdown.item.bullet": THEME.primary,
-        "markdown.code": THEME.primary,
+        "markdown.item.bullet": THEME.muted,
+        "markdown.item.number": THEME.muted,
+        "markdown.code": f"{THEME.primary} on {THEME.code_bg}",
         "markdown.code_block": THEME.primary,
-        "markdown.block_quote": THEME.muted,
-        "markdown.h1": f"bold {THEME.primary}",
+        "markdown.block_quote": THEME.subtle,
+        "markdown.h1": f"bold {THEME.brand}",
         "markdown.h2": f"bold {THEME.primary}",
-        "markdown.h3": f"bold {THEME.primary}",
-        "markdown.h4": f"bold {THEME.primary}",
-        "markdown.h5": f"bold {THEME.primary}",
-        "markdown.h6": f"bold {THEME.primary}",
-        "markdown.link": THEME.accent,
+        "markdown.h3": f"bold {THEME.secondary}",
+        "markdown.h4": THEME.secondary,
+        "markdown.h5": THEME.subtle,
+        "markdown.h6": THEME.muted,
+        "markdown.hr": THEME.border,
+        "markdown.link": f"underline {THEME.accent}",
+        "markdown.link_url": THEME.muted,
         "markdown.em": f"italic {THEME.primary}",
-        "markdown.strong": f"bold {THEME.primary}",
+        "markdown.strong": f"bold {THEME.brand}",
     }
 )
+
+# Rich console for all output (includes MARKDOWN_THEME so Live streams inherit it)
+console = Console(theme=MARKDOWN_THEME)
 
 
 @dataclass
@@ -77,6 +81,7 @@ app = typer.Typer(
         "  rho-agent --access read-only\n"
         "  rho-agent --add-dir ../shared-lib\n"
         "  rho-agent -r latest\n"
+        "  rho-agent monitor --live\n"
         "  rho-agent --system-prompt ./prompt.md --var env=prod"
     ),
     add_completion=False,

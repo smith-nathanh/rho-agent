@@ -1,7 +1,8 @@
-"""Monitor command: interactive command loop operating on session directories."""
+"""Monitor command: interactive command shell and live Mission Control dashboard."""
 
 from __future__ import annotations
 
+import builtins
 import fcntl
 import json
 import shlex
@@ -11,61 +12,169 @@ from time import sleep
 from typing import Annotated
 
 import typer
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import FileHistory
 from rich import box
+from rich.console import Group, RenderableType
 from rich.panel import Panel
+from rich.rule import Rule
 from rich.table import Table
+from rich.text import Text
 
-from ..core.approvals import respond
+from ..core.approvals import pending_requests, respond
 from ..core.session_meta import LIVE_STATUSES, effective_status, read_meta
 from ..core.session_store import SessionStore
+from .completion import MonitorCompleter
 from .formatting import (
+    _format_cost,
     _format_elapsed,
-    _format_token_count,
     _format_tool_signature,
+    _is_interactive_terminal,
     _markup,
+    _shorten_path,
 )
-from .session_table import print_sessions
-from .state import SESSIONS_DIR, app, console
-from .theme import THEME
+from .monitor_live import MissionControl, _tail_trace_lines, render_trace_event
+from .session_table import _project_label, fleet_counts, print_sessions
+from .state import CONFIG_DIR, MONITOR_HISTORY_FILE, SESSIONS_DIR, app, console
+from .theme import PTK_STYLE, THEME, status_style
+from .ui import render_approval_card
+
+_BUILTIN_INPUT = builtins.input
 
 
 class MonitorSession:
-    """Interactive command loop for session directory observability."""
+    """Interactive command shell and live dashboard for session directory observability."""
 
     def __init__(self, sessions_dir: Path) -> None:
         self._dir = sessions_dir
         self._store = SessionStore(sessions_dir)
 
-    def run(self) -> None:
-        """Start the interactive monitor command loop."""
-        console.print(
-            Panel(
-                f"[bold]{_markup('rho-agent monitor', THEME.primary)}[/bold]\n"
-                f"Directory: {_markup(str(self._dir), THEME.muted)}\n"
-                "Type [bold]help[/bold] for commands.",
-                border_style=THEME.border,
-            )
-        )
+    def _use_ptk(self) -> bool:
+        """Use prompt_toolkit in real interactive TTYs; fall back to input() when mocked/piped."""
+        return _is_interactive_terminal() and builtins.input is _BUILTIN_INPUT
+
+    def _prompt_tokens(self) -> list[tuple[str, str]]:
+        """Minimal dynamic prompt with subtle live counters."""
+        parts: list[tuple[str, str]] = [
+            ("class:prompt.badge.live", "ρ "),
+            ("class:prompt.monitor", "monitor"),
+        ]
+        try:
+            sessions = self._store.list(limit=50)
+            counts, _, _ = fleet_counts(sessions)
+            pending_n = len(self._store.pending_approvals())
+            badges: list[tuple[str, str]] = []
+            if counts["running"]:
+                badges.append(("class:prompt.badge.live", f"●{counts['running']}"))
+            if pending_n:
+                badges.append(("class:prompt.badge.alert", f"●{pending_n}"))
+            if badges:
+                parts.append(("class:prompt.muted", " "))
+                for idx, badge in enumerate(badges):
+                    if idx:
+                        parts.append(("class:prompt.muted", " "))
+                    parts.append(badge)
+        except Exception:
+            pass
+        parts.append(("class:prompt.arrow", " › "))
+        return parts
+
+    def _toolbar_tokens(self) -> list[tuple[str, str]]:
+        """Quiet auto-refreshing bottom status bar for the monitor shell."""
+        parts: list[tuple[str, str]] = [("class:toolbar.muted", " ")]
+        try:
+            sessions = self._store.list(limit=50)
+            counts, total_cost, _ = fleet_counts(sessions)
+            pending_n = len(self._store.pending_approvals())
+
+            if counts["running"]:
+                parts.append(("class:toolbar.accent", f"● {counts['running']} running"))
+            else:
+                parts.append(("class:toolbar.muted", "○ 0 running"))
+
+            if pending_n:
+                parts.append(("class:toolbar.sep", "  ·  "))
+                parts.append(
+                    ("class:toolbar.warn", f"● {pending_n} approval{'s' if pending_n != 1 else ''}")
+                )
+
+            if counts["waiting_input"]:
+                parts.append(("class:toolbar.sep", "  ·  "))
+                parts.append(("class:toolbar.muted", f"{counts['waiting_input']} idle"))
+
+            if counts["paused"]:
+                parts.append(("class:toolbar.sep", "  ·  "))
+                parts.append(("class:toolbar.muted", f"{counts['paused']} paused"))
+
+            cost_str = _format_cost(total_cost)
+            if cost_str:
+                parts.append(("class:toolbar.sep", "  ·  "))
+                parts.append(("class:toolbar.ok", cost_str))
+        except Exception:
+            parts.append(("class:toolbar.muted", "monitor"))
+
+        parts.append(("class:toolbar.sep", "  ·  "))
+        parts.append(("class:toolbar.muted", "live  ·  Tab complete  ·  help  ·  exit "))
+        return parts
+
+    def _print_banner(self) -> None:
+        top = Table.grid(expand=True)
+        top.add_column(ratio=1)
+        top.add_column(justify="right", no_wrap=True)
+
+        title = Text()
+        title.append("ρ ", style=f"bold {THEME.accent}")
+        title.append("rho-agent monitor", style=f"bold {THEME.brand}")
+        title.append(f"  {_shorten_path(str(self._dir))}", style=THEME.muted)
+        hints = Text("live · ps · watch · review · help · exit", style=THEME.muted)
+        top.add_row(title, hints)
+
+        console.print(Group(Rule(style=THEME.border), top, Rule(style=THEME.border)))
+
+    def run(self, *, start_live: bool = False) -> None:
+        """Start the interactive monitor command loop (or live Mission Control)."""
+        if start_live:
+            result = MissionControl(self._store).run(on_watch=self._cmd_watch)
+            if result != "shell":
+                return
+
+        self._print_banner()
         self._cmd_ps()
+
+        prompt_session: PromptSession[str] | None = None
+        if self._use_ptk():
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            prompt_session = PromptSession(
+                history=FileHistory(str(MONITOR_HISTORY_FILE)),
+                completer=MonitorCompleter(self._store),
+                bottom_toolbar=self._toolbar_tokens,
+                refresh_interval=1.0,
+                style=PTK_STYLE,
+                complete_while_typing=False,
+            )
 
         while True:
             try:
-                raw = input("monitor> ").strip()
+                if prompt_session is not None:
+                    raw = prompt_session.prompt(self._prompt_tokens).strip()
+                else:
+                    raw = input("monitor> ").strip()
             except EOFError:
                 console.print()
                 break
             except KeyboardInterrupt:
-                # Like a shell: Ctrl+C clears the line. A Ctrl+C meant for
-                # `watch` that lands just after it ended must not quit.
                 console.print()
                 continue
 
             if not raw:
                 continue
-            if raw in ("quit", "exit", "q"):
+            if raw in ("quit", "exit", "q", "/exit", "/quit"):
                 break
             if raw in ("help", "h", "?"):
                 self._print_help()
+                continue
+            if raw in ("clear", "cls"):
+                console.clear()
                 continue
 
             try:
@@ -78,10 +187,19 @@ class MonitorSession:
 
             if command == "ps":
                 self._cmd_ps()
+            elif command in ("live", "top", "dash", "dashboard"):
+                exit_mode = MissionControl(self._store).run(on_watch=self._cmd_watch)
+                if exit_mode == "quit":
+                    break
+                self._cmd_ps()
             elif command == "watch" and len(parts) > 1:
                 self._cmd_watch(parts[1], parts[2] if len(parts) > 2 else None)
+            elif command == "inspect" and len(parts) > 1:
+                self._cmd_inspect(parts[1])
             elif command == "approvals":
                 self._cmd_approvals()
+            elif command == "review":
+                self._cmd_review()
             elif command in ("approve", "deny") and len(parts) > 1:
                 self._cmd_answer(parts[1], approved=command == "approve")
             elif command == "cancel" and len(parts) > 1:
@@ -94,29 +212,62 @@ class MonitorSession:
                 self._cmd_directive(parts[1], " ".join(parts[2:]))
             else:
                 console.print(_markup(f"Unknown command: {raw}", THEME.warning))
-                console.print("[dim]Type 'help' for command list[/dim]")
+                console.print(f"[{THEME.muted}]Type 'help' for command list[/{THEME.muted}]")
 
     def _print_help(self) -> None:
-        console.print(_markup("Commands:", THEME.secondary))
-        console.print("[dim]  ps                                      list sessions[/dim]")
+        sections: list[tuple[str, list[tuple[str, str]]]] = [
+            (
+                "Observe",
+                [
+                    ("ps", "List sessions grouped by project"),
+                    ("live  (top / dash)", "Open live auto-refreshing Mission Control"),
+                    ("watch <id> [n|all]", "Follow a session trace live (default: last 20)"),
+                    ("inspect <id>", "Show metadata, subagents & recent events"),
+                ],
+            ),
+            (
+                "Approvals",
+                [
+                    ("approvals", "List pending tool approval requests"),
+                    ("review", "Step through pending approvals interactively"),
+                    ("approve <req|all>", "Approve one request or all pending"),
+                    ("deny <req>", "Deny a pending request"),
+                ],
+            ),
+            (
+                "Control",
+                [
+                    ("directive <id> <text>", "Inject an instruction before the next step"),
+                    ("pause <id|all>", "Pause live session(s)"),
+                    ("resume <id|all>", "Resume paused session(s)"),
+                    ("cancel <id|all>", "Cancel live session(s)"),
+                    ("clear / help / exit", "Clear screen, show help, or exit"),
+                ],
+            ),
+        ]
+
+        blocks: list[RenderableType] = []
+        for idx, (heading, rows) in enumerate(sections):
+            if idx:
+                blocks.append(Text(""))
+            blocks.append(Text(heading, style=f"bold {THEME.primary}"))
+            grid = Table.grid(padding=(0, 3))
+            grid.add_column(width=24, style=THEME.secondary, no_wrap=True)
+            grid.add_column(style=THEME.muted)
+            for lhs, rhs in rows:
+                grid.add_row(f"  {lhs}", rhs)
+            blocks.append(grid)
+
         console.print(
-            "[dim]  watch <prefix> [n|all]                  follow a session (last n events first)[/dim]"
+            Panel(
+                Group(*blocks),
+                title=f"[{THEME.secondary}]Monitor Commands[/{THEME.secondary}]",
+                title_align="left",
+                box=box.SQUARE,
+                border_style=THEME.border,
+                padding=(0, 1),
+            )
         )
-        console.print(
-            "[dim]  approvals                               list pending tool approvals[/dim]"
-        )
-        console.print(
-            "[dim]  approve <request|all>                   approve a pending tool call[/dim]"
-        )
-        console.print(
-            "[dim]  deny <request>                          deny a pending tool call[/dim]"
-        )
-        console.print("[dim]  cancel <prefix|all>                    cancel live session(s)[/dim]")
-        console.print("[dim]  pause <prefix|all>                     pause live session(s)[/dim]")
-        console.print("[dim]  resume <prefix|all>                    resume session(s)[/dim]")
-        console.print("[dim]  directive <prefix> <text>               inject directive[/dim]")
-        console.print("[dim]  help                                    show this help[/dim]")
-        console.print("[dim]  quit                                    exit monitor[/dim]")
 
     def _resolve_dirs(self, prefix: str) -> list[Path]:
         """Resolve prefix to matching session directories."""
@@ -135,26 +286,140 @@ class MonitorSession:
         return matches[0]
 
     def _cmd_ps(self) -> None:
-        print_sessions(self._store.list(limit=50))
-        pending = len(self._store.pending_approvals())
+        sessions = self._store.list(limit=50)
+        pending = self._store.pending_approvals()
+        print_sessions(sessions, pending_approvals=len(pending))
         if pending:
+            lines: list[Text] = []
+            for info, req in pending[:5]:
+                sig = _format_tool_signature(req.tool_name, req.tool_args)
+                row = Text()
+                row.append(f"  {req.id}", style=THEME.warning)
+                row.append(f"  #{info.id}  ", style=THEME.muted)
+                row.append(sig, style=THEME.primary)
+                lines.append(row)
+            if len(pending) > 5:
+                lines.append(Text(f"  … and {len(pending) - 5} more", style=THEME.muted))
+            lines.append(
+                Text("  review · approve <id> · approve all · deny <id>", style=THEME.muted)
+            )
             console.print(
-                _markup(
-                    f"{pending} tool approval(s) pending. Type 'approvals' to see them.",
-                    THEME.warning,
+                Panel(
+                    Group(*lines),
+                    title=(
+                        f"[{THEME.warning}]{len(pending)} Approval"
+                        f"{'s' if len(pending) != 1 else ''} Waiting[/{THEME.warning}]"
+                    ),
+                    title_align="left",
+                    box=box.SQUARE,
+                    border_style=THEME.warning,
+                    padding=(0, 1),
                 )
             )
+
+    def _cmd_inspect(self, prefix: str) -> None:
+        """Show detailed metadata, children, pending approvals, and recent trace for one session."""
+        matches = self._store.find(prefix)
+        if not matches:
+            console.print(_markup(f"No session matching '{prefix}'", THEME.error))
+            return
+        if len(matches) > 1:
+            names = ", ".join(m.id for m in matches[:5])
+            console.print(_markup(f"Ambiguous prefix '{prefix}': {names}", THEME.warning))
+            return
+
+        info = matches[0]
+        glyph, color = status_style(info.status)
+        grid = Table.grid(padding=(0, 2))
+        grid.add_column(style=THEME.muted, no_wrap=True)
+        grid.add_column()
+
+        st = Text()
+        st.append(f"{glyph} ", style=color)
+        st.append(info.status, style=THEME.primary)
+        if info.pid:
+            st.append(f"  ·  pid {info.pid}", style=THEME.muted)
+        if info.user or info.host:
+            owner = f"{info.user}@{info.host}" if info.host else info.user
+            st.append(f"  ·  {owner}", style=THEME.muted)
+        grid.add_row("status", st)
+        grid.add_row("model", Text(info.model or "?", style=THEME.secondary))
+        if info.access:
+            grid.add_row("access", Text(info.access, style=THEME.subtle))
+        if info.cwd:
+            grid.add_row("project", Text(_project_label(info.cwd), style=THEME.muted))
+        if info.cost_usd:
+            grid.add_row("cost", Text(_format_cost(info.cost_usd), style=THEME.primary))
+        if info.first_prompt:
+            grid.add_row("prompt", Text(info.display_preview, style=THEME.primary))
+
+        blocks: list[RenderableType] = [grid]
+
+        if info.children:
+            blocks.append(Text(""))
+            blocks.append(Text("Subagents", style=THEME.muted))
+            for idx, child in enumerate(info.children):
+                conn = "├─ " if idx < len(info.children) - 1 else "└─ "
+                cg, cc = status_style(child.status)
+                row = Text("  ")
+                row.append(conn, style=THEME.border)
+                row.append(f"{child.id}  ", style=THEME.primary)
+                row.append(f"{cg} {child.status}  ", style=cc)
+                row.append(child.display_preview, style=THEME.muted)
+                blocks.append(row)
+
+        if info.path is not None:
+            reqs = pending_requests(info.path)
+            if reqs:
+                blocks.append(Text(""))
+                blocks.append(Text("Pending approvals", style=THEME.warning))
+                for req in reqs:
+                    sig = _format_tool_signature(req.tool_name, req.tool_args)
+                    row = Text("  ")
+                    row.append(f"{req.id}  ", style=THEME.warning)
+                    row.append(sig, style=THEME.primary)
+                    blocks.append(row)
+
+        recent = _tail_trace_lines(info.path, limit=14)
+        rendered = [
+            r
+            for line in recent
+            if (r := render_trace_event(line, compact=False, working_dir=info.cwd or None))
+            is not None
+        ]
+        if rendered:
+            blocks.append(Text(""))
+            blocks.append(Text("Recent activity", style=THEME.muted))
+            blocks.extend(rendered[-8:])
+
+        console.print(
+            Panel(
+                Group(*blocks),
+                title=f"[{THEME.primary}]Session #{info.id}[/{THEME.primary}]",
+                title_align="left",
+                box=box.SQUARE,
+                border_style=THEME.border,
+                padding=(0, 1),
+            )
+        )
 
     def _cmd_approvals(self) -> None:
         pending = self._store.pending_approvals()
         if not pending:
-            console.print("[dim]No pending approvals[/dim]")
+            console.print(f"[{THEME.muted}]No pending approvals[/{THEME.muted}]")
             return
-        table = Table(show_header=True, header_style=THEME.secondary, box=box.SIMPLE_HEAD)
-        table.add_column("Request", style=THEME.accent, no_wrap=True)
-        table.add_column("Session", no_wrap=True)
-        table.add_column("Waiting", justify="right", no_wrap=True)
-        table.add_column("Tool call", overflow="fold")
+        table = Table(
+            show_header=True,
+            header_style=THEME.muted,
+            box=box.SIMPLE_HEAD,
+            border_style=THEME.border,
+            expand=True,
+            pad_edge=False,
+        )
+        table.add_column("Request", style=THEME.warning, no_wrap=True)
+        table.add_column("Session", style=THEME.primary, no_wrap=True)
+        table.add_column("Waiting", justify="right", style=THEME.muted, no_wrap=True)
+        table.add_column("Tool call", overflow="fold", style=THEME.subtle)
         now = datetime.now(UTC)
         for info, request in pending:
             try:
@@ -164,6 +429,49 @@ class MonitorSession:
             signature = _format_tool_signature(request.tool_name, request.tool_args)
             table.add_row(request.id, info.id, waiting, signature)
         console.print(table)
+        console.print(
+            f"[{THEME.muted}]review · approve <id> · approve all · deny <id>[/{THEME.muted}]"
+        )
+
+    def _cmd_review(self) -> None:
+        """Interactively step through pending approval requests one by one."""
+        pending = self._store.pending_approvals()
+        if not pending:
+            console.print(f"[{THEME.muted}]No pending approvals to review.[/{THEME.muted}]")
+            return
+        total = len(pending)
+        for idx, (info, req) in enumerate(pending, start=1):
+            console.print(f"\n[{THEME.muted}]Request {idx}/{total} · #{info.id}[/{THEME.muted}]")
+            panel, _ = render_approval_card(
+                req.tool_name,
+                req.tool_args,
+                request_id=req.id,
+                working_dir=info.cwd or None,
+            )
+            console.print(panel)
+            console.print(
+                f"  {_markup('[y] approve  [n] deny  [s] skip  [q] stop:', THEME.warning)} ",
+                end="",
+            )
+            try:
+                ans = input().strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                console.print()
+                break
+            if ans in ("y", "yes"):
+                respond(req, True)
+                console.print(
+                    _markup(f"  approved: {req.id} ({req.tool_name}, {info.id})", THEME.secondary)
+                )
+            elif ans in ("n", "no"):
+                respond(req, False)
+                console.print(
+                    _markup(f"  denied: {req.id} ({req.tool_name}, {info.id})", THEME.warning)
+                )
+            elif ans in ("q", "quit"):
+                break
+            else:
+                console.print(_markup(f"  skipped {req.id}", THEME.muted))
 
     def _cmd_answer(self, prefix: str, *, approved: bool) -> None:
         pending = self._store.pending_approvals()
@@ -180,17 +488,11 @@ class MonitorSession:
             return
         for info, request in matches:
             respond(request, approved)
-            verb, color = ("approved", THEME.success) if approved else ("denied", THEME.warning)
+            verb, color = ("approved", THEME.secondary) if approved else ("denied", THEME.warning)
             console.print(_markup(f"{verb}: {request.id} ({request.tool_name}, {info.id})", color))
 
     def _cmd_watch(self, prefix: str, tail: str | None = None) -> None:
-        """Follow a session's trace: the last events first, then new ones as they appear.
-
-        Args:
-            prefix: Session ID prefix (a child session's ID works too).
-            tail: How many past events to show first; ``all`` for the whole
-                trace. Defaults to 20.
-        """
+        """Follow a session's trace: the last events first, then new ones as they appear."""
         if tail is None:
             skip_to_last: int | None = 20
         elif tail == "all":
@@ -209,7 +511,22 @@ class MonitorSession:
             console.print(_markup("No trace.jsonl found", THEME.error))
             return
 
-        console.print(_markup(f"Watching {session_dir.name} (Ctrl+C to stop)", THEME.success))
+        meta = read_meta(session_dir)
+        status = effective_status(meta) if meta else "unknown"
+        glyph, color = status_style(status)
+        cwd = str(meta.get("cwd") or "") or None
+
+        hdr = Text()
+        hdr.append("watch ", style=THEME.muted)
+        hdr.append(f"#{session_dir.name}", style=f"bold {THEME.primary}")
+        hdr.append("  ·  ", style=THEME.border_active)
+        hdr.append(f"{glyph} {status}", style=color)
+        if meta.get("model"):
+            hdr.append(f"  ·  {meta['model']}", style=THEME.muted)
+        if cwd:
+            hdr.append(f"  ·  {_project_label(cwd)}", style=THEME.muted)
+        hdr.append("   Ctrl+C to stop", style=THEME.muted)
+        console.print(Group(Rule(style=THEME.border), hdr, Rule(style=THEME.border)))
 
         try:
             with open(trace_path, encoding="utf-8") as f:
@@ -218,123 +535,37 @@ class MonitorSession:
                     if len(past) > skip_to_last:
                         console.print(
                             _markup(
-                                f"... {len(past) - skip_to_last} earlier events "
+                                f"  … {len(past) - skip_to_last} earlier events "
                                 f"(watch {session_dir.name} all)",
                                 THEME.muted,
                             )
                         )
                     for line in past[len(past) - skip_to_last :] if skip_to_last else []:
-                        self._render_trace_event(line)
+                        self._render_trace_event(line, working_dir=cwd)
                 while True:
                     line = f.readline()
                     if line:
                         line = line.strip()
                         if line:
-                            self._render_trace_event(line)
+                            self._render_trace_event(line, working_dir=cwd)
                     else:
-                        # Stop once the session is finished or its process is gone.
                         meta = read_meta(session_dir)
                         if meta:
                             status = effective_status(meta)
                             if status not in LIVE_STATUSES:
-                                console.print(_markup(f"Session ended ({status})", THEME.muted))
+                                sg, sc = status_style(status)
+                                console.print(_markup(f"  {sg} Session ended ({status})", sc))
                                 return
                         sleep(0.5)
         except KeyboardInterrupt:
             console.print()
             console.print(_markup("Stopped watching.", THEME.muted))
 
-    def _render_trace_event(self, line: str) -> None:
+    def _render_trace_event(self, line: str, *, working_dir: str | None = None) -> None:
         """Render a single trace.jsonl line."""
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            return
-
-        ev_type = event.get("type", "")
-
-        if ev_type == "run_start":
-            prompt = event.get("prompt", "")
-            preview = prompt[:120].replace("\n", " ")
-            if len(prompt) > 120:
-                preview += "..."
-            console.print(_markup(f"run_start: {preview}", THEME.secondary))
-
-        elif ev_type == "run_end":
-            status = event.get("status", "?")
-            console.print(_markup(f"run_end: {status}", THEME.muted))
-
-        elif ev_type == "llm_start":
-            model = event.get("model", "?")
-            ctx = event.get("context_size", "?")
-            console.print(_markup(f"llm_start model={model} context={ctx}", THEME.muted))
-
-        elif ev_type == "llm_end":
-            inp = event.get("input_tokens", 0)
-            out = event.get("output_tokens", 0)
-            cost = event.get("cost_usd", 0.0) or 0.0
-            cost_str = f" cost=${cost:.4f}" if cost else ""  # not every client reports cost
-            console.print(
-                _markup(
-                    f"llm_end in={_format_token_count(inp)} out={_format_token_count(out)}{cost_str}",
-                    THEME.muted,
-                )
-            )
-
-        elif ev_type == "tool_start":
-            name = event.get("tool_name", "?")
-            args = event.get("tool_args", {})
-            args_str = json.dumps(args, ensure_ascii=False)
-            if len(args_str) > 200:
-                args_str = args_str[:200] + "..."
-            console.print(_markup(f"tool: {name}({args_str})", THEME.tool_call))
-
-        elif ev_type == "tool_end":
-            name = event.get("tool_name", "?")
-            ok = event.get("success", True)
-            status_str = "ok" if ok else "error"
-            color = THEME.success if ok else THEME.error
-            console.print(f"  {_markup(f'{name}: {status_str}', color)}")
-
-        elif ev_type == "tool_blocked":
-            name = event.get("tool_name", "?")
-            console.print(_markup(f"  {name}: BLOCKED", THEME.warning))
-
-        elif ev_type == "message":
-            role = event.get("role", "?")
-            content = event.get("content", "")
-            if role == "assistant" and content:
-                preview = content[:200].replace("\n", " ")
-                if len(content) > 200:
-                    preview += "..."
-                console.print(_markup(f"assistant: {preview}", THEME.primary))
-
-        elif ev_type == "approval_requested":
-            signature = _format_tool_signature(event.get("tool_name"), event.get("tool_args"))
-            request_id = event.get("request_id", "?")
-            console.print(_markup(f"waiting for approval {request_id}: {signature}", THEME.warning))
-
-        elif ev_type == "approval_resolved":
-            outcome = event.get("outcome", "?")
-            color = THEME.success if outcome == "approved" else THEME.warning
-            console.print(_markup(f"approval {event.get('request_id', '?')}: {outcome}", color))
-
-        elif ev_type == "child_start":
-            child = event.get("child_session_id", "?")
-            tool = event.get("tool_name", "?")
-            instruction = str(event.get("instruction", ""))[:120].replace("\n", " ")
-            console.print(
-                _markup(f"child {child} started ({tool}): {instruction}", THEME.secondary)
-            )
-
-        elif ev_type == "child_end":
-            child = event.get("child_session_id", "?")
-            console.print(_markup(f"child {child} ended: {event.get('status', '?')}", THEME.muted))
-
-        elif ev_type == "compact":
-            before = event.get("tokens_before", "?")
-            after = event.get("tokens_after", "?")
-            console.print(_markup(f"compact: {before} -> {after} tokens", THEME.muted))
+        item = render_trace_event(line, compact=False, working_dir=working_dir)
+        if item is not None:
+            console.print(item)
 
     def _cmd_cancel(self, prefix: str) -> None:
         matches = self._store.find(prefix)
@@ -355,7 +586,7 @@ class MonitorSession:
         for info in matches:
             if info.live and info.path is not None:
                 (info.path / "pause").touch()
-                console.print(_markup(f"pause: {info.id}", THEME.success))
+                console.print(_markup(f"pause: {info.id}", THEME.secondary))
             elif prefix != "all":
                 console.print(_markup(f"{info.id}: not running ({info.status})", THEME.muted))
 
@@ -368,7 +599,7 @@ class MonitorSession:
             pause_path = d / "pause"
             if pause_path.exists():
                 pause_path.unlink()
-                console.print(_markup(f"resume: {d.name}", THEME.success))
+                console.print(_markup(f"resume: {d.name}", THEME.secondary))
             else:
                 console.print(_markup(f"{d.name}: not paused", THEME.muted))
 
@@ -394,7 +625,7 @@ class MonitorSession:
                     f.write(entry)
                 finally:
                     fcntl.flock(f, fcntl.LOCK_UN)
-            console.print(_markup(f"directive queued for {session_dir.name}", THEME.success))
+            console.print(_markup(f"directive queued for {session_dir.name}", THEME.secondary))
             if status not in LIVE_STATUSES:
                 console.print(
                     _markup(
@@ -413,12 +644,20 @@ def monitor(
         str | None,
         typer.Argument(help="Sessions directory to monitor (default: the CLI's sessions)"),
     ] = None,
+    live: Annotated[
+        bool,
+        typer.Option(
+            "--live",
+            "-L",
+            help="Launch straight into the live auto-refreshing Mission Control dashboard",
+        ),
+    ] = False,
 ) -> None:
-    """Interactive command loop for session directory observability."""
+    """Interactive command shell and live Mission Control dashboard for sessions."""
     sessions_dir = Path(dir).expanduser().resolve() if dir else SESSIONS_DIR
     if not sessions_dir.is_dir():
         console.print(_markup(f"Not a directory: {sessions_dir}", THEME.error))
         raise typer.Exit(1)
 
     session = MonitorSession(sessions_dir)
-    session.run()
+    session.run(start_live=live)

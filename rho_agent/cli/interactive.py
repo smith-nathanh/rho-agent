@@ -7,13 +7,10 @@ import os
 import platform
 import shutil
 import signal
-from datetime import datetime
 from pathlib import Path
-from time import monotonic
 from typing import Any
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 
@@ -33,7 +30,15 @@ from .formatting import (
 )
 from .single import upload_to_sandbox
 from .state import CONFIG_DIR, HISTORY_FILE, RENDER_MARKDOWN, console
-from .theme import THEME
+from .theme import PTK_STYLE, THEME
+from .ui import (
+    TurnRenderer,
+    render_access_card,
+    render_saved_sessions_table,
+    render_session_status_card,
+    render_user_prompt,
+    render_welcome_banner,
+)
 
 
 class InteractiveSession:
@@ -50,18 +55,34 @@ class InteractiveSession:
     ) -> None:
         self.session = session
         self.approval_handler = approval_handler
+        self.approval_handler.working_dir = working_dir
         self.working_dir = working_dir
         self.session_store = session_store
         self.upload_mappings = upload_mappings or []
         self.setup_commands = setup_commands or []
         self.session_status = "completed"
+        config = session.agent.config
+        access_level = config.access.level.value if config.backend == "local" else "remote"
         self.token_status = TokenStatus(
             input_tokens=session.state.usage.get("input_tokens", 0),
             output_tokens=session.state.usage.get("output_tokens", 0),
+            model=config.model or "",
+            access_level=access_level,
+            context_window=getattr(session, "context_window", None),
+            cost_usd=float(session.state.usage.get("cost_usd", 0.0) or 0.0),
         )
         self.interactive_tty = _is_interactive_terminal()
         # Told to the model with the next message, e.g. after /access changes.
         self._pending_note: str | None = None
+
+    def _prompt_tokens(self) -> list[tuple[str, str]]:
+        """Minimal prompt reflecting current sandbox access posture."""
+        level = self.token_status.access_level
+        arrow_cls = {
+            "read-only": "class:prompt.readonly",
+            "full": "class:prompt.full",
+        }.get(level, "class:prompt.arrow")
+        return [(arrow_cls, "› ")]
 
     async def run(self) -> None:
         """Run the interactive REPL loop until exit or error."""
@@ -81,26 +102,19 @@ class InteractiveSession:
             history=FileHistory(str(HISTORY_FILE)),
             completer=create_completer(working_dir=self.working_dir),
             multiline=True,
+            prompt_continuation=lambda width, line_number, is_soft_wrap: [
+                ("class:continuation", "  · ")
+            ],
             key_bindings=key_bindings,
-            bottom_toolbar=(lambda: self.token_status.render()),
+            bottom_toolbar=self.token_status.render_toolbar,
+            style=PTK_STYLE,
+            erase_when_done=True,
             complete_while_typing=False,
             complete_in_thread=True,
         )
 
-        # Welcome message
-        from rich.panel import Panel
-
-        version = _get_version()
-        console.print(
-            Panel(
-                f"[bold]{_markup('ρ rho-agent', THEME.primary)}[/bold] v{version}\n"
-                f"{_markup(access_summary(self.session.agent), THEME.accent)}\n"
-                f"Model: {_markup(self.session.agent.config.model, THEME.accent)}\n"
-                "Enter to send, Esc+Enter for newline, Ctrl+C to cancel.\n"
-                "Type [bold]/help[/bold] for commands, [bold]exit[/bold] to quit.",
-                border_style=THEME.border,
-            )
-        )
+        # Welcome header card
+        console.print(render_welcome_banner(self.session, self.working_dir, _get_version()))
 
         try:
             # Upload files to sandbox before starting interactive loop
@@ -128,8 +142,8 @@ class InteractiveSession:
                 if source == "directive" and not user_input:
                     continue
                 if source == "directive":
-                    console.print(_markup("Directive from monitor:", THEME.secondary))
-                    console.print(user_input)
+                    console.print(render_user_prompt(user_input, label="directive"))
+                    console.print()
                     await self._execute_turn(user_input)
                     if self.session_status == "cancelled":
                         break
@@ -138,7 +152,7 @@ class InteractiveSession:
                 if not user_input:
                     continue
 
-                if user_input.lower() in ("exit", "quit"):
+                if user_input.lower() in ("exit", "quit", "/exit", "/quit"):
                     break
 
                 if user_input.startswith("/"):
@@ -150,6 +164,13 @@ class InteractiveSession:
                         continue
                     if user_input.startswith("/resume"):
                         self._handle_resume(user_input)
+                        continue
+                    if user_input == "/status":
+                        console.print(
+                            render_session_status_card(
+                                self.session, self.token_status, self.working_dir
+                            )
+                        )
                         continue
 
                     action = handle_command(user_input, self.approval_handler)
@@ -169,6 +190,8 @@ class InteractiveSession:
                         )
                     continue
 
+                console.print(render_user_prompt(user_input))
+                console.print()
                 await self._execute_turn(user_input)
                 if self.session_status == "cancelled":
                     break
@@ -179,7 +202,11 @@ class InteractiveSession:
             self.session.set_status(self.session_status)
             await self.session.close()
             if self.session.state.messages:
-                console.print(f"\n[dim]Goodbye! Session saved: {self.session.id}[/dim]")
+                console.print(
+                    f"\n[{THEME.muted}]Session saved ·[/{THEME.muted}] "
+                    f"[{THEME.primary}]{self.session.id}[/{THEME.primary}] "
+                    f"[{THEME.muted}](rho-agent -r {self.session.id})[/{THEME.muted}]"
+                )
             else:
                 console.print(_markup("\nGoodbye!", THEME.muted))
 
@@ -217,9 +244,7 @@ class InteractiveSession:
                     return request
                 await asyncio.sleep(poll_seconds)
 
-        prompt_task = asyncio.ensure_future(
-            prompt_session.prompt_async(HTML(f"<style fg='{THEME.prompt}'><b>&gt;</b></style> "))
-        )
+        prompt_task = asyncio.ensure_future(prompt_session.prompt_async(self._prompt_tokens))
         watch_task = asyncio.ensure_future(watch())
         try:
             await asyncio.wait({prompt_task, watch_task}, return_when=asyncio.FIRST_COMPLETED)
@@ -245,41 +270,34 @@ class InteractiveSession:
     async def _execute_turn(self, user_input: str) -> None:
         """Run one agent turn, streaming events to the console."""
         loop = asyncio.get_event_loop()
-        response_chunks: list[str] = []
 
-        def on_cancel():
-            console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
+        renderer = TurnRenderer(
+            console=console,
+            interactive_tty=self.interactive_tty,
+            render_markdown=RENDER_MARKDOWN,
+            working_dir=self.working_dir,
+            model=self.session.agent.config.model or "",
+            context_window=getattr(self.session, "context_window", None),
+            token_status=self.token_status,
+            show_turn_footer=False,
+        )
+
+        def on_cancel() -> None:
+            renderer.pause_for_prompt()
+            console.print(f"\n{_markup('Cancelling…', THEME.warning)}")
             self.session.cancel()
 
         if platform.system() != "Windows":
             loop.add_signal_handler(signal.SIGINT, on_cancel)
 
+        prev_hook = self.approval_handler.before_prompt
+        self.approval_handler.before_prompt = renderer.pause_for_prompt
         try:
-            status_ctx = None
-            start = monotonic()
-            if self.interactive_tty:
-                status_ctx = console.status(
-                    "⠋ working (0s)",
-                    spinner="dots",
-                    spinner_style=THEME.accent,
-                )
-                status_ctx.__enter__()
-            saw_model_output = False
-            pending_text_chunks: list[str] = []
+            renderer.start()
 
             async def on_event(event: AgentEvent) -> None:
-                nonlocal saw_model_output, status_ctx, pending_text_chunks
-                if status_ctx and not saw_model_output:
-                    elapsed = int(monotonic() - start)
-                    status_ctx.update(f"⠋ working ({elapsed}s • Ctrl+C: cancel)")
-                if event.type == "text" and event.content:
-                    response_chunks.append(event.content)
-                if event.type in ("text", "tool_start", "error", "cancelled"):
-                    saw_model_output = True
-                    if status_ctx:
-                        status_ctx.__exit__(None, None, None)
-                        status_ctx = None
                 if event.type == "cancelled":
+                    renderer.stop()
                     _sync_token_status_from_state(self.token_status, self.session.state)
                     # Cancelled from another process (monitor or `rho-agent cancel`)
                     if self.session.cancelled_externally:
@@ -290,22 +308,15 @@ class InteractiveSession:
                     return
                 if event.type == "error":
                     _sync_token_status_from_state(self.token_status, self.session.state)
-                handle_event(
-                    event,
-                    show_turn_usage=False,
-                    token_status=self.token_status,
-                    render_markdown=self.interactive_tty and RENDER_MARKDOWN,
-                    pending_text_chunks=pending_text_chunks,
-                )
+                renderer.on_event(event)
 
             if self._pending_note:
                 user_input = f"{self._pending_note}\n\n{user_input}"
                 self._pending_note = None
             await self.session.run(user_input, on_event=on_event)
-
-            if status_ctx:
-                status_ctx.__exit__(None, None, None)
         finally:
+            renderer.stop()
+            self.approval_handler.before_prompt = prev_hook
             if platform.system() != "Windows":
                 loop.remove_signal_handler(signal.SIGINT)
 
@@ -322,7 +333,7 @@ class InteractiveSession:
             local = Path(local_path).expanduser().resolve()
             local.parent.mkdir(parents=True, exist_ok=True)
             await sandbox.fs.download_file(remote_path, str(local))
-            console.print(_markup(f"Downloaded {remote_path} → {local}", THEME.success))
+            console.print(_markup(f"✓ Downloaded {remote_path} → {local}", THEME.success))
         except RuntimeError as exc:
             console.print(_markup(str(exc), THEME.error))
         except Exception as exc:
@@ -343,7 +354,7 @@ class InteractiveSession:
                 return
             target = str(Path(parts[2]).expanduser().resolve())
             if session.revoke_access(target) or session.revoke_access(parts[2]):
-                console.print(_markup(f"Revoked access to {parts[2]}.", THEME.success))
+                console.print(_markup(f"✓ Revoked access to {parts[2]}.", THEME.success))
                 self._pending_note = f"[The user revoked your access to {parts[2]}.]"
             else:
                 console.print(_markup(f"No grant for {parts[2]}.", THEME.warning))
@@ -379,6 +390,7 @@ class InteractiveSession:
             console.print(_markup(str(exc), THEME.error))
             return
         session._registry = agent.registry
+        self.token_status.access_level = level.value
         if config.system_prompt and config.system_prompt == default_prompt:
             config.system_prompt = _default_prompt_for(config) or config.system_prompt
             agent._system_prompt = None
@@ -386,25 +398,10 @@ class InteractiveSession:
             f"[The user changed your access to {level.value}. Tools and limits have "
             "changed accordingly.]"
         )
-        console.print(_markup(access_summary(agent), THEME.success))
+        console.print(_markup(f"✓ {access_summary(agent)}", THEME.success))
 
     def _show_access(self) -> None:
-        session = self.session
-        agent = session.agent
-        console.print(_markup(access_summary(agent), THEME.accent))
-        sandbox = agent.registry.sandbox
-        if sandbox is not None:
-            policy = sandbox.with_grants(session.access_grants).policy
-            console.print(_markup(policy.describe(), THEME.muted))
-        if session.access_grants:
-            console.print("Granted this session:")
-            for grant in session.access_grants:
-                kind = "write" if grant.write else "read"
-                console.print(f"  {kind:5} {grant.path}")
-            console.print(_markup("Remove one with /access revoke <path>.", THEME.muted))
-        console.print(
-            _markup("Change level with /access read-only | workspace | full.", THEME.muted)
-        )
+        console.print(render_access_card(self.session))
 
     @staticmethod
     def _resolve_resume_id(raw: str, sessions: list[Any]) -> str | None:
@@ -449,21 +446,7 @@ class InteractiveSession:
                 )
                 return
         else:
-            console.print(_markup("Recent sessions:", THEME.secondary))
-            for idx, info in enumerate(sessions, start=1):
-                try:
-                    started_dt = datetime.fromisoformat(info.created_at)
-                    time_str = started_dt.strftime("%Y-%m-%d %H:%M")
-                except ValueError:
-                    time_str = info.id
-                console.print(
-                    f"{_markup(f'{idx:>2}.', THEME.secondary)} "
-                    f"{_markup(info.id, THEME.accent)}  {time_str}  "
-                    f"{_markup(info.model, THEME.muted)}"
-                )
-                if info.display_preview:
-                    console.print(_markup(f"  {info.display_preview}", THEME.muted))
-            console.print()
+            console.print(render_saved_sessions_table(sessions, numbered=True))
             console.print(
                 _markup(
                     "Enter number, session ID, or prefix (blank to cancel):",
@@ -520,16 +503,15 @@ class InteractiveSession:
                 update_meta(previous_dir, status="completed")
             else:
                 shutil.rmtree(previous_dir, ignore_errors=True)  # never used
-        self.token_status.total_input_tokens = resumed.state.usage.get("input_tokens", 0)
-        self.token_status.total_output_tokens = resumed.state.usage.get("output_tokens", 0)
-        self.token_status.total_reasoning_tokens = resumed.state.usage.get("reasoning_tokens", 0)
+        _sync_token_status_from_state(self.token_status, resumed.state)
         self.token_status.context_size = 0
 
-        console.print(_markup(f"Resumed session: {selected_id}", THEME.success))
+        console.print(_markup(f"✓ Resumed session #{selected_id}", THEME.success))
         console.print(
             _markup(
-                f"Messages: {len(resumed.state.messages)}  "
-                f"tokens in/out: {resumed.state.usage.get('input_tokens', 0)}/{resumed.state.usage.get('output_tokens', 0)}",
+                f"  Messages: {len(resumed.state.messages)}  ·  "
+                f"tokens in/out: {resumed.state.usage.get('input_tokens', 0)}/"
+                f"{resumed.state.usage.get('output_tokens', 0)}",
                 THEME.muted,
             )
         )

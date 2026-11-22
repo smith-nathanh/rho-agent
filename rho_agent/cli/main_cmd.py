@@ -7,7 +7,6 @@ import dataclasses
 import os
 import platform
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -35,7 +34,6 @@ from .events import ApprovalHandler, announce_queued_approval
 from .formatting import (
     _is_interactive_terminal,
     _markup,
-    access_summary,
 )
 from .interactive import run_interactive
 from .single import run_single, run_single_with_output
@@ -48,6 +46,7 @@ from .state import (
     settings,
 )
 from .theme import THEME
+from .ui import render_saved_sessions_table, render_single_header
 
 SANDBOX_CONFIG_FILE = ".rho-agent.toml"
 
@@ -504,18 +503,7 @@ def main(
             console.print(_markup("No saved sessions found.", THEME.muted))
             raise typer.Exit(0)
 
-        console.print("[bold]Saved sessions:[/bold]\n")
-        for info in sessions:
-            try:
-                started_dt = datetime.fromisoformat(info.created_at)
-                time_str = started_dt.strftime("%Y-%m-%d %H:%M")
-            except ValueError:
-                time_str = info.id
-            console.print(
-                f"{_markup(info.id, THEME.accent)}  {time_str}  {_markup(info.model, THEME.muted)}"
-            )
-            console.print(f"  {info.display_preview}")
-            console.print()
+        console.print(render_saved_sessions_table(sessions))
         raise typer.Exit(0)
 
     # Handle --resume: find the session to load
@@ -679,7 +667,7 @@ def main(
     session.approval_callback = approval_handler.check_approval
 
     if run_prompt_text:
-        console.print(_markup(access_summary(agent), THEME.accent))
+        console.print(render_single_header(session, resolved_working_dir))
         if output:
             asyncio.run(
                 run_single_with_output(

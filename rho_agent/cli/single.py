@@ -6,7 +6,6 @@ import asyncio
 import platform
 import signal
 from pathlib import Path
-from time import monotonic
 
 from ..core.events import AgentEvent
 from ..core.session import Session
@@ -17,6 +16,7 @@ from .formatting import (
 )
 from .state import RENDER_MARKDOWN, console
 from .theme import THEME
+from .ui import TurnRenderer
 
 _UPLOAD_BATCH_SIZE = 100
 
@@ -38,7 +38,7 @@ async def upload_to_sandbox(
     if not mappings:
         return
 
-    console.print(_markup("Creating sandbox...", THEME.muted))
+    console.print(_markup("  ◌ Creating remote sandbox…", THEME.muted))
     sandbox = await session.get_sandbox()
     manager = session.agent.sandbox_manager
 
@@ -48,7 +48,7 @@ async def upload_to_sandbox(
         dest = await manager.absolute_path(dest)
         src = Path(src_str).expanduser().resolve()
         if not src.exists():
-            console.print(_markup(f"Upload source not found: {src}", THEME.error))
+            console.print(_markup(f"  ✗ Upload source not found: {src}", THEME.error))
             continue
 
         if src.is_dir():
@@ -58,7 +58,9 @@ async def upload_to_sandbox(
                 if f.is_file() and not (_UPLOAD_SKIP_DIRS & set(f.relative_to(src).parts))
             ]
             total = len(files)
-            console.print(_markup(f"Uploading {src_str} → {dest} ({total} files)", THEME.accent))
+            console.print(
+                _markup(f"  ↑ Uploading {src_str} → {dest} ({total} files)", THEME.accent)
+            )
             done = 0
             for i in range(0, total, _UPLOAD_BATCH_SIZE):
                 batch = files[i : i + _UPLOAD_BATCH_SIZE]
@@ -67,9 +69,9 @@ async def upload_to_sandbox(
                     [(fp, f"{dest.rstrip('/')}/{fp.relative_to(src)}") for fp in batch],
                 )
                 done += len(batch)
-                console.print(_markup(f"  {done}/{total} files uploaded", THEME.muted))
+                console.print(_markup(f"    {done}/{total} files uploaded", THEME.muted))
         else:
-            console.print(_markup(f"Uploading {src_str} → {dest}", THEME.accent))
+            console.print(_markup(f"  ↑ Uploading {src_str} → {dest}", THEME.accent))
             await sandbox.fs.upload_file(str(src), dest)
 
 
@@ -94,7 +96,7 @@ async def run_setup_commands(
     env = manager.env_vars if manager else None
 
     for cmd in commands:
-        console.print(_markup(f"setup: {cmd}", THEME.accent))
+        console.print(_markup(f"  ❯ setup  $ {cmd}", THEME.accent))
         resp = await run(sandbox, cmd, cwd=working_dir, env=env)
         if resp.output:
             console.print(_markup(resp.output.rstrip(), THEME.muted))
@@ -112,15 +114,31 @@ async def run_single(
     """Run a single prompt and exit."""
     loop = asyncio.get_event_loop()
     interactive_tty = _is_interactive_terminal()
+    working_dir = getattr(getattr(session, "agent", None), "config", None)
+    wd_str = getattr(working_dir, "working_dir", None)
+    model_str = getattr(working_dir, "model", "") or ""
 
-    def on_cancel():
-        console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
+    renderer: TurnRenderer | None = None
+    if interactive_tty:
+        renderer = TurnRenderer(
+            console=console,
+            interactive_tty=True,
+            render_markdown=RENDER_MARKDOWN,
+            working_dir=wd_str,
+            model=model_str,
+            context_window=getattr(session, "context_window", None),
+            show_turn_footer=True,
+        )
+
+    def on_cancel() -> None:
+        if renderer is not None:
+            renderer.pause_for_prompt()
+        console.print(f"\n{_markup('⊘ Cancelling…', THEME.warning)}")
         session.cancel()
 
     if platform.system() != "Windows":
         loop.add_signal_handler(signal.SIGINT, on_cancel)
 
-    session_status = "completed"
     try:
         # Upload files to sandbox before running
         if upload_mappings:
@@ -130,54 +148,34 @@ async def run_single(
         if setup_commands:
             await run_setup_commands(session, setup_commands, session.agent.config.working_dir)
 
-        status_ctx = None
-        start = monotonic()
-        if interactive_tty:
-            status_ctx = console.status(
-                "⠋ working (0s)",
-                spinner="dots",
-                spinner_style=THEME.accent,
-            )
-            status_ctx.__enter__()
-        saw_model_output = False
+        if renderer is not None:
+            renderer.start()
         pending_text_chunks: list[str] = []
 
         async def on_event(event: AgentEvent) -> None:
-            nonlocal saw_model_output, status_ctx, session_status, pending_text_chunks
-            if status_ctx and not saw_model_output:
-                elapsed = int(monotonic() - start)
-                status_ctx.update(f"⠋ working ({elapsed}s • Ctrl+C: cancel)")
-            if event.type in ("text", "tool_start", "error", "cancelled"):
-                saw_model_output = True
-                if status_ctx:
-                    status_ctx.__exit__(None, None, None)
-                    status_ctx = None
-            if event.type == "error":
-                session_status = "error"
-                handle_event(
-                    event,
-                    render_markdown=interactive_tty and RENDER_MARKDOWN,
-                    pending_text_chunks=pending_text_chunks,
-                )
+            if renderer is not None:
+                if event.type == "cancelled":
+                    renderer.stop()
+                    console.print(_markup("⊘ Cancelled", THEME.muted))
+                    return
+                renderer.on_event(event)
                 return
+
             if event.type == "cancelled":
-                session_status = "cancelled"
                 console.print(_markup("Cancelled", THEME.muted))
                 return
             handle_event(
                 event,
-                render_markdown=interactive_tty and RENDER_MARKDOWN,
+                render_markdown=False,
                 pending_text_chunks=pending_text_chunks,
+                working_dir=wd_str,
+                model=model_str,
             )
 
         await session.run(prompt, on_event=on_event)
-
-        if status_ctx:
-            status_ctx.__exit__(None, None, None)
-    except Exception:
-        session_status = "error"
-        raise
     finally:
+        if renderer is not None:
+            renderer.stop()
         if platform.system() != "Windows":
             loop.remove_signal_handler(signal.SIGINT)
         await session.close()
@@ -209,9 +207,26 @@ async def run_single_with_output(
 
     loop = asyncio.get_event_loop()
     interactive_tty = _is_interactive_terminal()
+    cfg = getattr(getattr(session, "agent", None), "config", None)
+    wd_str = getattr(cfg, "working_dir", None)
+    model_str = getattr(cfg, "model", "") or ""
 
-    def on_cancel():
-        console.print(f"\n{_markup('Cancelling...', THEME.warning)}")
+    renderer: TurnRenderer | None = None
+    if interactive_tty:
+        renderer = TurnRenderer(
+            console=console,
+            interactive_tty=True,
+            render_markdown=RENDER_MARKDOWN,
+            working_dir=wd_str,
+            model=model_str,
+            context_window=getattr(session, "context_window", None),
+            show_turn_footer=True,
+        )
+
+    def on_cancel() -> None:
+        if renderer is not None:
+            renderer.pause_for_prompt()
+        console.print(f"\n{_markup('⊘ Cancelling…', THEME.warning)}")
         session.cancel()
 
     if platform.system() != "Windows":
@@ -231,54 +246,38 @@ async def run_single_with_output(
         if setup_commands:
             await run_setup_commands(session, setup_commands, session.agent.config.working_dir)
 
-        status_ctx = None
-        start = monotonic()
-        if interactive_tty:
-            status_ctx = console.status(
-                "⠋ working (0s)",
-                spinner="dots",
-                spinner_style=THEME.accent,
-            )
-            status_ctx.__enter__()
-        saw_model_output = False
+        if renderer is not None:
+            renderer.start()
 
         async def on_event(event: AgentEvent) -> None:
-            nonlocal saw_model_output, status_ctx, cancelled, had_error
-            if status_ctx and not saw_model_output:
-                elapsed = int(monotonic() - start)
-                status_ctx.update(f"⠋ working ({elapsed}s • Ctrl+C: cancel)")
-            if event.type in ("text", "tool_start", "error", "cancelled"):
-                saw_model_output = True
-                if status_ctx:
-                    status_ctx.__exit__(None, None, None)
-                    status_ctx = None
-            if event.type == "error":
-                had_error = True
-                handle_event(
-                    event,
-                    render_markdown=interactive_tty and RENDER_MARKDOWN,
-                    pending_text_chunks=pending_text_chunks,
-                )
-                return
-            if event.type == "cancelled":
-                console.print(_markup("Cancelled", THEME.muted))
-                cancelled = True
-                return
-            handle_event(
-                event,
-                render_markdown=interactive_tty and RENDER_MARKDOWN,
-                pending_text_chunks=pending_text_chunks,
-            )
+            nonlocal cancelled, had_error
             if event.type == "text" and event.content:
                 collected_text.append(event.content)
+            if event.type == "error":
+                had_error = True
+            if event.type == "cancelled":
+                cancelled = True
+                if renderer is not None:
+                    renderer.stop()
+                console.print(_markup("Cancelled", THEME.muted))
+                return
+
+            if renderer is not None:
+                renderer.on_event(event)
+                return
+
+            handle_event(
+                event,
+                render_markdown=False,
+                pending_text_chunks=pending_text_chunks,
+                working_dir=wd_str,
+                model=model_str,
+            )
 
         await session.run(prompt, on_event=on_event)
-
-        if status_ctx:
-            status_ctx.__exit__(None, None, None)
-    except Exception:
-        raise
     finally:
+        if renderer is not None:
+            renderer.stop()
         if platform.system() != "Windows":
             loop.remove_signal_handler(signal.SIGINT)
         await session.close()
@@ -289,8 +288,8 @@ async def run_single_with_output(
     try:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text("".join(collected_text), encoding="utf-8")
-        console.print(f"\n{_markup(f'Output written to: {output_file}', THEME.success)}")
+        console.print(f"\n{_markup(f'✓ Output written to: {output_file}', THEME.success)}")
         return True
     except Exception as exc:
-        console.print(f"\n{_markup(f'Failed to write output: {exc}', THEME.error)}")
+        console.print(f"\n{_markup(f'✗ Failed to write output: {exc}', THEME.error)}")
         return False
