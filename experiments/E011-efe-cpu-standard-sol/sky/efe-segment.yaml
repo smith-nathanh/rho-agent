@@ -1,0 +1,57 @@
+# E011 full run, one segment at a time (not run): all 89 CPU-only core
+# tasks of the Embodied First Exam, split by suite into 4 Harbor jobs, each
+# launched on its own and combined afterwards with ../combine.py.
+#
+#   SEGMENT       tasks  config                         expected wall clock
+#   ese              50  configs/efe-ese.yaml           2.5-3.5 h (8 h worst case)
+#   dexhand          23  configs/efe-dexhand.yaml       2.5-3 h (4.5 h worst case)
+#   robocasa          8  configs/efe-robocasa.yaml      1-2 h
+#   mujoco-small      8  configs/efe-mujoco-small.yaml  1-1.5 h
+#
+# Launch one segment from the root of the rho-agent checkout that has this
+# folder, with the OpenAI key from the main checkout's .env (--no-project: run
+# the installed sky tool without building this checkout's Python environment):
+#   uv run --no-project --env-file /Users/nate/proj/rho-agent/.env -- sky launch -c e011 \
+#     --config experiments/E011-efe-cpu-standard-sol/sky/project.yaml \
+#     --secret OPENAI_API_KEY --env SEGMENT=ese -d \
+#     experiments/E011-efe-cpu-standard-sol/sky/efe-segment.yaml
+# The same command with another SEGMENT reuses the VM if it is still up (setup
+# reruns and adds that segment's suites), or makes a new one. Launching a
+# segment while another runs queues it on the same VM until the first ends.
+# Stay online until the command returns (a few minutes); setup and the run
+# happen on the VM.
+# Watch:     sky logs e011                (text only)
+# Results:   gs://rho-agent-evals-e011/e011-<SEGMENT> (copied every 5 min)
+# If preempted, rerun the same command; the segment resumes and reruns only its
+# unfinished trials.
+# The VM deletes itself 30 minutes after its last job ends; or: sky down e011
+# GCP quota: the VM uses all 32 vCPUs of `CPUs (all regions)`.
+name: e011-segment
+
+envs:
+  SEGMENT: ese                    # override with --env SEGMENT=<name>
+
+resources:
+  infra: gcp
+  instance_type: n2-standard-32   # 32 vCPU, 128 GB; AVX-512 for LIBERO-MAX
+  use_spot: true
+  disk_size: 300                  # GB: the suites' images, VLABench's 40 GB build, containers, logs
+  autostop:
+    idle_minutes: 30
+    down: true                    # Spot clusters cannot be stopped, only deleted
+
+secrets:
+  OPENAI_API_KEY: null            # passed with --secret at launch; never written to a file
+
+file_mounts:
+  /results:
+    name: rho-agent-evals-e011    # the pilot's bucket
+    store: gcs
+    mode: MOUNT
+  ~/e011: experiments/E011-efe-cpu-standard-sol
+
+setup: |
+  bash ~/e011/sky/setup.sh ~/e011/configs/efe-${SEGMENT}.yaml
+
+run: |
+  bash ~/e011/sky/run.sh e011-${SEGMENT} ~/e011/configs/efe-${SEGMENT}.yaml

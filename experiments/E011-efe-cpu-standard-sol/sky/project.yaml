@@ -1,0 +1,8 @@
+# Use with sky launch --config experiments/E011-efe-cpu-standard-sol/sky/project.yaml ...
+# (same as E005's). The workspace must be registered on the local SkyPilot API
+# server, in ~/.sky/config.yaml:
+#   workspaces:
+#     rho-agent-evals:
+#       gcp:
+#         project_id: rho-agent-evals
+active_workspace: rho-agent-evals

@@ -18,10 +18,12 @@ not happen.
 | [E007](E007-full-terminal-bench-2.1/) | 2026-11-15 to 16 | Full Terminal-Bench 2.1, Sol, on Daytona | Done | 89 (+2 setup, 3 reruns of setup failures) | 10.33 | 79/89 passed (88.8%); no timeouts. Flag: 2 failures were refused by OpenAI's cyber filter |
 | [E008](E008-sol-on-gpt-5.2-failures/) | 2026-11-15 | Sol on 7 TB 2.1 tasks GPT-5.2 always failed, Daytona | Done | 7 | 0.80 | 4/7 passed; the 3 failures were near misses, no timeouts |
 | [E009](E009-reviewer-replay/) | 2026-11-15 | Reviewer replay on E008 traces: current vs revised prompt | Done | 42 reviewer calls | 0.39 | Both flag 1 of 3 failures; revised prompt finds its real cause but flags 2 of 4 passes |
+| [E011](E011-efe-cpu-standard-sol/) | 2026-11-19 (pilot) | Embodied First Exam, CPU-only core tasks (Standard), Sol, on a GCP VM | Done without ESE (budget) | 2 + 39 | 86.22 | **21/39 on the non-ESE tasks for $85.59** (Astra 16/38, Opus 14/39, Argon 12/39). Pilot 1/2 (setup check). mujoco-small 5/8 for $5.88 (Opus 7/8, Argon 5/8, Astra 4/8). robocasa 5/8 for $16.49 (best leaderboard run: Opus 4/8). dexhand 11/23 for $63.22 (Astra 11/22 for $385.74, Argon 6/23, Opus 3/23). ESE (50 tasks) not run: API budget. Setup works on a Docker host; Daytona v2 cannot run EFE |
 
-**Spent so far: $33.70** in model calls (E000–E009): $5.39 in March 2026
-(E000) and $28.31 in November (E001–E009). Daytona compute (from E005 on) is
-billed separately and not included. The machine-readable ledger is
+**Spent so far: $119.92** in model calls (E000–E009 and E011): $5.39 in March
+2026 (E000) and $114.53 in November (E001–E009, E011). E010 (Terminal-Bench-Science)
+is recorded on its own branch and not counted here yet. Daytona and GCP
+compute (from E005 on) are billed separately and not included. The machine-readable ledger is
 [`ledger.csv`](ledger.csv).
 
 ## How to record an experiment

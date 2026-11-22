@@ -1,0 +1,61 @@
+# E011 segment `mujoco-small` (not run): Small MuJoCo suites: 8 tasks (DexJoCo 2, LIBERO-MAX 2, MetaWorld+ 2, VLABench 2).
+# Embodied First Exam, Standard setting, CPU-only core tasks. One of four segments that
+# together cover all 89 CPU-only core tasks; results are combined afterwards with
+# ../combine.py. Run on the VM by ../sky/efe-segment.yaml with SEGMENT=mujoco-small, from
+# ~/rho-agent; dataset paths are relative to it (Harbor does not expand ~).
+# Expected: about 1-1.5 h at 8 at once, plus VLABench's build. Model: about $10-16, at most $80 with the $10 cap.
+jobs_dir: jobs/e011-mujoco-small
+n_attempts: 1
+
+# Docker CPU and memory limits are caps, not reservations. Not measured in the pilot; caps 6.5-8.5 CPUs and 9-16 GB per trial. VLABench builds its
+# image on first use (5-20 min, 40 GB of disk). LIBERO-MAX needs AVX-512 (n2 VMs have it).
+n_concurrent_trials: 8
+
+# Infrastructure start failures are rerun; the agent's own cutoff is a result and is not
+# (EFE's rule, docs/protocol/running.md).
+retry:
+  max_retries: 2
+  include_exceptions: [EnvironmentStartTimeoutError]
+  min_wait_sec: 60
+  max_wait_sec: 300
+
+environment:
+  type: docker
+  delete: true
+
+# Same agent, model and settings as the pilot (configs/efe-pilot.yaml), except the cost
+# cap: $10 per trial here, $6 in the pilot (raised 2026-11-19).
+agents:
+  - import_path: rho_agent.eval.harbor.agent:RhoAgent
+    model_name: openai/gpt-6.1-sol
+    kwargs:
+      install_source: git
+      version: f9354038686fea71ebca0a95aec26af2d8ea130b   # main after smith-nathanh/rho-agent#38
+      bash_only: false             # full tool set, view_image on
+      reasoning_effort: medium
+      enable_confirm_done: true
+      confirm_done_max: 3
+      enable_reviewer: false
+      cost_ceiling_usd: 10.0        # per trial; trials that hit it are flagged by combine.py
+      max_wall_seconds: 0          # each task's own cutoff (1800 or 3600 s)
+      max_call_seconds: 1200
+      auto_compact: true
+      compact_at_tokens: 240000    # 32K below Sol's 272K price tier
+
+datasets:
+  - path: ../efe/tasks/dexjoco   # 2 tasks
+    task_names:
+      - dexjoco-bimanual-photograph-i00-standard
+      - dexjoco-fold-glasses-i00-standard
+  - path: ../efe/tasks/libero-max   # 2 tasks
+    task_names:
+      - libero-max-goal-akita-black-bowl-in-wooden-cabinet-top-target-relocation-i00-standard
+      - libero-max-goal-wine-bottle-on-wine-rack-top-visual-theme-switch-i00-standard
+  - path: ../efe/tasks/metaworldplus   # 2 tasks
+    task_names:
+      - metaworldplus-basketball-i00-standard
+      - metaworldplus-button-press-topdown-i00-standard
+  - path: ../efe/tasks/vlabench   # 2 tasks
+    task_names:
+      - vlabench-heat-food-i00-standard
+      - vlabench-texas-holdem-i00-standard

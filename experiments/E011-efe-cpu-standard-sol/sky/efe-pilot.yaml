@@ -1,0 +1,44 @@
+# E011 pilot (also the smoke test): 2 Embodied First Exam tasks on a GCP Spot
+# VM with Harbor's Docker environment. Adapted from E005's sky/gcp-compose.yaml.
+#
+# Launch from the root of the rho-agent checkout that has this folder
+# (file_mounts paths are relative to it), with the OpenAI key read from the
+# main checkout's .env (--no-project: run the installed sky tool without
+# building this checkout's Python environment, a large download):
+#   uv run --no-project --env-file /Users/nate/proj/rho-agent/.env -- sky launch -c e011-pilot \
+#     --config experiments/E011-efe-cpu-standard-sol/sky/project.yaml \
+#     --secret OPENAI_API_KEY -d \
+#     experiments/E011-efe-cpu-standard-sol/sky/efe-pilot.yaml
+# Stay online until the command returns (VM up, files synced, job queued: a few
+# minutes); setup runs on the VM as part of the job, and after that the run
+# needs nothing from the Mac.
+# Watch:     sky logs e011-pilot          (text only)
+# Results:   gs://rho-agent-evals-e011/e011-efe-pilot (copied every 5 min)
+# If preempted, rerun the same launch command; the job resumes.
+# The cluster deletes itself 30 minutes after the job ends; or: sky down e011-pilot
+name: e011-pilot
+
+resources:
+  infra: gcp
+  instance_type: n2-standard-16   # 16 vCPU, 64 GB; the 2 trials' caps add up to 15 CPUs, 29 GB
+  use_spot: true
+  disk_size: 100                  # GB: two suites' images (DexHand, ESE), containers, logs
+  autostop:
+    idle_minutes: 30
+    down: true                    # Spot clusters cannot be stopped, only deleted
+
+secrets:
+  OPENAI_API_KEY: null            # passed with --secret at launch; never written to a file
+
+file_mounts:
+  /results:
+    name: rho-agent-evals-e011    # GCS bucket, created on first launch
+    store: gcs
+    mode: MOUNT
+  ~/e011: experiments/E011-efe-cpu-standard-sol
+
+setup: |
+  bash ~/e011/sky/setup.sh ~/e011/configs/efe-pilot.yaml
+
+run: |
+  bash ~/e011/sky/run.sh e011-efe-pilot ~/e011/configs/efe-pilot.yaml

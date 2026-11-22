@@ -1,0 +1,59 @@
+# E011 segment `robocasa` (not run): RoboCasa family: 8 tasks (RoboCasa365 5, RoboCasa 2, RoboCasa-GR1 1).
+# Embodied First Exam, Standard setting, CPU-only core tasks. One of four segments that
+# together cover all 89 CPU-only core tasks; results are combined afterwards with
+# ../combine.py. Run on the VM by ../sky/efe-segment.yaml with SEGMENT=robocasa, from
+# ~/rho-agent; dataset paths are relative to it (Harbor does not expand ~).
+# Expected: about 1-2 h at 4 at once. Model: about $25-35, at most $80 with the $10 cap.
+jobs_dir: jobs/e011-robocasa
+n_attempts: 1
+
+# Docker CPU and memory limits are caps, not reservations. Not measured in the pilot. Their simulators have the largest memory caps (10-15 GB;
+# 30 GB per RoboCasa-GR1 trial in all), so 4 at once to stay inside 128 GB even at the caps.
+n_concurrent_trials: 4
+
+# Infrastructure start failures are rerun; the agent's own cutoff is a result and is not
+# (EFE's rule, docs/protocol/running.md).
+retry:
+  max_retries: 2
+  include_exceptions: [EnvironmentStartTimeoutError]
+  min_wait_sec: 60
+  max_wait_sec: 300
+
+environment:
+  type: docker
+  delete: true
+
+# Same agent, model and settings as the pilot (configs/efe-pilot.yaml), except the cost
+# cap: $10 per trial here, $6 in the pilot (raised 2026-11-19).
+agents:
+  - import_path: rho_agent.eval.harbor.agent:RhoAgent
+    model_name: openai/gpt-6.1-sol
+    kwargs:
+      install_source: git
+      version: f9354038686fea71ebca0a95aec26af2d8ea130b   # main after smith-nathanh/rho-agent#38
+      bash_only: false             # full tool set, view_image on
+      reasoning_effort: medium
+      enable_confirm_done: true
+      confirm_done_max: 3
+      enable_reviewer: false
+      cost_ceiling_usd: 10.0        # per trial; trials that hit it are flagged by combine.py
+      max_wall_seconds: 0          # each task's own cutoff (1800 or 3600 s)
+      max_call_seconds: 1200
+      auto_compact: true
+      compact_at_tokens: 240000    # 32K below Sol's 272K price tier
+
+datasets:
+  - path: ../efe/tasks/robocasa365   # 5 tasks
+    task_names:
+      - robocasa365-assemble-cooking-array-i00-standard
+      - robocasa365-cereal-and-bowl-i00-standard
+      - robocasa365-display-meat-variety-i00-standard
+      - robocasa365-microwave-defrost-meat-i00-standard
+      - robocasa365-searing-meat-i00-standard
+  - path: ../efe/tasks/robocasa   # 2 tasks
+    task_names:
+      - robocasa-coffee-setup-mug-i00-standard
+      - robocasa-turn-off-sink-faucet-i00-standard
+  - path: ../efe/tasks/robocasa-gr1   # 1 tasks
+    task_names:
+      - robocasa-gr1-potato-to-microwave-close-i00-standard
