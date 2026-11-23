@@ -12,7 +12,7 @@ Set Height 820
 Set Padding 22
 Set TypingSpeed 40ms
 Set CursorBlink false
-Set Theme { "name": "Carbon", "black": "#121212", "red": "#F87171", "green": "#6EE7B7", "yellow": "#E5B869", "blue": "#60A5FA", "magenta": "#A3A3A3", "cyan": "#60A5FA", "white": "#EAEAEA", "brightBlack": "#555555", "brightRed": "#F87171", "brightGreen": "#6EE7B7", "brightYellow": "#E5B869", "brightBlue": "#60A5FA", "brightMagenta": "#D4D4D4", "brightCyan": "#60A5FA", "brightWhite": "#FAFAFA", "background": "#121212", "foreground": "#EAEAEA", "selection": "#242424", "cursor": "#60A5FA" }
+Set Theme { "name": "Stone", "black": "#141312", "red": "#E07A7A", "green": "#6FC297", "yellow": "#E5B472", "blue": "#A8A29E", "magenta": "#D97757", "cyan": "#A8A29E", "white": "#E6E2DC", "brightBlack": "#6B6560", "brightRed": "#E07A7A", "brightGreen": "#6FC297", "brightYellow": "#E5B472", "brightBlue": "#D6D1CA", "brightMagenta": "#D97757", "brightCyan": "#D6D1CA", "brightWhite": "#F5F2ED", "background": "#141312", "foreground": "#E6E2DC", "selection": "#282522", "cursor": "#D97757" }
 Set Framerate 20
 
 Hide

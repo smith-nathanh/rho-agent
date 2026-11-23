@@ -42,6 +42,9 @@ mkdir -p "$demo_home/proj"
 touch "$demo_home/.rho-agent-demo"
 demo_home="$(cd "$demo_home" && pwd -P)"  # the real path, so projects show as ~/proj/...
 cp -R docs/demo/projects/. "$demo_home/proj/"
+if [[ -f "$demo_home/proj/telemetry/seed_db.py" ]]; then
+  (cd "$demo_home/proj/telemetry" && "$repo/.venv/bin/python" seed_db.py && rm seed_db.py)
+fi
 # Each sample project is its own git repository, as a real project would be:
 # agents usually look at `git status` first.
 for project in "$demo_home"/proj/*/; do
@@ -54,6 +57,7 @@ done
 export DEMO_HOME="$demo_home"
 export PATH="$repo/.venv/bin:$PATH"
 export BASH_SILENCE_DEPRECATION_WARNING=1
+unset RHO_AGENT_THEME
 
 # to_gif <name> [trim]: turn docs/demo/<name>.mp4 into docs/demo/<name>.gif.
 # With "trim", cut a few seconds after the screen last changed, for a tape
