@@ -35,8 +35,8 @@ from .formatting import (
 from .monitor_live import MissionControl, _tail_trace_lines, render_trace_event, write_directive
 from .session_table import _project_label, fleet_counts, print_sessions
 from .state import CONFIG_DIR, MONITOR_HISTORY_FILE, SESSIONS_DIR, app, console
-from .theme import PTK_STYLE, THEME, status_style
-from .ui import render_approval_card
+from .theme import PTK_STYLE, THEME, set_theme, status_style
+from .ui import render_approval_card, render_themes_card
 
 _BUILTIN_INPUT = builtins.input
 
@@ -70,7 +70,7 @@ class MonitorSession:
     def _prompt_tokens(self) -> list[tuple[str, str]]:
         """Minimal dynamic prompt with subtle live counters."""
         parts: list[tuple[str, str]] = [
-            ("class:prompt.badge.live", "ρ "),
+            ("class:prompt.mark", "ρ "),
             ("class:prompt.monitor", "monitor"),
         ]
         try:
@@ -108,8 +108,9 @@ class MonitorSession:
 
             if pending_n:
                 parts.append(("class:toolbar.sep", "  ·  "))
+                parts.append(("class:toolbar.warn", "● "))
                 parts.append(
-                    ("class:toolbar.warn", f"● {pending_n} approval{'s' if pending_n != 1 else ''}")
+                    ("class:toolbar.ok", f"{pending_n} approval{'s' if pending_n != 1 else ''}")
                 )
 
             if counts["waiting_input"]:
@@ -137,7 +138,7 @@ class MonitorSession:
         top.add_column(justify="right", no_wrap=True)
 
         title = Text()
-        title.append("ρ ", style=f"bold {THEME.accent}")
+        title.append("ρ ", style=f"bold {THEME.mark}")
         title.append("rho-agent monitor", style=f"bold {THEME.brand}")
         title.append(f"  {_shorten_path(str(self._dir))}", style=THEME.muted)
         hints = Text("live · ps · watch · review · help · exit", style=THEME.muted)
@@ -224,6 +225,8 @@ class MonitorSession:
                 self._cmd_resume(parts[1])
             elif command == "directive" and len(parts) > 2:
                 self._cmd_directive(parts[1], " ".join(parts[2:]))
+            elif command == "theme":
+                self._cmd_theme(parts[1] if len(parts) > 1 else None)
             else:
                 console.print(_markup(f"Unknown command: {raw}", THEME.warning))
                 console.print(f"[{THEME.muted}]Type 'help' for command list[/{THEME.muted}]")
@@ -255,6 +258,7 @@ class MonitorSession:
                     ("pause <id|all>", "Pause live session(s)"),
                     ("resume <id|all>", "Resume paused session(s)"),
                     ("cancel <id|all>", "Cancel live session(s)"),
+                    ("theme [name]", "List or switch CLI color themes"),
                     ("clear / help / exit", "Clear screen, show help, or exit"),
                 ],
             ),
@@ -308,7 +312,7 @@ class MonitorSession:
             for info, req in pending[:5]:
                 sig = _format_tool_signature(req.tool_name, req.tool_args)
                 row = Text()
-                row.append(f"  {req.id}", style=THEME.warning)
+                row.append(f"  {req.id}", style=f"bold {THEME.brand}")
                 row.append(f"  #{info.id}  ", style=THEME.muted)
                 row.append(sig, style=THEME.primary)
                 lines.append(row)
@@ -321,12 +325,13 @@ class MonitorSession:
                 Panel(
                     Group(*lines),
                     title=(
-                        f"[{THEME.warning}]{len(pending)} Approval"
-                        f"{'s' if len(pending) != 1 else ''} Waiting[/{THEME.warning}]"
+                        f"[{THEME.warning}]●[/{THEME.warning}] "
+                        f"[bold {THEME.brand}]{len(pending)} Approval"
+                        f"{'s' if len(pending) != 1 else ''} Waiting[/bold {THEME.brand}]"
                     ),
                     title_align="left",
                     box=box.SQUARE,
-                    border_style=THEME.warning,
+                    border_style=THEME.border_active,
                     padding=(0, 1),
                 )
             )
@@ -386,11 +391,12 @@ class MonitorSession:
             reqs = pending_requests(info.path)
             if reqs:
                 blocks.append(Text(""))
-                blocks.append(Text("Pending approvals", style=THEME.warning))
+                blocks.append(Text("Pending approvals", style=THEME.secondary))
                 for req in reqs:
                     sig = _format_tool_signature(req.tool_name, req.tool_args)
                     row = Text("  ")
-                    row.append(f"{req.id}  ", style=THEME.warning)
+                    row.append("● ", style=THEME.warning)
+                    row.append(f"{req.id}  ", style=f"bold {THEME.brand}")
                     row.append(sig, style=THEME.primary)
                     blocks.append(row)
 
@@ -430,7 +436,7 @@ class MonitorSession:
             expand=True,
             pad_edge=False,
         )
-        table.add_column("Request", style=THEME.warning, no_wrap=True)
+        table.add_column("Request", style=f"bold {THEME.primary}", no_wrap=True)
         table.add_column("Session", style=THEME.primary, no_wrap=True)
         table.add_column("Waiting", justify="right", style=THEME.muted, no_wrap=True)
         table.add_column("Tool call", overflow="fold", style=THEME.subtle)
@@ -622,6 +628,19 @@ class MonitorSession:
             else:
                 console.print(_markup(f"{d.name}: not paused", THEME.muted))
 
+    def _cmd_theme(self, name: str | None) -> None:
+        if not name:
+            console.print(render_themes_card(command_prefix="theme"))
+            return
+        try:
+            chosen = set_theme(name, persist=True)
+        except ValueError as exc:
+            console.print(_markup(str(exc), THEME.error))
+            return
+        console.print(
+            _markup(f"✓ Theme set to {chosen.name} ({chosen.description})", THEME.success)
+        )
+
     def _cmd_directive(self, prefix: str, text: str) -> None:
         session_dir = self._resolve_single_dir(prefix)
         if not session_dir:
@@ -655,8 +674,22 @@ def monitor(
             help="Launch straight into the live auto-refreshing Mission Control dashboard",
         ),
     ] = False,
+    theme: Annotated[
+        str | None,
+        typer.Option(
+            "--theme",
+            help="Color theme override (stone, teal, dusk, obsidian, light)",
+        ),
+    ] = None,
 ) -> None:
     """Interactive command shell and live Mission Control dashboard for sessions."""
+    if theme:
+        try:
+            set_theme(theme)
+        except ValueError as exc:
+            console.print(_markup(str(exc), THEME.error))
+            raise typer.Exit(1) from exc
+
     sessions_dir = Path(dir).expanduser().resolve() if dir else SESSIONS_DIR
     if not sessions_dir.is_dir():
         console.print(_markup(f"Not a directory: {sessions_dir}", THEME.error))

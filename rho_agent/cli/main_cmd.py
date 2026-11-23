@@ -45,7 +45,7 @@ from .state import (
     console,
     settings,
 )
-from .theme import THEME
+from .theme import THEME, set_theme
 from .ui import render_saved_sessions_table, render_single_header
 
 SANDBOX_CONFIG_FILE = ".rho-agent.toml"
@@ -451,9 +451,23 @@ def main(
             help="Turn automatic history compaction on or off (default on)",
         ),
     ] = None,
+    theme: Annotated[
+        str | None,
+        typer.Option(
+            "--theme",
+            help="Color theme override (stone, teal, dusk, obsidian, light)",
+        ),
+    ] = None,
 ) -> None:
     """rho-agent: an agent harness and CLI. Runs sandboxed: it can edit the working
     directory and asks before going outside it (see --access)."""
+    if theme:
+        try:
+            set_theme(theme)
+        except ValueError as exc:
+            console.print(_markup(str(exc), THEME.error))
+            raise typer.Exit(1) from exc
+
     # --- Daytona sandbox configuration ---
     # When --backend daytona, read .rho-agent.toml from the project root.
     # CLI flags (--dockerfile, --registered-image, --upload, --working-dir) override the toml.

@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 from rich.theme import Theme
 
-from .theme import THEME
+from .theme import THEME, ActiveTheme, CliTheme, on_theme_change
 
 # Config directory for rho-agent data
 CONFIG_DIR = Path.home() / ".config" / "rho-agent"
@@ -29,33 +29,50 @@ RENDER_MARKDOWN = os.getenv("RHO_AGENT_RENDER_MARKDOWN", "1").lower() not in (
     "no",
 )
 
-MARKDOWN_THEME = Theme(
-    {
-        "markdown": THEME.primary,
-        "markdown.paragraph": THEME.primary,
-        "markdown.text": THEME.primary,
-        "markdown.item": THEME.primary,
-        "markdown.item.bullet": THEME.muted,
-        "markdown.item.number": THEME.muted,
-        "markdown.code": f"{THEME.primary} on {THEME.code_bg}",
-        "markdown.code_block": THEME.primary,
-        "markdown.block_quote": THEME.subtle,
-        "markdown.h1": f"bold {THEME.brand}",
-        "markdown.h2": f"bold {THEME.primary}",
-        "markdown.h3": f"bold {THEME.secondary}",
-        "markdown.h4": THEME.secondary,
-        "markdown.h5": THEME.subtle,
-        "markdown.h6": THEME.muted,
-        "markdown.hr": THEME.border,
-        "markdown.link": f"underline {THEME.accent}",
-        "markdown.link_url": THEME.muted,
-        "markdown.em": f"italic {THEME.primary}",
-        "markdown.strong": f"bold {THEME.brand}",
-    }
-)
 
-# Rich console for all output (includes MARKDOWN_THEME so Live streams inherit it)
-console = Console(theme=MARKDOWN_THEME)
+def build_markdown_theme(theme: CliTheme | ActiveTheme = THEME) -> Theme:
+    """Build a Rich Markdown Theme matching ``theme``."""
+    return Theme(
+        {
+            "markdown": theme.primary,
+            "markdown.paragraph": theme.primary,
+            "markdown.text": theme.primary,
+            "markdown.item": theme.primary,
+            "markdown.item.bullet": theme.muted,
+            "markdown.item.number": theme.muted,
+            "markdown.code": theme.code,
+            "markdown.code_block": theme.primary,
+            "markdown.block_quote": theme.subtle,
+            "markdown.h1": f"bold {theme.brand}",
+            "markdown.h2": f"bold {theme.primary}",
+            "markdown.h3": f"bold {theme.secondary}",
+            "markdown.h4": theme.secondary,
+            "markdown.h5": theme.subtle,
+            "markdown.h6": theme.muted,
+            "markdown.hr": theme.border,
+            "markdown.link": f"underline {theme.accent}",
+            "markdown.link_url": theme.muted,
+            "markdown.em": f"italic {theme.primary}",
+            "markdown.strong": f"bold {theme.brand}",
+        }
+    )
+
+
+MARKDOWN_THEME = build_markdown_theme(THEME)
+
+# Rich console for all output (pushed theme lets /theme swap palettes live)
+console = Console()
+console.push_theme(MARKDOWN_THEME)
+
+
+def _refresh_console_theme(theme: CliTheme) -> None:
+    global MARKDOWN_THEME
+    MARKDOWN_THEME = build_markdown_theme(theme)
+    console.pop_theme()
+    console.push_theme(MARKDOWN_THEME)
+
+
+on_theme_change(_refresh_console_theme)
 
 
 @dataclass

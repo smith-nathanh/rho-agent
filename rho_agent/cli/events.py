@@ -10,8 +10,9 @@ from rich.panel import Panel
 
 from ..core.approvals import ApprovalQueue, ApprovalRequest
 from ..core.events import AgentEvent
+from . import state
 from .formatting import TokenStatus, _markup
-from .state import MARKDOWN_THEME, console
+from .state import console
 from .theme import THEME
 from .ui import (
     make_markdown,
@@ -116,7 +117,7 @@ def handle_event(
             pending_text_chunks.clear()
             return
         try:
-            with console.use_theme(MARKDOWN_THEME):
+            with console.use_theme(state.MARKDOWN_THEME):
                 console.print(make_markdown(combined))
         except Exception:
             print(combined, flush=True)

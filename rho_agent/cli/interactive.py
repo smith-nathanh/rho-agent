@@ -31,12 +31,13 @@ from .formatting import (
 )
 from .single import upload_to_sandbox
 from .state import CONFIG_DIR, HISTORY_FILE, RENDER_MARKDOWN, console
-from .theme import PTK_STYLE, THEME
+from .theme import PTK_STYLE, THEME, set_theme
 from .ui import (
     TurnRenderer,
     render_access_card,
     render_saved_sessions_table,
     render_session_status_card,
+    render_themes_card,
     render_user_prompt,
     render_welcome_banner,
 )
@@ -165,6 +166,9 @@ class InteractiveSession:
                         continue
                     if user_input.startswith("/resume"):
                         self._handle_resume(user_input)
+                        continue
+                    if user_input == "/theme" or user_input.startswith("/theme "):
+                        self._handle_theme(user_input)
                         continue
                     if user_input == "/status":
                         console.print(
@@ -343,6 +347,22 @@ class InteractiveSession:
             console.print(_markup(str(exc), THEME.error))
         except Exception as exc:
             console.print(_markup(f"Download failed: {exc}", THEME.error))
+
+    def _handle_theme(self, cmd: str) -> None:
+        """``/theme`` lists palettes; ``/theme <name>`` switches live and saves preference."""
+        parts = cmd.split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip():
+            console.print(render_themes_card(command_prefix="/theme"))
+            return
+        choice = parts[1].strip()
+        try:
+            chosen = set_theme(choice, persist=True)
+        except ValueError as exc:
+            console.print(_markup(str(exc), THEME.error))
+            return
+        console.print(
+            _markup(f"✓ Theme set to {chosen.name} ({chosen.description})", THEME.success)
+        )
 
     def _handle_access(self, cmd: str) -> None:
         """``/access`` shows access; ``/access <level>`` changes it;

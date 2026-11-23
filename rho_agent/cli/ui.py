@@ -39,7 +39,7 @@ from .formatting import (
     access_summary,
 )
 from .state import console as default_console
-from .theme import THEME, status_style, tool_visual
+from .theme import THEME, THEMES, status_style, tool_visual
 
 # Clean subtle pulse dots (modern, non-retro)
 _SPINNER_FRAMES = ("●", "●", "◉", "○", "◉")
@@ -80,11 +80,12 @@ class MinimalMarkdown(Markdown):
 
 def make_markdown(text: str) -> MinimalMarkdown:
     """Create a minimal left-aligned Markdown renderable."""
+    code_theme = "ansi_light" if THEME.name == "light" else "ansi_dark"
     return MinimalMarkdown(
         text,
         style=THEME.primary,
-        code_theme="ansi_dark",
-        inline_code_theme="ansi_dark",
+        code_theme=code_theme,
+        inline_code_theme=code_theme,
     )
 
 
@@ -100,7 +101,7 @@ def _access_label(level: str, *, backend: str = "local") -> Text:
 
 
 def render_user_prompt(text: str, *, label: str | None = None) -> RenderableType:
-    """Render a user prompt as a distinct matte-charcoal strip with a blue left bar."""
+    """Render a user prompt as a distinct matte-charcoal strip with a subtle left bar."""
     bg = THEME.user_bg
     grid = Table.grid(expand=True, padding=0)
     grid.add_column(width=2, no_wrap=True)
@@ -109,13 +110,13 @@ def render_user_prompt(text: str, *, label: str | None = None) -> RenderableType
     lines = text.splitlines() or [""]
     if label:
         grid.add_row(
-            Text("┃ ", style=f"{THEME.accent} on {bg}"),
+            Text("┃ ", style=f"{THEME.mark} on {bg}"),
             Text(label, style=f"{THEME.muted} on {bg}"),
             style=f"on {bg}",
         )
     for line in lines:
         grid.add_row(
-            Text("┃ ", style=f"{THEME.accent} on {bg}"),
+            Text("┃ ", style=f"{THEME.mark} on {bg}"),
             Text(line, style=f"bold {THEME.brand} on {bg}"),
             style=f"on {bg}",
         )
@@ -126,11 +127,11 @@ def render_agent_divider(*, after_tools: bool = False) -> RenderableType:
     """Subtle visual marker separating the agent's voice from user prompts and tool work."""
     if after_tools:
         return Rule(
-            title=f"[bold {THEME.accent}]ρ[/bold {THEME.accent}]",
+            title=f"[bold {THEME.mark}]ρ[/bold {THEME.mark}]",
             align="left",
             style=THEME.border,
         )
-    return Text("ρ", style=f"bold {THEME.accent}")
+    return Text("ρ", style=f"bold {THEME.mark}")
 
 
 def render_welcome_banner(
@@ -149,7 +150,7 @@ def render_welcome_banner(
     top.add_column(justify="right", no_wrap=True)
 
     left_title = Text()
-    left_title.append("ρ ", style=f"bold {THEME.accent}")
+    left_title.append("ρ ", style=f"bold {THEME.mark}")
     left_title.append("rho-agent", style=f"bold {THEME.brand}")
     left_title.append(f"  {version}", style=THEME.muted)
 
@@ -510,7 +511,13 @@ def render_approval_card(
     if request_id:
         title = f"{title}  [{request_id}]"
 
-    border = THEME.error if high_risk else THEME.warning
+    border = THEME.error if high_risk else THEME.border_active
+    dot_color = THEME.error if high_risk else THEME.warning
+    title_markup = (
+        f"[{THEME.error}]{escape(title)}[/{THEME.error}]"
+        if high_risk
+        else f"[{dot_color}]●[/{dot_color}] [bold {THEME.brand}]{escape(title)}[/bold {THEME.brand}]"
+    )
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style=THEME.muted, no_wrap=True)
     grid.add_column()
@@ -525,7 +532,7 @@ def render_approval_card(
 
     panel = Panel(
         Group(*items),
-        title=f"[{border}]{escape(title)}[/{border}]",
+        title=title_markup,
         title_align="left",
         box=box.SQUARE,
         border_style=border,
@@ -584,6 +591,7 @@ def render_help_card() -> Panel:
                 ("/compact [guidance]", "Compact conversation history"),
                 ("/resume [latest|id]", "Switch to a saved session"),
                 ("/download <src> <dst>", "Download a file from a remote sandbox"),
+                ("/theme [name]", "List or switch CLI color themes"),
                 ("/clear", "Clear screen"),
                 ("exit / quit", "Save and exit"),
             ],
@@ -623,6 +631,54 @@ def render_help_card() -> Panel:
     return Panel(
         Group(*blocks),
         title=f"[{THEME.secondary}]Help[/{THEME.secondary}]",
+        title_align="left",
+        box=box.SQUARE,
+        border_style=THEME.border,
+        padding=(0, 1),
+    )
+
+
+def render_themes_card(*, command_prefix: str = "/theme") -> Panel:
+    """Render available CLI/monitor themes with live color swatches."""
+    table = Table(
+        show_header=True,
+        header_style=THEME.muted,
+        box=box.SIMPLE_HEAD,
+        border_style=THEME.border,
+        expand=True,
+        pad_edge=False,
+    )
+    table.add_column("Theme", no_wrap=True)
+    table.add_column("Swatches", no_wrap=True)
+    table.add_column("Description", ratio=1)
+
+    for key, preset in THEMES.items():
+        active = key == THEME.name
+        name_cell = Text()
+        if active:
+            name_cell.append("● ", style=THEME.accent)
+            name_cell.append(key, style=f"bold {THEME.brand}")
+        else:
+            name_cell.append("  ", style="")
+            name_cell.append(key, style=THEME.secondary)
+
+        swatch = Text()
+        swatch.append("ρ ", style=f"bold {preset.mark}")
+        swatch.append("● ", style=preset.code)
+        swatch.append("● ", style=preset.success)
+        swatch.append("● ", style=preset.warning)
+        swatch.append("●", style=preset.error)
+
+        desc = Text(preset.description, style=THEME.primary if active else THEME.muted)
+        table.add_row(name_cell, swatch, desc)
+
+    footer = Text(
+        f"Switch with: {command_prefix} <name>   (saved to ~/.config/rho-agent/theme)",
+        style=THEME.muted,
+    )
+    return Panel(
+        Group(table, Text(""), footer),
+        title=f"[{THEME.secondary}]Themes[/{THEME.secondary}]",
         title_align="left",
         box=box.SQUARE,
         border_style=THEME.border,
@@ -918,10 +974,12 @@ class TurnRenderer:
         if self._in_tool_section:
             self._console.print()
             self._console.print(render_agent_divider(after_tools=True))
+            self._console.print()
             self._in_tool_section = False
             self._showed_agent_anchor = True
         elif not self._showed_agent_anchor:
             self._console.print(render_agent_divider(after_tools=False))
+            self._console.print()
             self._showed_agent_anchor = True
 
     def _flush_text_stream(self) -> None:

@@ -15,6 +15,8 @@ from prompt_toolkit.completion import (
 )
 from prompt_toolkit.document import Document
 
+from .theme import THEMES
+
 # Slash commands with descriptions shown in the completion menu
 COMMAND_SPECS: list[tuple[str, str]] = [
     ("/status", "Session tokens, context window & cost"),
@@ -27,6 +29,8 @@ COMMAND_SPECS: list[tuple[str, str]] = [
     ("/resume", "List or switch to a saved session"),
     ("/resume latest", "Resume the most recent session"),
     ("/download", "Download file from remote sandbox"),
+    ("/theme", "List or switch CLI color themes"),
+    *[(f"/theme {name}", preset.description) for name, preset in THEMES.items()],
     ("/clear", "Clear the terminal screen"),
     ("/help", "Show commands and keybindings"),
     ("/exit", "Save and quit"),
@@ -50,6 +54,7 @@ MONITOR_COMMANDS: list[tuple[str, str]] = [
     ("pause", "Pause live session(s) before next LLM call"),
     ("resume", "Resume paused session(s)"),
     ("cancel", "Cancel live session(s) (cancel <id|all>)"),
+    ("theme", "List or switch color theme (theme <name>)"),
     ("clear", "Clear the screen"),
     ("help", "Show monitor command reference"),
     ("exit", "Exit monitor"),
@@ -214,6 +219,16 @@ class MonitorCompleter(Completer):
                         start_position=-len(arg_prefix),
                         display=info.id,
                         display_meta=meta,
+                    )
+
+        elif cmd == "theme":
+            for name, preset in THEMES.items():
+                if name.startswith(arg_prefix.lower()):
+                    yield Completion(
+                        name,
+                        start_position=-len(arg_prefix),
+                        display=name,
+                        display_meta=preset.description,
                     )
 
         elif cmd in _APPROVAL_TARGET_CMDS:

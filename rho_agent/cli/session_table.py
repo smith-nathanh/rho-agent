@@ -74,34 +74,34 @@ def build_fleet_summary(
     """Quiet architectural summary strip for active sessions, alerts, and spend."""
     counts, total_cost, total = fleet_counts(sessions)
     bar = Text()
-    bar.append("ρ ", style=f"bold {THEME.accent}")
+    bar.append("ρ ", style=f"bold {THEME.mark}")
     bar.append("fleet", style=f"bold {THEME.brand}")
     bar.append("  ", style="")
 
-    items: list[tuple[str, str, str]] = []
+    items: list[tuple[str, str, str, str]] = []
     if counts["running"]:
-        items.append(("●", f"{counts['running']} running", THEME.accent))
+        items.append(("●", f"{counts['running']} running", THEME.accent, THEME.secondary))
     if pending_approvals or counts["waiting_approval"]:
         n = max(pending_approvals, counts["waiting_approval"])
-        items.append(("●", f"{n} approval{'s' if n != 1 else ''}", THEME.warning))
+        items.append(("●", f"{n} approval{'s' if n != 1 else ''}", THEME.warning, THEME.primary))
     if counts["waiting_input"]:
-        items.append(("○", f"{counts['waiting_input']} idle", THEME.secondary))
+        items.append(("○", f"{counts['waiting_input']} idle", THEME.secondary, THEME.secondary))
     if counts["paused"]:
-        items.append(("▪", f"{counts['paused']} paused", THEME.muted))
+        items.append(("▪", f"{counts['paused']} paused", THEME.muted, THEME.muted))
     if counts["completed"]:
-        items.append(("·", f"{counts['completed']} done", THEME.muted))
+        items.append(("·", f"{counts['completed']} done", THEME.muted, THEME.muted))
     failed = counts["error"] + counts["dead"]
     if failed:
-        items.append(("×", f"{failed} error", THEME.error))
+        items.append(("×", f"{failed} error", THEME.error, THEME.error))
 
     if not items:
         bar.append("no active sessions", style=THEME.muted)
     else:
-        for idx, (glyph, label, color) in enumerate(items):
+        for idx, (glyph, label, dot_color, label_color) in enumerate(items):
             if idx:
                 bar.append("  ·  ", style=THEME.border)
-            bar.append(f"{glyph} ", style=color)
-            bar.append(label, style=THEME.secondary if color == THEME.accent else color)
+            bar.append(f"{glyph} ", style=dot_color)
+            bar.append(label, style=label_color)
 
     cost_str = _format_cost(total_cost)
     if cost_str:
@@ -174,8 +174,10 @@ def print_sessions(
         status_cell.append(
             info.status,
             style=color
-            if info.status in ("waiting_approval", "error", "dead")
-            else (THEME.primary if info.status == "running" else THEME.subtle),
+            if info.status in ("error", "dead")
+            else (
+                THEME.primary if info.status in ("running", "waiting_approval") else THEME.subtle
+            ),
         )
 
         row: list[object] = [id_cell, status_cell]

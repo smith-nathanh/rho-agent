@@ -220,8 +220,8 @@ def render_trace_event(
         signature = _format_tool_signature(event.get("tool_name"), event.get("tool_args"))
         req_id = event.get("request_id", "?")
         row = prefix("│ ", THEME.warning)
-        row.append(f"approval {req_id}  ", style=THEME.warning)
-        row.append(signature, style=THEME.primary)
+        row.append(f"approval {req_id}  ", style=f"bold {THEME.primary}")
+        row.append(signature, style=THEME.secondary)
         return row
 
     if ev_type == "approval_resolved":
@@ -470,7 +470,7 @@ class MissionControl:
         if width < 120:
             counts, total_cost, _ = fleet_counts(sessions)
             summary = Text()
-            summary.append("ρ ", style=f"bold {THEME.accent}")
+            summary.append("ρ ", style=f"bold {THEME.mark}")
             summary.append("fleet ", style=f"bold {THEME.brand}")
             if counts["running"]:
                 summary.append(f"●{counts['running']} ", style=THEME.accent)
@@ -500,7 +500,7 @@ class MissionControl:
             Panel(
                 header_grid,
                 box=box.SQUARE,
-                border_style=THEME.warning if pending else THEME.border,
+                border_style=THEME.border,
                 padding=(0, 1),
             )
         )
@@ -609,10 +609,10 @@ class MissionControl:
             }.get(info.status, info.status)
             st_cell.append(
                 short_status,
-                style=color if reqs else (THEME.primary if is_sel else THEME.subtle),
+                style=THEME.primary if (reqs or is_sel) else THEME.subtle,
             )
             if reqs:
-                st_cell.append(f" ({len(reqs)})", style=THEME.warning)
+                st_cell.append(f" ({len(reqs)})", style=THEME.secondary)
 
             row_cells: list[Any] = [cursor, id_cell, st_cell]
             if show_active:
@@ -711,27 +711,39 @@ class MissionControl:
             req_body = Text()
             req_body.append(sig, style=THEME.primary)
             req_body.append("\n")
-            req_body.append("a approve   A all   x deny", style=THEME.warning)
+            req_body.append("a", style=f"bold {THEME.primary}")
+            req_body.append(" approve   ", style=THEME.muted)
+            req_body.append("A", style=f"bold {THEME.primary}")
+            req_body.append(" all   ", style=THEME.muted)
+            req_body.append("x", style=f"bold {THEME.primary}")
+            req_body.append(" deny", style=THEME.muted)
             if len(sel_reqs) > 1:
                 req_body.append(f"   (+{len(sel_reqs) - 1} more)", style=THEME.muted)
             blocks.append(Text(""))
             blocks.append(
                 Panel(
                     req_body,
-                    title=f"[{THEME.warning}]Approval · {escape(req.id)}[/{THEME.warning}]",
+                    title=(
+                        f"[{THEME.warning}]●[/{THEME.warning}] "
+                        f"[bold {THEME.brand}]Approval · {escape(req.id)}[/bold {THEME.brand}]"
+                    ),
                     title_align="left",
                     box=box.SQUARE,
-                    border_style=THEME.warning,
+                    border_style=THEME.border_active,
                     padding=(0, 1),
                 )
             )
         elif all_pending:
             other_info, other_req = all_pending[0]
-            hint = Text(
+            hint = Text()
+            hint.append("● ", style=THEME.warning)
+            hint.append(
                 f"{len(all_pending)} approval(s) pending on #{other_info.id} "
-                f"({other_req.tool_name}) — press a to approve",
-                style=THEME.warning,
+                f"({other_req.tool_name}) — press ",
+                style=THEME.primary,
             )
+            hint.append("a", style=f"bold {THEME.brand}")
+            hint.append(" to approve", style=THEME.secondary)
             blocks.append(Text(""))
             blocks.append(hint)
 

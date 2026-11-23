@@ -81,7 +81,7 @@ def test_approval_card_escalates_border_for_dangerous_targets() -> None:
         "request_access",
         {"path": "/tmp/other-proj", "access": "write", "reason": "update shared lib"},
     )
-    assert safe_panel.border_style == THEME.warning
+    assert safe_panel.border_style == THEME.border_active
 
     home_panel, _ = render_approval_card(
         "request_access",
@@ -488,3 +488,78 @@ def test_tail_trace_lines_bounded_seek_and_narrow_mission_control(tmp_path: Path
     with c.capture() as cap:
         c.print(mc.build_layout())
     assert "Fleet" in cap.get()
+
+
+def test_theme_switching_persistence_and_completions(tmp_path: Path, monkeypatch) -> None:
+    from rho_agent.cli.theme import (
+        PTK_STYLE,
+        THEMES,
+        load_theme,
+        resolve_theme_name,
+        set_theme,
+    )
+    from rho_agent.cli.ui import render_themes_card
+
+    cfg = tmp_path / "theme"
+    prev = THEME.name
+    try:
+        # Every theme keeps a unified brand accent (mark == accent == prompt)
+        for preset in THEMES.values():
+            assert preset.mark == preset.accent == preset.prompt
+
+        # Default fallback is stone (Stone & Terracotta) with terracotta rho mark
+        monkeypatch.delenv("RHO_AGENT_THEME", raising=False)
+        default_t = load_theme(config_file=cfg)
+        assert default_t.name == "stone"
+        assert default_t.mark == "#D97757"
+        assert resolve_theme_name("terracotta") == "stone"
+        assert resolve_theme_name("slate") == "dusk"
+        assert resolve_theme_name("sage") == "teal"
+
+        # Live switch updates THEME proxy, PTK_STYLE, and persists when requested
+        chosen = set_theme("teal", persist=True, config_file=cfg)
+        assert chosen.name == "teal"
+        assert THEME.name == "teal"
+        assert THEME.accent == "#52B8B2"
+        assert cfg.read_text(encoding="utf-8").strip() == "teal"
+        assert load_theme(config_file=cfg).name == "teal"
+        assert PTK_STYLE.style_rules  # DynamicStyle resolves without error
+
+        # Env var overrides saved file
+        monkeypatch.setenv("RHO_AGENT_THEME", "obsidian")
+        assert load_theme(config_file=cfg).name == "obsidian"
+
+        # Invalid theme raises ValueError
+        try:
+            set_theme("nonexistent")
+        except ValueError as exc:
+            assert "Unknown theme" in str(exc)
+        else:
+            raise AssertionError("Expected ValueError for unknown theme")
+
+        # Card renders all palettes
+        card_out = _render_to_str(render_themes_card())
+        for name in THEMES:
+            assert name in card_out
+
+        # Slash and monitor completions expose /theme and theme <name>
+        slash_matches = [
+            c.text
+            for c in SlashCommandCompleter().get_completions(Document("/theme "), MagicMock())
+        ]
+        assert "/theme stone" in slash_matches
+        assert "/theme teal" in slash_matches
+        assert "/theme dusk" in slash_matches
+
+        mon_matches = [
+            c.text
+            for c in MonitorCompleter(SessionStore(tmp_path / "s")).get_completions(
+                Document("theme "), MagicMock()
+            )
+        ]
+        assert "stone" in mon_matches
+        assert "teal" in mon_matches
+        assert "dusk" in mon_matches
+        assert "obsidian" in mon_matches
+    finally:
+        set_theme(prev)
