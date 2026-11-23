@@ -75,7 +75,7 @@ Terminal-Bench 2.1 evaluates autonomous coding agents across 89 end-to-end tasks
 
 ### [Embodied First Exam](https://www.embodied-first-exam.ai/leaderboard/) — **21 / 39 (53.8%)**
 
-> **Model:** `GPT-6.1 Sol` (`medium` reasoning) · **Cost:** `$85.59` · **Run:** 39 of 456 core tasks, Standard setting, 1 attempt/task (Nov 2026)
+> **Model:** `GPT-6.1 Sol` (`medium` reasoning) · **Cost:** `$85.59` · **Run:** 39 of 456 core tasks, Standard setting, 1 attempt/task (Nov 2026) · [experiment E011](experiments/E011-efe-cpu-standard-sol/)
 
 The Embodied First Exam asks a coding agent to operate a simulated robot (an arm, a five-finger hand or a kitchen robot) toward a goal such as "open the jar" or "swap the remote's batteries" — seeing only through camera images and acting by writing Python motor commands against a 30–60 minute clock.
 
