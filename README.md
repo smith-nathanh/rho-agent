@@ -1,11 +1,13 @@
 # rho-agent
 
-rho-agent runs AI agents that read code, run commands and edit files. Agents run inside an OS sandbox: they can change the project they work in, and ask before touching anything outside it. You can use it two ways:
+rho-agent is a pure-Python AI agent CLI and library that reads code, runs commands and edits files. Because it needs only Python — no Node runtime, no browser, no background daemon — it runs anywhere Python does: your laptop, a small remote VM over SSH, a container, an edge device, or a robot.
 
-- **From the terminal.** Work with an agent in a conversation, hand it a task to finish on its own, or start several and supervise them from one place.
-- **From Python.** Import `rho_agent` and build agents into your own programs. The CLI is a thin layer over the same three classes.
+Agents run inside an OS sandbox: they can change the project they work in, and ask before touching anything outside it. You can use it two ways:
 
-![An interactive session: the agent finds a bug behind two failing tests, fixes it and reruns the tests](docs/demo/cli.gif)
+- **From the terminal.** Work with an agent interactively, hand it a task to finish in the background, or supervise a fleet of local or remote agents from one live monitor.
+- **From Python.** Import `rho_agent` and embed agents directly into your own programs. The CLI is a thin layer over the same three classes.
+
+![An interactive session on a rover controller: the agent finds a millimeter-to-meter bug behind two failing obstacle-stop tests, fixes it and reruns the suite](docs/demo/cli.gif)
 
 ## Benchmark results
 
@@ -176,7 +178,7 @@ rho-agent
 > now run the whole suite
 ```
 
-When the agent needs something outside the project, such as writing a sibling repository, it asks at the prompt and waits for your answer. Ctrl+C stops the current turn without ending the session, `/help` lists the commands available inside it, and the status bar shows how many tokens the session has used.
+When the agent needs something outside the project, such as writing a sibling repository, it asks at the prompt and waits for your answer. Ctrl+C stops the current turn without ending the session, `/status` shows context usage and cost, `/help` lists the commands available inside it, and the bottom bar tracks your session as you work.
 
 Sessions are saved as you go, so you can leave and come back:
 
@@ -206,17 +208,18 @@ rho-agent --prompt examples/log_debugger/debug.md --var log_path=/mnt/logs/12345
 
 ### Run several and supervise them
 
-Agents started in the background keep working on their own. `rho-agent monitor` shows all of them, grouped by project, with subagents listed under the agent that started them.
+Agents started in the background keep working on their own. `rho-agent monitor` opens an interactive shell (and `rho-agent monitor --live` opens a split-pane live dashboard) showing all of them grouped by project, with subagents nested under the agent that started them.
 
-![The monitor: two agents in different projects wait for approval, get approved, and one is redirected while it works](docs/demo/monitor.gif)
+![The monitor: inspect a session's history and subagent tree, then switch to Live Mission Control to approve waiting agents and steer them mid-run](docs/demo/monitor.gif)
 
 From the monitor you can:
 
-- see which agents are working, waiting for input, waiting for an approval, or dead
-- `watch` one live, including a single subagent
-- answer approval requests with `approve` and `deny`
-- `pause`, `resume` and `cancel`
-- send a `directive` that the agent reads before its next step
+- see which agents are working, idle, waiting for approval, paused, or dead
+- `inspect` a session's metadata, subagent tree, pending approvals, and recent trace history
+- open the `live` dashboard (`rho-agent monitor --live`) to navigate the fleet, watch live traces, and approve or steer with single keystrokes
+- `watch` one agent live, including a single subagent
+- answer approval requests with `review`, `approve`, and `deny`
+- `pause`, `resume`, `cancel`, or send a `directive` that the agent reads before its next step
 
 An agent with no terminal attached cannot ask you anything directly, so when it needs access outside its sandbox it queues the request and waits for an answer in the monitor:
 
@@ -224,7 +227,7 @@ An agent with no terminal attached cannot ask you anything directly, so when it 
 rho-agent "split payments don't add up to the invoice total. fix it" &
 ```
 
-There is no daemon and no server behind this. Each session is a directory of plain files under `~/.config/rho-agent/sessions`, and the monitor reads and writes those files. See [Monitor](docs/site/monitor.md).
+There is no daemon and no server behind this. Each session is a directory of plain files under `~/.config/rho-agent/sessions`, and the monitor reads and writes those files — so you can SSH into a remote VM or edge device and run `rho-agent monitor --live` directly on the box. See [Monitor](docs/site/monitor.md).
 
 ## In Python
 

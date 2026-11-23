@@ -177,7 +177,7 @@ class TokenStatus:
         parts.append((pill_cls, self.access_level))
 
         if self.model:
-            parts.append(("class:toolbar.sep", "  ·  "))
+            parts.append(("class:toolbar.sep", " · "))
             parts.append(("class:toolbar.model", self.model))
 
         ratio = (
@@ -190,7 +190,7 @@ class TokenStatus:
             if ratio >= 0.85
             else ("class:toolbar.warn" if ratio >= 0.65 else "class:toolbar.muted")
         )
-        parts.append(("class:toolbar.sep", "  ·  "))
+        parts.append(("class:toolbar.sep", " · "))
         parts.append(
             (
                 ctx_cls,
@@ -199,7 +199,7 @@ class TokenStatus:
         )
 
         if self.total_input_tokens or self.total_output_tokens:
-            parts.append(("class:toolbar.sep", "  ·  "))
+            parts.append(("class:toolbar.sep", " · "))
             parts.append(
                 (
                     "class:toolbar.muted",
@@ -224,11 +224,11 @@ class TokenStatus:
 
         cost_str = _format_cost(self.total_cost_usd)
         if cost_str:
-            parts.append(("class:toolbar.sep", "  ·  "))
+            parts.append(("class:toolbar.sep", " · "))
             parts.append(("class:toolbar.ok", cost_str))
 
-        parts.append(("class:toolbar.sep", "  ·  "))
-        parts.append(("class:toolbar.muted", "/help  ·  Esc+Enter newline  ·  exit "))
+        parts.append(("class:toolbar.sep", " · "))
+        parts.append(("class:toolbar.muted", "/help · exit "))
         return parts
 
 
