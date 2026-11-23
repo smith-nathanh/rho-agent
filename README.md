@@ -52,12 +52,10 @@ See the [Python SDK](docs/site/python-sdk.md) guide for events, approval callbac
 
 > **Model:** `GPT-6.1 Sol` (`medium` reasoning) · **Cost:** `$10.23` · **Run:** 1 attempt/task (Nov 2026) · [experiment E007](experiments/E007-full-terminal-bench-2.1/)
 
-Terminal-Bench drops an agent into a Linux container with a real job and no further help (building POV-Ray from source, installing Windows 3.11, cracking a 7z archive, training a fastText model) and checks the result with hidden tests. We ran all 89 tasks of version 2.1.
+Terminal-Bench 2.1 evaluates autonomous coding agents across 89 end-to-end tasks inside isolated Linux containers — spanning compiler builds, distributed PyTorch parallelism, statistical model migrations, systems debugging, and data pipelines — graded by hidden test suites with no human hints.
 
 <details>
-<summary>Category breakdown &amp; tools (89 tasks)</summary>
-
-**Tools:** `bash`, `read`, `write`, `edit`, `glob`, `grep`, `list`, `view_image`
+<summary>Results</summary>
 
 | Category | Score | Model cost |
 |---|---|---|
@@ -81,14 +79,8 @@ Terminal-Bench drops an agent into a Linux container with a real job and no furt
 
 The Embodied First Exam asks a coding agent to operate a simulated robot (an arm, a five-finger hand or a kitchen robot) toward a goal such as "open the jar" or "swap the remote's batteries" — seeing only through camera images and acting by writing Python motor commands against a 30–60 minute clock.
 
-![DexHand remote battery swap, solved: a five-finger robot hand slides open a TV remote's battery door, moves the old AA cell to a tray, seats the new one and slides the door shut](docs/demo/efe-dexhand-remote-battery-swap.gif)
-
-*DexHand remote battery swap, solved in 18.7 minutes for $0.84. Replay shows the graded episode (after one reset) at ~4× real time.*
-
 <details>
-<summary>Segment breakdown &amp; tools (39 tasks)</summary>
-
-**Tools:** `bash`, `read`, `write`, `edit`, `glob`, `grep`, `list`, `view_image`
+<summary>Results</summary>
 
 | Segment | Score | Model cost |
 |---|---|---|
@@ -98,6 +90,10 @@ The Embodied First Exam asks a coding agent to operate a simulated robot (an arm
 | **Total** | **21 / 39 (53.8%)** | $85.59 |
 
 </details>
+
+![DexHand remote battery swap, solved: a five-finger robot hand slides open a TV remote's battery door, moves the old AA cell to a tray, seats the new one and slides the door shut](docs/demo/efe-dexhand-remote-battery-swap.gif)
+
+*DexHand remote battery swap, solved in 18.7 minutes for $0.84. Replay shows the graded episode (after one reset) at ~4× real time.*
 
 ## Setup
 
