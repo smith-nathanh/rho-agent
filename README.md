@@ -1,8 +1,8 @@
 # rho-agent
 
-rho-agent is a pure-Python AI agent CLI and library that reads code, runs commands and edits files. Because it needs only Python — no Node runtime, no browser, no background daemon — it runs anywhere Python does: your laptop, a small remote VM over SSH, a container, an edge device, or a robot.
+rho-agent is a pure-Python harness for running AI agents — as a terminal CLI or as a library in your own code. Because Python is its only runtime, it can run on a laptop, a remote VM over SSH, a container, an edge device, or a robot.
 
-Agents run inside an OS sandbox: they can change the project they work in, and ask before touching anything outside it. Use it from the terminal (interactively, one-shot, or via a live fleet monitor) or embed it directly in Python.
+Agents work inside an OS sandbox that enforces permissions across built-in tools for the shell, files, search, vision, databases, and MCP servers. Use it interactively, supervise background agents from a live terminal monitor, or embed it directly via the Python SDK.
 
 ### Interactive CLI
 
@@ -52,7 +52,7 @@ See the [Python SDK](docs/site/python-sdk.md) guide for events, approval callbac
 
 > **Model:** `GPT-6.1 Sol` (`medium` reasoning) · **Cost:** `$10.23` · **Run:** 1 attempt/task (Nov 2026) · [experiment E007](experiments/E007-full-terminal-bench-2.1/)
 
-Terminal-Bench 2.1 evaluates autonomous coding agents across 89 end-to-end tasks inside isolated Linux containers — spanning compiler builds, distributed PyTorch parallelism, statistical model migrations, systems debugging, and data pipelines — graded by hidden test suites with no human hints.
+Terminal-Bench 2.1 evaluates coding agents across 89 end-to-end tasks inside isolated Linux containers — spanning compiler builds, distributed PyTorch parallelism, statistical model migrations, systems debugging, and data pipelines — graded by hidden test suites with no human hints.
 
 <details>
 <summary>Results</summary>
