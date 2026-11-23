@@ -48,19 +48,16 @@ See the [Python SDK](docs/site/python-sdk.md) guide for events, approval callbac
 
 ## Benchmark results
 
-Both benchmarks were run with the same setup:
+### [Terminal-Bench 2.1](https://tbench.ai/leaderboard/terminal-bench/2.1) — **79 / 89 (88.8%)**
 
-| Harness | Model | Reasoning effort | Tools |
-|---|---|---|---|
-| **rho-agent** | **GPT-6.1 Sol** | **medium** | `bash`, `read`, `write`, `edit`, `glob`, `grep`, `list`, `view_image` |
+> **Model:** `GPT-6.1 Sol` (`medium` reasoning) · **Cost:** `$10.23` · **Run:** 1 attempt/task (Nov 2026) · [experiment E007](experiments/E007-full-terminal-bench-2.1/)
 
-### [Terminal-Bench 2.1](https://tbench.ai/leaderboard/terminal-bench/2.1)
+Terminal-Bench drops an agent into a Linux container with a real job and no further help (building POV-Ray from source, installing Windows 3.11, cracking a 7z archive, training a fastText model) and checks the result with hidden tests. We ran all 89 tasks of version 2.1.
 
-Terminal-Bench is a leading benchmark for agents that work in a terminal. Each
-task drops the agent into a Linux container with a real job and no further
-help, such as building POV-Ray from source, installing Windows 3.11, cracking a
-password-protected 7z archive or training a fastText model, and hidden tests
-then check the result. We ran all 89 tasks of version 2.1.
+<details>
+<summary>Category breakdown &amp; tools (89 tasks)</summary>
+
+**Tools:** `bash`, `read`, `write`, `edit`, `glob`, `grep`, `list`, `view_image`
 
 | Category | Score | Model cost |
 |---|---|---|
@@ -76,17 +73,22 @@ then check the result. We ran all 89 tasks of version 2.1.
 | Other (chess, scheduling, video) | **3 / 3 (100%)** | $0.21 |
 | **Total** | **79 / 89 (88.8%)** | $10.23 |
 
-One attempt per task (November 2026). Details: [experiment E007](experiments/E007-full-terminal-bench-2.1/).
+</details>
 
-### [Embodied First Exam](https://www.embodied-first-exam.ai/leaderboard/)
+### [Embodied First Exam](https://www.embodied-first-exam.ai/leaderboard/) — **21 / 39 (53.8%)**
 
-The Embodied First Exam asks a coding agent to operate a simulated robot (an
-arm, a five-finger hand or a kitchen robot) toward a goal such as "open the jar"
-or "swap the remote's batteries". The agent sees only through the robot's
-cameras and acts only by writing code that sends motor commands, so it works in
-a loop of moving, looking at camera images and adjusting, against a 30–60
-minute clock. We ran 39 of the 456 core tasks in the leaderboard's
-Standard setting.
+> **Model:** `GPT-6.1 Sol` (`medium` reasoning) · **Cost:** `$85.59` · **Run:** 39 of 456 core tasks, Standard setting, 1 attempt/task (Nov 2026)
+
+The Embodied First Exam asks a coding agent to operate a simulated robot (an arm, a five-finger hand or a kitchen robot) toward a goal such as "open the jar" or "swap the remote's batteries" — seeing only through camera images and acting by writing Python motor commands against a 30–60 minute clock.
+
+![DexHand remote battery swap, solved: a five-finger robot hand slides open a TV remote's battery door, moves the old AA cell to a tray, seats the new one and slides the door shut](docs/demo/efe-dexhand-remote-battery-swap.gif)
+
+*DexHand remote battery swap, solved in 18.7 minutes for $0.84. Replay shows the graded episode (after one reset) at ~4× real time.*
+
+<details>
+<summary>Segment breakdown &amp; tools (39 tasks)</summary>
+
+**Tools:** `bash`, `read`, `write`, `edit`, `glob`, `grep`, `list`, `view_image`
 
 | Segment | Score | Model cost |
 |---|---|---|
@@ -95,11 +97,7 @@ Standard setting.
 | DexJoCo, LIBERO-MAX, MetaWorld+, VLABench | **5 / 8 (62.5%)** | $5.88 |
 | **Total** | **21 / 39 (53.8%)** | $85.59 |
 
-One attempt per task (November 2026).
-
-![DexHand remote battery swap, solved: a five-finger robot hand slides open a TV remote's battery door, moves the old AA cell to a tray, seats the new one and slides the door shut](docs/demo/efe-dexhand-remote-battery-swap.gif)
-
-DexHand remote battery swap, solved in 18.7 minutes for $0.84. rho-agent drove the hand by writing Python that sends joint-angle targets to the simulator, looking at camera images between moves. The replay shows the graded episode (after one reset) at about 4× real time.
+</details>
 
 ## Setup
 
@@ -113,25 +111,26 @@ uv tool install git+https://github.com/smith-nathanh/rho-agent
 uv add git+https://github.com/smith-nathanh/rho-agent
 ```
 
-rho-agent works with any OpenAI-compatible API (OpenAI, OpenRouter, xAI, Groq, DeepSeek, or local vLLM/Ollama) and reads only its own `RHO_AGENT_*` variables — it never picks up `OPENAI_API_KEY`:
-
-| Variable | Purpose |
-|---|---|
-| `RHO_AGENT_API_KEY` | Provider API key |
-| `RHO_AGENT_BASE_URL` | Provider endpoint (leave unset for OpenAI) |
-| `RHO_AGENT_MODEL` | Model name (default: `gpt-6.1-terra`) |
+rho-agent works with any OpenAI-compatible API and reads only its own `RHO_AGENT_*` variables (it never picks up `OPENAI_API_KEY`):
 
 ```bash
-# OpenAI
 export RHO_AGENT_API_KEY=sk-...
+```
 
-# Another OpenAI-compatible provider (e.g. OpenRouter) or local server
+<details>
+<summary>Using other providers (OpenRouter, xAI, Groq, DeepSeek, Ollama/vLLM)</summary>
+
+Set `RHO_AGENT_BASE_URL` and `RHO_AGENT_MODEL` (default: `gpt-6.1-terra`), or pass `--base-url` / `--model` / `--reasoning-effort` on the command line. `.env` files in the working directory are loaded automatically.
+
+```bash
 export RHO_AGENT_API_KEY=sk-or-...
 export RHO_AGENT_BASE_URL=https://openrouter.ai/api/v1
 export RHO_AGENT_MODEL=anthropic/claude-haiku-4.5
 ```
 
-`.env` files, `--model`, `--base-url`, and `--reasoning-effort` are also supported. Calls use the Responses API and fall back to Chat Completions automatically when a server doesn't expose Responses. See [Installation](docs/site/installation.md) for optional extras (MCP, databases, Daytona, OpenTelemetry) and the [FAQ](docs/site/faq.md) for provider details.
+Calls use the Responses API and fall back to Chat Completions automatically when a server doesn't expose Responses. See [Installation](docs/site/installation.md) for optional extras (MCP, databases, Daytona, OpenTelemetry) and the [FAQ](docs/site/faq.md) for provider details.
+
+</details>
 
 ## Access
 
@@ -143,7 +142,7 @@ export RHO_AGENT_MODEL=anthropic/claude-haiku-4.5
 | `read-only` | Temp dirs only | Inspecting code safely |
 | `full` | Anywhere (no sandbox) | Containers, CI, disposable VMs |
 
-`workspace` and `read-only` confine every command in an OS sandbox (Seatbelt on macOS, [bubblewrap](https://github.com/containers/bubblewrap) on Linux): `.git/hooks`, `.git/config`, `~/.ssh`, `~/.aws`, and API keys in the environment stay protected, and local Unix sockets are blocked. When an agent needs more, it asks in the terminal or queues an approval in `rho-agent monitor`. Pass `--add-dir <path>` up front, use `/access` mid-session, or run `rho-agent sandbox check` to verify. See [Access](docs/site/access.md) for details and known limits.
+`workspace` and `read-only` confine every command in an OS sandbox (Seatbelt on macOS, [bubblewrap](https://github.com/containers/bubblewrap) on Linux): `.git/hooks`, `.git/config`, `~/.ssh`, `~/.aws`, and API keys stay protected, and local Unix sockets are blocked. When an agent needs more, it asks in the terminal or queues an approval in `rho-agent monitor`. Pass `--add-dir <path>` up front, use `/access` mid-session, or run `rho-agent sandbox check` to verify. See [Access](docs/site/access.md) for details and known limits.
 
 ## Documentation
 
