@@ -1,6 +1,6 @@
 # rho-agent
 
-rho-agent is a pure-Python harness for running AI agents. It requires only Python, keeping it lightweight enough to run on a laptop, a remote VM over SSH, a container, an edge device, or a robot.
+rho-agent is a lightweight harness for running AI agents. It requires only Python, so it can run on virtually any compute device with minimal setup — from containers and remote VMs to edge devices and robots.
 
 Agents work inside an OS sandbox that enforces permissions across built-in tools for the shell, files, search, vision, databases, and MCP servers. Use it interactively, supervise background agents from a live terminal monitor, or embed it directly via the Python SDK.
 
