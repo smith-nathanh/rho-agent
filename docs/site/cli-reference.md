@@ -31,6 +31,7 @@ Without a prompt argument, the agent starts in interactive mode. With a prompt, 
 | `--prompt / -p <text>` | Prompt text for one-shot mode |
 | `--model <name>` | Model to use (default: `gpt-6.1-terra` or `RHO_AGENT_MODEL`) |
 | `--base-url <url>` | API endpoint override |
+| `--theme <name>` | Color theme override. Use `/theme` in an interactive session to list themes or `/theme <name>` to switch. |
 | `--config / -c <path>` | Agent config YAML file |
 | `--output <path>` | Write the agent's final response to a file |
 | `--queue-approvals` | Send approval requests to `rho-agent monitor` instead of prompting here (the default when there is no terminal) |
@@ -40,6 +41,14 @@ Without a prompt argument, the agent starts in interactive mode. With a prompt, 
 | `--compact-threshold <fraction>` | Compact history at this fraction of the context window (default `0.7`) |
 | `--compact-at-tokens <n>` | Compact history at this exact input token count; wins over the fraction |
 | `--no-auto-compact` | Turn automatic history compaction off |
+
+### Switching models
+
+In an interactive session, use `/model` to search the configured provider’s model catalog. The picker shows input and output rates in USD per million tokens. Use **F2** to sort by input price and **F3** to sort by output price. OpenRouter shows tool-capable models by default when the catalog identifies them. Press **F4** to see all OpenRouter models.
+
+OpenRouter rates come from its catalog. OpenAI estimates use the bundled price table or your configured price overrides. Other compatible providers can list models through `/models`; prices are shown as unknown when no rates are configured.
+
+Press **Enter** to select the highlighted model for the next turn, or use `/model <id>` to enter an ID directly if your provider does not offer a catalog. The active conversation and its usage totals carry over, and the selection is saved with that session.
 
 ### Examples
 

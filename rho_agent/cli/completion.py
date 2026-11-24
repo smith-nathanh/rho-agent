@@ -20,6 +20,7 @@ from .theme import THEMES
 # Slash commands with descriptions shown in the completion menu
 COMMAND_SPECS: list[tuple[str, str]] = [
     ("/status", "Session tokens, context window & cost"),
+    ("/model", "Compare prices and switch models"),
     ("/access", "Show or switch sandbox access level"),
     ("/access read-only", "Switch to read-only sandbox"),
     ("/access workspace", "Switch to workspace sandbox"),

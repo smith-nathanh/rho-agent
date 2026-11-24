@@ -6,7 +6,7 @@ Agents work inside an OS sandbox that enforces permissions across built-in tools
 
 ### Interactive CLI
 
-![An interactive session on a rover controller: the agent finds a millimeter-to-meter bug behind two failing obstacle-stop tests, fixes it and reruns the suite](docs/demo/cli.gif)
+![An interactive session on a telemetry watchdog: the agent correlates reset logs with SQLite readings, adds a thermal guard, and verifies it](docs/demo/cli.gif)
 
 Run `rho-agent` in a project for an interactive session (or pass a prompt to run one-shot and exit). Sessions save automatically so you can resume with `rho-agent -r latest`.
 

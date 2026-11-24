@@ -11,7 +11,7 @@ Set Height 740
 Set Padding 22
 Set TypingSpeed 40ms
 Set CursorBlink false
-Set Theme { "name": "Stone", "black": "#141312", "red": "#E07A7A", "green": "#6FC297", "yellow": "#E5B472", "blue": "#A8A29E", "magenta": "#D97757", "cyan": "#A8A29E", "white": "#E6E2DC", "brightBlack": "#6B6560", "brightRed": "#E07A7A", "brightGreen": "#6FC297", "brightYellow": "#E5B472", "brightBlue": "#D6D1CA", "brightMagenta": "#D97757", "brightCyan": "#D6D1CA", "brightWhite": "#F5F2ED", "background": "#141312", "foreground": "#E6E2DC", "selection": "#282522", "cursor": "#D97757" }
+Set Theme { "name": "Glacier", "black": "#101822", "red": "#FF969D", "green": "#7AD8AE", "yellow": "#FFBF79", "blue": "#78C8FF", "magenta": "#B9B7F5", "cyan": "#9DB4C5", "white": "#E7F3FA", "brightBlack": "#8EA7BA", "brightRed": "#FF969D", "brightGreen": "#7AD8AE", "brightYellow": "#F1CB8F", "brightBlue": "#A0D9FF", "brightMagenta": "#CBC8FF", "brightCyan": "#C4D7E4", "brightWhite": "#F3FAFF", "background": "#101822", "foreground": "#E7F3FA", "selection": "#2A4763", "cursor": "#78C8FF" }
 # The default frame rate cannot keep up and makes the video play fast.
 Set Framerate 20
 
@@ -30,11 +30,11 @@ Type "rho-agent"
 Enter
 Sleep 3.5s
 
-Type "node-04 keeps resetting in alerts.log, yet watchdog.py reports nominal. Correlate alerts.log with telemetry.db and policy.toml, add the missing check to watchdog.py, and run it to verify."
+Type "Why does watchdog.py miss the node-04 resets? Check alerts.log, policy.toml, and the node-04 readings in SQLite. Patch watchdog.py and run it to verify."
 Sleep 500ms
 Enter
 # Wait for the agent to finish its investigation, edit, and verification cleanly.
-Sleep 20s
+Sleep 16s
 
 Type "/status"
 Enter

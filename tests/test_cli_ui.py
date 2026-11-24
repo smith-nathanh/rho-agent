@@ -547,9 +547,7 @@ def test_theme_switching_persistence_and_completions(tmp_path: Path, monkeypatch
             c.text
             for c in SlashCommandCompleter().get_completions(Document("/theme "), MagicMock())
         ]
-        assert "/theme stone" in slash_matches
-        assert "/theme teal" in slash_matches
-        assert "/theme dusk" in slash_matches
+        assert {f"/theme {name}" for name in THEMES} <= set(slash_matches)
 
         mon_matches = [
             c.text
@@ -557,9 +555,6 @@ def test_theme_switching_persistence_and_completions(tmp_path: Path, monkeypatch
                 Document("theme "), MagicMock()
             )
         ]
-        assert "stone" in mon_matches
-        assert "teal" in mon_matches
-        assert "dusk" in mon_matches
-        assert "obsidian" in mon_matches
+        assert set(THEMES) <= set(mon_matches)
     finally:
         set_theme(prev)

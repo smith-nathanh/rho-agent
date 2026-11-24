@@ -159,12 +159,7 @@ def render_welcome_banner(
         right_id.append(f"#{session.id}", style=THEME.muted)
     top.add_row(left_title, right_id)
 
-    meta = Text()
-    meta.append(config.model or "default", style=THEME.secondary)
-    if getattr(config, "reasoning_effort", None):
-        meta.append(f" ({config.reasoning_effort})", style=THEME.muted)
-    meta.append("  ·  ", style=THEME.border_active)
-    meta.append_text(_access_label(level, backend=config.backend))
+    meta = _access_label(level, backend=config.backend)
     if config.backend == "local" and config.access.sandboxed:
         sandbox = getattr(session.agent.registry, "sandbox", None)
         mech = {"seatbelt": "seatbelt", "bubblewrap": "bwrap"}.get(
@@ -586,6 +581,7 @@ def render_help_card() -> Panel:
             "Session",
             [
                 ("/status", "Context window, token usage, cache rate & cost"),
+                ("/model [id]", "Compare prices and switch models"),
                 ("/access [level]", "Inspect sandbox or switch: read-only | workspace | full"),
                 ("/access revoke <path>", "Remove an extra directory grant"),
                 ("/compact [guidance]", "Compact conversation history"),
@@ -750,7 +746,10 @@ def render_session_status_card(
     grid.add_column()
 
     grid.add_row("session", Text(f"#{session.id}", style=THEME.primary))
-    grid.add_row("model", Text(config.model or "", style=THEME.secondary))
+    model = Text(config.model or "", style=THEME.secondary)
+    if reasoning_effort := getattr(config, "reasoning_effort", None):
+        model.append(f" ({reasoning_effort})", style=THEME.muted)
+    grid.add_row("model", model)
     grid.add_row("project", Text(_shorten_path(working_dir), style=THEME.muted))
     grid.add_row("messages", Text(str(len(session.state.messages)), style=THEME.secondary))
 

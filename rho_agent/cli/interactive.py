@@ -10,12 +10,14 @@ import signal
 from pathlib import Path
 from typing import Any
 
+from openai import APIError
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from rich.markup import escape
 
 from ..core.events import AgentEvent
+from ..core.models import limits_for
 from ..core.session import Session
 from ..core.session_meta import update_meta
 from ..core.session_store import SessionStore
@@ -29,6 +31,7 @@ from .formatting import (
     _sync_token_status_from_state,
     access_summary,
 )
+from .model_picker import pick_model
 from .single import upload_to_sandbox
 from .state import CONFIG_DIR, HISTORY_FILE, RENDER_MARKDOWN, console
 from .theme import PTK_STYLE, THEME, set_theme
@@ -169,6 +172,9 @@ class InteractiveSession:
                         continue
                     if user_input == "/theme" or user_input.startswith("/theme "):
                         self._handle_theme(user_input)
+                        continue
+                    if user_input.split(maxsplit=1)[0] == "/model":
+                        await self._handle_model(user_input)
                         continue
                     if user_input == "/status":
                         console.print(
@@ -328,6 +334,56 @@ class InteractiveSession:
             self.approval_handler.after_prompt = prev_after
             if platform.system() != "Windows":
                 loop.remove_signal_handler(signal.SIGINT)
+
+    async def _handle_model(self, cmd: str) -> None:
+        parts = cmd.split(maxsplit=1)
+        current = self.session.agent.config.model
+        context_window = None
+        if len(parts) > 1:
+            model = parts[1].strip()
+        else:
+            try:
+                with console.status("Loading model catalog…"):
+                    models = await self.session.list_models()
+                if not models:
+                    raise ValueError("The provider returned no models.")
+                selection = await pick_model(
+                    models, current=current, openrouter=self.session.is_openrouter
+                )
+            except (KeyboardInterrupt, EOFError):
+                return
+            except (APIError, ValueError) as exc:
+                status = getattr(exc, "status_code", None)
+                if status == 401:
+                    message = (
+                        "The provider rejected authentication for /models (HTTP 401). "
+                        "Check that RHO_AGENT_API_KEY matches the configured API endpoint, "
+                        "then restart rho."
+                    )
+                else:
+                    detail = f" (HTTP {status})" if status is not None else ""
+                    message = f"Could not load models{detail}. Use /model <id> to choose by ID."
+                console.print(_markup(message, THEME.warning))
+                return
+            if selection is None:
+                return
+            model, context_window = selection.id, selection.context_window
+
+        try:
+            self.session.switch_model(model, context_window=context_window)
+        except (OSError, ValueError) as exc:
+            console.print(_markup(f"Could not save the selected model. {exc}", THEME.error))
+            return
+        self.token_status.model = model
+        self.token_status.context_window = (
+            self.session.context_window or limits_for(model).context_window
+        )
+        if model != current:
+            self.token_status.context_size = self.session.state.estimate_tokens(
+                self.session.agent.system_prompt
+            )
+        label = "Model switched to" if model != current else "Current model:"
+        console.print(_markup(f"{label} {model}", THEME.secondary))
 
     async def _handle_download(self, cmd: str) -> None:
         """Handle /download <remote_path> <local_path>."""
@@ -516,10 +572,24 @@ class InteractiveSession:
             return
 
         # Continue as the resumed session: its history, ID and directory. The
-        # agent (tools, access, model) stays the one this process started with.
+        # agent keeps its tools and access. Use the resumed connection settings
+        # for both generation and the model picker.
         previous_dir = self.session._session_dir
         self.session._state = resumed.state
-        self.session._client = resumed.agent.create_client()
+        self.session._client = resumed._client
+        config = self.session.agent.config
+        saved = resumed.agent.config
+        config.model = saved.model
+        config.base_url = saved.base_url
+        config.service_tier = saved.service_tier
+        config.reasoning_effort = saved.reasoning_effort
+        config.response_format = saved.response_format
+        config.context_window = saved.context_window
+        self.session.context_window = resumed.context_window
+        self.token_status.model = saved.model
+        self.token_status.context_window = (
+            resumed.context_window or limits_for(saved.model).context_window
+        )
         self.session._id = resumed.id
         self.session._session_dir = resumed._session_dir
         self.session.access_grants = list(resumed.access_grants)

@@ -31,10 +31,10 @@ class CliTheme:
     primary: str = "#E6E2DC"  # warm off-white body copy
     secondary: str = "#A8A29E"  # stone secondary text
     brand: str = "#F5F2ED"  # bright warm-white wordmark
-    muted: str = "#78716C"  # quiet warm graphite metadata
+    muted: str = "#999087"  # quiet warm graphite metadata
     subtle: str = "#9C958F"  # secondary body copy
-    border: str = "#2E2B28"  # whisper-thin hairline border
-    border_active: str = "#4A4540"  # focused hairline border
+    border: str = "#494039"  # whisper-thin hairline border
+    border_active: str = "#63574D"  # focused hairline border
 
     # Focal mark, accent, and restrained semantic states
     mark: str = "#D97757"  # rho brand mark & user prompt bar (unified with accent)
@@ -50,22 +50,22 @@ class CliTheme:
     tool_call: str = "#D6D1CA"
     tool_name: str = "#E6E2DC"
     tool_result: str = "#9C958F"
-    rail: str = "#2E2B28"
+    rail: str = "#494039"
 
     # Editorial diffs
     diff_add: str = "#6FC297"
     diff_del: str = "#E07A7A"
     diff_add_bg: str = "#15231C"
     diff_del_bg: str = "#271717"
-    diff_hunk: str = "#6B6560"
+    diff_hunk: str = "#999087"
 
     # Matte neutral surfaces
     user_bg: str = "#1E1C1A"
     code_bg: str = "#23201E"
     toolbar_bg: str = "#181715"
     toolbar_fg: str = "#9C958F"
-    toolbar_muted: str = "#6B6560"
-    selection_bg: str = "#282522"
+    toolbar_muted: str = "#8D857E"
+    selection_bg: str = "#463A32"
     selection_fg: str = "#F5F2ED"
 
 
@@ -77,10 +77,10 @@ TEAL_THEME = CliTheme(
     primary="#E4E9EA",
     secondary="#97A3A6",
     brand="#F4F6F6",
-    muted="#697478",
-    subtle="#899699",
-    border="#272F32",
-    border_active="#3F4B50",
+    muted="#87979B",
+    subtle="#91A0A3",
+    border="#3A474B",
+    border_active="#526167",
     mark="#52B8B2",
     accent="#52B8B2",
     code="#9AD4D0",
@@ -91,19 +91,19 @@ TEAL_THEME = CliTheme(
     prompt="#52B8B2",
     tool_call="#D1D8DA",
     tool_name="#E4E9EA",
-    tool_result="#899699",
-    rail="#272F32",
+    tool_result="#91A0A3",
+    rail="#3A474B",
     diff_add="#74CC8A",
     diff_del="#E57A7A",
     diff_add_bg="#13241B",
     diff_del_bg="#271718",
-    diff_hunk="#5D676B",
+    diff_hunk="#87979B",
     user_bg="#1A1E20",
     code_bg="#202427",
     toolbar_bg="#15181A",
     toolbar_fg="#97A3A6",
-    toolbar_muted="#5D676B",
-    selection_bg="#23292C",
+    toolbar_muted="#849297",
+    selection_bg="#35474A",
     selection_fg="#F4F6F6",
 )
 
@@ -113,10 +113,10 @@ DUSK_THEME = CliTheme(
     primary="#E4E6F0",
     secondary="#989DB2",
     brand="#F4F5FA",
-    muted="#686E84",
-    subtle="#888EA4",
-    border="#272A38",
-    border_active="#41465C",
+    muted="#8F95AD",
+    subtle="#969BB1",
+    border="#3D4256",
+    border_active="#565C77",
     mark="#9E95F0",
     accent="#9E95F0",
     code="#C6C0F5",
@@ -127,19 +127,19 @@ DUSK_THEME = CliTheme(
     prompt="#9E95F0",
     tool_call="#CFD3E4",
     tool_name="#E4E6F0",
-    tool_result="#888EA4",
-    rail="#272A38",
+    tool_result="#969BB1",
+    rail="#3D4256",
     diff_add="#68CCA0",
     diff_del="#E87A86",
     diff_add_bg="#12241E",
     diff_del_bg="#28161B",
-    diff_hunk="#5D6278",
+    diff_hunk="#8F95AD",
     user_bg="#1A1C26",
     code_bg="#202330",
     toolbar_bg="#15161E",
     toolbar_fg="#989DB2",
-    toolbar_muted="#5D6278",
-    selection_bg="#232635",
+    toolbar_muted="#898FA7",
+    selection_bg="#3B405B",
     selection_fg="#F4F5FA",
 )
 
@@ -149,10 +149,10 @@ OBSIDIAN_THEME = CliTheme(
     primary="#D8D8DE",
     secondary="#9E9EA8",
     brand="#FAFAFA",
-    muted="#6B6B75",
-    subtle="#8E8E98",
-    border="#27272A",
-    border_active="#424248",
+    muted="#94949E",
+    subtle="#9C9CA6",
+    border="#42424B",
+    border_active="#5B5B67",
     mark="#FAFAFA",
     accent="#FAFAFA",
     code="#FFFFFF",
@@ -163,20 +163,92 @@ OBSIDIAN_THEME = CliTheme(
     prompt="#FAFAFA",
     tool_call="#D0D0D8",
     tool_name="#E4E4EA",
-    tool_result="#8E8E98",
-    rail="#27272A",
+    tool_result="#9C9CA6",
+    rail="#42424B",
     diff_add="#5AD28E",
     diff_del="#EE7878",
     diff_add_bg="#102218",
     diff_del_bg="#261316",
-    diff_hunk="#63636B",
+    diff_hunk="#94949E",
     user_bg="#1B1B1F",
     code_bg="#1F1F24",
     toolbar_bg="#161619",
     toolbar_fg="#9E9EA8",
-    toolbar_muted="#63636B",
-    selection_bg="#242429",
+    toolbar_muted="#898993",
+    selection_bg="#40404A",
     selection_fg="#FAFAFA",
+)
+
+GLACIER_THEME = CliTheme(
+    name="glacier",
+    description="Deep navy with ice-blue accents and warm honey code",
+    primary="#E7F3FA",
+    secondary="#9DB4C5",
+    brand="#F3FAFF",
+    muted="#8EA7BA",
+    subtle="#9DB4C5",
+    border="#3C5266",
+    border_active="#57758D",
+    mark="#78C8FF",
+    accent="#78C8FF",
+    code="#F1CB8F",
+    success="#7AD8AE",
+    warning="#FFBF79",
+    error="#FF969D",
+    subagent="#9DB4C5",
+    prompt="#78C8FF",
+    tool_call="#C4D7E4",
+    tool_name="#E7F3FA",
+    tool_result="#9DB4C5",
+    rail="#3C5266",
+    diff_add="#7AD8AE",
+    diff_del="#FF969D",
+    diff_add_bg="#142B27",
+    diff_del_bg="#321C29",
+    diff_hunk="#8EA7BA",
+    user_bg="#172738",
+    code_bg="#192A3A",
+    toolbar_bg="#101822",
+    toolbar_fg="#9DB4C5",
+    toolbar_muted="#8EA7BA",
+    selection_bg="#2A4763",
+    selection_fg="#F3FAFF",
+)
+
+MOSS_THEME = CliTheme(
+    name="moss",
+    description="Olive charcoal with yellow-green accents and pale gold code",
+    primary="#F0F1E1",
+    secondary="#B2B59D",
+    brand="#F9F9EE",
+    muted="#A0A58F",
+    subtle="#B2B59D",
+    border="#4A513B",
+    border_active="#636E4F",
+    mark="#C4D882",
+    accent="#C4D882",
+    code="#EDD397",
+    success="#81D4AA",
+    warning="#FFC47F",
+    error="#FF9891",
+    subagent="#B2B59D",
+    prompt="#C4D882",
+    tool_call="#D1D4BF",
+    tool_name="#F0F1E1",
+    tool_result="#B2B59D",
+    rail="#4A513B",
+    diff_add="#81D4AA",
+    diff_del="#FF9891",
+    diff_add_bg="#1B3023",
+    diff_del_bg="#382321",
+    diff_hunk="#A0A58F",
+    user_bg="#282F20",
+    code_bg="#2C3223",
+    toolbar_bg="#181B13",
+    toolbar_fg="#B2B59D",
+    toolbar_muted="#A0A58F",
+    selection_bg="#3D482A",
+    selection_fg="#F9F9EE",
 )
 
 LIGHT_THEME = CliTheme(
@@ -185,18 +257,18 @@ LIGHT_THEME = CliTheme(
     primary="#1C1917",
     secondary="#57534E",
     brand="#0C0A09",
-    muted="#78716C",
+    muted="#6D645D",
     subtle="#57534E",
     border="#D6D3D1",
     border_active="#A8A29E",
-    mark="#C25E3D",
-    accent="#C25E3D",
+    mark="#A95032",
+    accent="#A95032",
     code="#9A3F24",
-    success="#059669",
+    success="#047857",
     warning="#B45309",
-    error="#DC2626",
+    error="#C92C2C",
     subagent="#57534E",
-    prompt="#C25E3D",
+    prompt="#A95032",
     tool_call="#292524",
     tool_name="#1C1917",
     tool_result="#57534E",
@@ -205,13 +277,13 @@ LIGHT_THEME = CliTheme(
     diff_del="#B91C1C",
     diff_add_bg="#ECFDF5",
     diff_del_bg="#FEF2F2",
-    diff_hunk="#78716C",
+    diff_hunk="#6D645D",
     user_bg="#EFECE8",
     code_bg="#F0EDE9",
     toolbar_bg="#F5F3F0",
     toolbar_fg="#57534E",
-    toolbar_muted="#78716C",
-    selection_bg="#E7E5E4",
+    toolbar_muted="#6D645D",
+    selection_bg="#E0DCD6",
     selection_fg="#0C0A09",
 )
 
@@ -220,6 +292,8 @@ THEMES: dict[str, CliTheme] = {
     "teal": TEAL_THEME,
     "dusk": DUSK_THEME,
     "obsidian": OBSIDIAN_THEME,
+    "glacier": GLACIER_THEME,
+    "moss": MOSS_THEME,
     "light": LIGHT_THEME,
 }
 
@@ -413,7 +487,7 @@ def build_ptk_style(theme: CliTheme | ActiveTheme = THEME) -> PtkStyle:
             "completion-menu.completion.current": f"bg:{theme.selection_bg} {theme.selection_fg}",
             "completion-menu.meta.completion": f"bg:{theme.toolbar_bg} {theme.muted}",
             "completion-menu.meta.completion.current": (
-                f"bg:{theme.selection_bg} {theme.secondary}"
+                f"bg:{theme.selection_bg} {theme.selection_fg}"
             ),
             "scrollbar.background": f"bg:{theme.toolbar_bg}",
             "scrollbar.button": f"bg:{theme.border}",

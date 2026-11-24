@@ -45,7 +45,7 @@ from .state import (
     console,
     settings,
 )
-from .theme import THEME, set_theme
+from .theme import THEME, THEMES, set_theme
 from .ui import render_saved_sessions_table, render_single_header
 
 SANDBOX_CONFIG_FILE = ".rho-agent.toml"
@@ -455,7 +455,7 @@ def main(
         str | None,
         typer.Option(
             "--theme",
-            help="Color theme override (stone, teal, dusk, obsidian, light)",
+            help=f"Color theme override ({', '.join(THEMES)})",
         ),
     ] = None,
 ) -> None:

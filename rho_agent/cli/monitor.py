@@ -35,7 +35,7 @@ from .formatting import (
 from .monitor_live import MissionControl, _tail_trace_lines, render_trace_event, write_directive
 from .session_table import _project_label, fleet_counts, print_sessions
 from .state import CONFIG_DIR, MONITOR_HISTORY_FILE, SESSIONS_DIR, app, console
-from .theme import PTK_STYLE, THEME, set_theme, status_style
+from .theme import PTK_STYLE, THEME, THEMES, set_theme, status_style
 from .ui import render_approval_card, render_themes_card
 
 _BUILTIN_INPUT = builtins.input
@@ -678,7 +678,7 @@ def monitor(
         str | None,
         typer.Option(
             "--theme",
-            help="Color theme override (stone, teal, dusk, obsidian, light)",
+            help=f"Color theme override ({', '.join(THEMES)})",
         ),
     ] = None,
 ) -> None:

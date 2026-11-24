@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 
 from openai import APIStatusError, AsyncOpenAI
 
+from .catalog import CatalogModel, parse_catalog
 from .pricing import Prices, call_cost, can_price, prices_from_env
 
 # The only environment variables rho-agent reads for the model connection.
@@ -554,6 +555,29 @@ class ModelClient:
     def api(self) -> str:
         """The endpoint in use: ``"responses"`` or ``"chat"``."""
         return "chat" if self._chat is not None else "responses"
+
+    @property
+    def is_openrouter(self) -> bool:
+        return self._openrouter
+
+    async def list_models(self) -> list[CatalogModel]:
+        """Discover models using the same endpoint and key as generation."""
+        payload = await self._client.get(
+            "/models", cast_to=object, options={"timeout": 5.0, "max_retries": 0}
+        )
+        return parse_catalog(
+            payload,
+            openrouter=self.is_openrouter,
+            openai=_is_openai_host(self._base_url),
+            prices=self._prices,
+            service_tier=self._service_tier,
+        )
+
+    def set_model(self, model: str) -> None:
+        """Use a different model on the current connection."""
+        self._model = model
+        if self._chat is not None:
+            self._use_chat()
 
     def can_price(self) -> bool:
         """Whether calls to this model can be priced, so a cost cap can work."""
