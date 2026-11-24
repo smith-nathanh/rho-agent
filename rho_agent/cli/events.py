@@ -2,24 +2,26 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
-from rich.markdown import Markdown
-from rich.markup import escape
+from rich import box
 from rich.panel import Panel
 
 from ..core.approvals import ApprovalQueue, ApprovalRequest
 from ..core.events import AgentEvent
-from .formatting import (
-    TokenStatus,
-    _format_tool_preview,
-    _format_tool_signature,
-    _format_tool_summary,
-    _markup,
-)
-from .state import MARKDOWN_THEME, console
+from . import state
+from .formatting import TokenStatus, _markup
+from .state import console
 from .theme import THEME
+from .ui import (
+    make_markdown,
+    render_approval_card,
+    render_help_card,
+    render_tool_end,
+    render_tool_start,
+    render_turn_footer,
+)
 
 
 class ApprovalHandler:
@@ -34,70 +36,61 @@ class ApprovalHandler:
     def __init__(self) -> None:
         # When set, requests go to the monitor instead of this terminal.
         self.queue: ApprovalQueue | None = None
+        # Optional hooks called around interactive prompts or queued announcements
+        # (used by TurnRenderer to pause and resume live spinners cleanly).
+        self.before_prompt: Callable[[], None] | None = None
+        self.after_prompt: Callable[[], None] | None = None
+        self.working_dir: str | None = None
+
+    def announce_queued(self, request: ApprovalRequest) -> None:
+        """Pause any active live display and announce a queued approval."""
+        if self.before_prompt is not None:
+            self.before_prompt()
+        announce_queued_approval(request, working_dir=self.working_dir)
 
     async def check_approval(self, tool_name: str, tool_args: dict[str, Any]) -> bool:
         """Ask the user. Returns True if approved."""
         if self.queue is not None:
-            return await self.queue(tool_name, tool_args)
+            approved = await self.queue(tool_name, tool_args)
+            if approved and self.after_prompt is not None:
+                self.after_prompt()
+            return approved
 
-        title, body, question = _approval_text(tool_name, tool_args)
-        console.print(
-            Panel(
-                body,
-                title=_markup(title, THEME.warning),
-                title_align="left",
-                border_style=THEME.warning,
-                padding=(0, 1),
-            )
-        )
-        console.print(_markup(question, THEME.warning), end=" ")
+        if self.before_prompt is not None:
+            self.before_prompt()
+
+        panel, question = render_approval_card(tool_name, tool_args, working_dir=self.working_dir)
+        console.print()
+        console.print(panel)
+        console.print(f"  {_markup(question, THEME.warning)}", end=" ")
 
         try:
             response = input().strip().lower()
         except (EOFError, KeyboardInterrupt):
             return False
-        return response in ("y", "yes")
+        approved = response in ("y", "yes")
+        if approved and self.after_prompt is not None:
+            self.after_prompt()
+        return approved
 
 
-def _approval_text(tool_name: str, tool_args: dict[str, Any]) -> tuple[str, str, str]:
-    """Title, body and question for an approval prompt."""
-    reason = str(tool_args.get("reason") or "").strip()
-    reason_line = f"\n{_markup(reason, THEME.muted)}" if reason else ""
-    if tool_name == "request_access":
-        path = str(tool_args.get("path", ""))
-        kind = "read" if tool_args.get("access") == "read" else "write"
-        warning = ""
-        if path in ("/", str(Path.home())):
-            whole = "filesystem" if path == "/" else "home directory"
-            warning = "\n" + _markup(f"This is your entire {whole}.", THEME.error)
-        body = f"{_markup(path, THEME.tool_call)}{reason_line}{warning}"
-        return (
-            f"agent wants {kind} access outside the sandbox",
-            body,
-            "Allow for this session? [y/N]:",
-        )
-    if tool_name == "bash" and tool_args.get("unsandboxed"):
-        body = f"{_markup(str(tool_args.get('command', '')), THEME.tool_call)}{reason_line}"
-        return ("agent wants to run a command outside the sandbox", body, "Run it? [y/N]:")
-    sig = _format_tool_signature(tool_name, tool_args)
-    return ("approval", _markup(sig, THEME.tool_call), "Approve? [y/N]:")
-
-
-def announce_queued_approval(request: ApprovalRequest) -> None:
+def announce_queued_approval(
+    request: ApprovalRequest,
+    *,
+    working_dir: str | None = None,
+) -> None:
     """Tell the user a tool call is waiting for an answer in the monitor."""
-    sig = _format_tool_signature(request.tool_name, request.tool_args)
-    console.print(
-        Panel(
-            _markup(sig, THEME.tool_call),
-            title=_markup(f"waiting for approval {request.id}", THEME.warning),
-            title_align="left",
-            border_style=THEME.warning,
-            padding=(0, 1),
-        )
+    panel, _ = render_approval_card(
+        request.tool_name,
+        request.tool_args,
+        request_id=request.id,
+        working_dir=working_dir,
     )
+    console.print()
+    console.print(panel)
     console.print(
         _markup(
-            f"Answer from another terminal: rho-agent monitor, then "
+            f"  Answer from another terminal: rho-agent monitor → "
             f"'approve {request.id}' or 'deny {request.id}'",
             THEME.muted,
         )
@@ -111,6 +104,8 @@ def handle_event(
     token_status: TokenStatus | None = None,
     render_markdown: bool = False,
     pending_text_chunks: list[str] | None = None,
+    working_dir: str | None = None,
+    model: str = "",
 ) -> None:
     """Handle an agent event by printing to console."""
 
@@ -122,15 +117,8 @@ def handle_event(
             pending_text_chunks.clear()
             return
         try:
-            with console.use_theme(MARKDOWN_THEME):
-                console.print(
-                    Markdown(
-                        combined,
-                        style=THEME.primary,
-                        code_theme="ansi_dark",
-                        inline_code_theme="ansi_dark",
-                    )
-                )
+            with console.use_theme(state.MARKDOWN_THEME):
+                console.print(make_markdown(combined))
         except Exception:
             print(combined, flush=True)
         pending_text_chunks.clear()
@@ -141,6 +129,7 @@ def handle_event(
         "tool_blocked",
         "compact_start",
         "compact_end",
+        "retry",
         "turn_complete",
         "error",
         "cancelled",
@@ -155,83 +144,58 @@ def handle_event(
             print(event.content or "", end="", flush=True)
 
     elif event.type == "tool_start":
-        # Show compact tool signature (like Claude Code)
-        sig = _format_tool_signature(event.tool_name, event.tool_args)
         console.print()
-        console.print(
-            Panel(
-                _markup(sig, THEME.tool_call),
-                title=_markup("tool", THEME.secondary),
-                title_align="left",
-                border_style=THEME.secondary,
-                padding=(0, 1),
-            )
-        )
+        console.print(render_tool_start(event.tool_name, event.tool_args, working_dir=working_dir))
+
     elif event.type == "tool_end":
-        # Show a brief summary of what the tool found
-        summary = _format_tool_summary(event.tool_name, event.tool_metadata, event.tool_result)
-        preview = _format_tool_preview(event.tool_result, event.tool_name)
-        body_lines: list[str] = []
-        if summary:
-            body_lines.append(_markup(f"-> {summary}", THEME.success))
-        if preview:
-            body_lines.append(_markup(preview, THEME.tool_result))
-        if body_lines:
-            console.print(
-                Panel(
-                    "\n".join(body_lines),
-                    border_style=THEME.border,
-                    padding=(0, 1),
-                )
-            )
+        block = render_tool_end(event.tool_name, event.tool_metadata, event.tool_result)
+        if block is not None:
+            console.print(block)
 
     elif event.type == "tool_blocked":
-        console.print(_markup("Command rejected", THEME.error))
+        console.print(
+            f"  [{THEME.rail}]└[/{THEME.rail}] {_markup('rejected by user', THEME.warning)}"
+        )
+
+    elif event.type == "retry":
+        console.print(_markup(f"  retrying ({event.content or 'transient error'})", THEME.warning))
 
     elif event.type == "compact_start":
         trigger = event.content or "manual"
         if trigger == "auto":
-            console.print(_markup("Context limit approaching, auto-compacting...", THEME.warning))
+            console.print(_markup("  Context limit approaching — auto-compacting…", THEME.warning))
         else:
-            console.print(_markup("Compacting conversation...", THEME.warning))
+            console.print(_markup("  Compacting conversation…", THEME.warning))
 
     elif event.type == "compact_end":
-        console.print(_markup(event.content or "", THEME.success))
+        console.print(_markup(f"  {event.content or 'Compacted'}", THEME.secondary))
         console.print(
             _markup(
-                "Note: Multiple compactions can reduce accuracy. "
-                "Start a new session when possible.",
+                "  Tip: start a fresh session when switching tasks for best accuracy.",
                 THEME.muted,
             )
         )
 
     elif event.type == "turn_complete":
-        # Ensure we end on a new line after streamed text
         if not render_markdown:
             print()
         if token_status:
             token_status.update(event.usage)
         if show_turn_usage:
-            usage = event.usage or {}
-            context_size = usage.get("context_size", 0)
-            total_in = usage.get("total_input_tokens", 0)
-            total_out = usage.get("total_output_tokens", 0)
-            total_cached = usage.get("total_cached_tokens", 0)
-            total_cost = usage.get("total_cost_usd", 0.0)
-            cache_str = ""
-            if total_cached and total_in:
-                cache_str = f", cache: {total_cached / total_in:.0%}"
-            cost_str = f", cost: ${total_cost:.4f}" if total_cost else ""
-            # Reasoning tokens are part of the output count; shown when there are any.
-            total_reasoning = usage.get("total_reasoning_tokens", 0)
-            reasoning_str = f" ({total_reasoning} reasoning)" if total_reasoning else ""
-            print(
-                f"[context: {context_size}{cache_str}, session: {total_in} in | "
-                f"{total_out} out{reasoning_str}{cost_str}]"
-            )
+            console.print()
+            console.print(render_turn_footer(event.usage, model=model))
 
     elif event.type == "error":
-        console.print(_markup(f"Error: {event.content}", THEME.error))
+        console.print(
+            Panel(
+                _markup(str(event.content or "Unknown error"), THEME.error),
+                title=_markup("Error", THEME.error),
+                title_align="left",
+                box=box.SQUARE,
+                border_style=THEME.error,
+                padding=(0, 1),
+            )
+        )
 
 
 def handle_command(
@@ -243,61 +207,25 @@ def handle_command(
     Returns:
         None to continue loop normally
         "compact" or "compact:<instructions>" if /compact was called
-        Other string values for future special handling
+        Other string values for special handling in InteractiveSession
     """
     if cmd.startswith("/compact"):
-        # Extract optional instructions after /compact
         parts = cmd.split(maxsplit=1)
         if len(parts) > 1:
             return f"compact:{parts[1]}"
         return "compact"
 
     if cmd.startswith("/access"):
-        # Handled in run_interactive (needs the session and agent)
         return "access"
 
     if cmd.startswith("/resume"):
-        # Handled in run_interactive (needs conversation store/session context)
         return "resume"
 
+    if cmd == "/status":
+        return "status"
+
     if cmd == "/help":
-
-        def line(lhs: str, rhs: str) -> str:
-            # Pad using visible text width, then escape for Rich markup safety.
-            safe_lhs = escape(lhs.ljust(28))
-            safe_rhs = escape(rhs)
-            return f"  {safe_lhs}- {safe_rhs}"
-
-        help_text = "\n".join(
-            [
-                "[bold]Commands:[/bold]",
-                line("/access [level]", "Show access; or switch: read-only | workspace | full"),
-                line("/access revoke <path>", "Remove access granted this session"),
-                line("/compact [guidance]", "Compact conversation history"),
-                line("/download <remote> <local>", "Download file from sandbox"),
-                line("/resume [latest|id]", "Resume a saved conversation"),
-                line("/help", "Show this help"),
-                line("/clear", "Clear the screen"),
-                line("exit", "Quit the session"),
-                "",
-                "[bold]Input:[/bold]",
-                line("Enter", "Send message"),
-                line("Esc+Enter", "New line"),
-                "",
-                "[bold]Conversations:[/bold]",
-                line("rho-agent --list", "List saved conversations"),
-                line("rho-agent -r latest", "Resume most recent conversation"),
-                line("rho-agent -r <id>", "Resume specific conversation"),
-            ]
-        )
-        console.print(
-            Panel(
-                help_text,
-                title="Help",
-                title_align="left",
-                border_style=THEME.border,
-            )
-        )
+        console.print(render_help_card())
         return None
 
     if cmd == "/clear":

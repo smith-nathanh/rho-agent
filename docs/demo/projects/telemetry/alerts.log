@@ -1,0 +1,8 @@
+2026-11-22T14:15:00Z INFO  fleet     heartbeat ok (5/5 nodes online)
+2026-11-22T14:22:08Z WARN  node-04   watchdog reset triggered (uptime 418s)
+2026-11-22T14:22:14Z INFO  node-04   reconnected after reboot
+2026-11-22T14:27:11Z WARN  node-04   watchdog reset triggered (uptime 297s)
+2026-11-22T14:27:18Z INFO  node-04   reconnected after reboot
+2026-11-22T14:31:04Z WARN  node-04   watchdog reset triggered (uptime 226s)
+2026-11-22T14:31:10Z INFO  node-04   reconnected after reboot
+2026-11-22T14:35:00Z INFO  fleet     heartbeat ok (5/5 nodes online)

@@ -42,6 +42,9 @@ mkdir -p "$demo_home/proj"
 touch "$demo_home/.rho-agent-demo"
 demo_home="$(cd "$demo_home" && pwd -P)"  # the real path, so projects show as ~/proj/...
 cp -R docs/demo/projects/. "$demo_home/proj/"
+if [[ -f "$demo_home/proj/telemetry/seed_db.py" ]]; then
+  (cd "$demo_home/proj/telemetry" && "$repo/.venv/bin/python" seed_db.py && rm seed_db.py)
+fi
 # Each sample project is its own git repository, as a real project would be:
 # agents usually look at `git status` first.
 for project in "$demo_home"/proj/*/; do
@@ -54,18 +57,14 @@ done
 export DEMO_HOME="$demo_home"
 export PATH="$repo/.venv/bin:$PATH"
 export BASH_SILENCE_DEPRECATION_WARNING=1
+unset NO_COLOR
+export COLORTERM=truecolor
+export RHO_AGENT_THEME=glacier
 
-# to_gif <name> [trim]: turn docs/demo/<name>.mp4 into docs/demo/<name>.gif.
-# With "trim", cut a few seconds after the screen last changed, for a tape
-# that ends with a long idle wait.
+# Turn the recorded docs/demo/<name>.mp4 into docs/demo/<name>.gif.
 to_gif() {
-  local mp4="docs/demo/$1.mp4" gif="docs/demo/$1.gif" idle_from length
-  idle_from="$(ffmpeg -hide_banner -i "$mp4" -vf "freezedetect=n=0.001:d=5" -map 0:v -f null - 2>&1 |
-    grep -o 'freeze_start: [0-9.]*' | tail -1 | cut -d' ' -f2 || true)"
+  local mp4="docs/demo/$1.mp4" gif="docs/demo/$1.gif" length
   length="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$mp4")"
-  if [[ "${2:-}" == trim && -n "$idle_from" ]]; then
-    length="$(echo "$idle_from + 6" | bc)"
-  fi
   ffmpeg -hide_banner -loglevel error -y -t "$length" -i "$mp4" \
     -vf "fps=10,split[a][b];[a]palettegen=max_colors=64[p];[b][p]paletteuse=dither=none" "$gif"
   rm "$mp4"
@@ -75,7 +74,7 @@ to_gif() {
 case "${1:-}" in
   cli)
     vhs docs/demo/cli.tape
-    to_gif cli trim
+    to_gif cli
     check_repo
     ;;
   monitor)

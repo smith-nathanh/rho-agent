@@ -1,0 +1,6 @@
+# Fleet operating limits enforced by watchdog.py
+
+[limits]
+min_battery_v = 11.4
+max_temp_c = 75.0
+max_cpu_pct = 90.0

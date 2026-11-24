@@ -1,240 +1,27 @@
 # rho-agent
 
-rho-agent runs AI agents that read code, run commands and edit files. Agents run inside an OS sandbox: they can change the project they work in, and ask before touching anything outside it. You can use it two ways:
+rho-agent is a lightweight harness for running AI agents. It requires only Python, so it can run on virtually any compute device with minimal setup — from containers and remote VMs to edge devices and robots.
 
-- **From the terminal.** Work with an agent in a conversation, hand it a task to finish on its own, or start several and supervise them from one place.
-- **From Python.** Import `rho_agent` and build agents into your own programs. The CLI is a thin layer over the same three classes.
+Agents work inside an OS sandbox that enforces permissions across built-in tools for the shell, files, search, vision, databases, and MCP servers. Use it interactively, supervise background agents from a live terminal monitor, or embed it directly via the Python SDK.
 
-![An interactive session: the agent finds a bug behind two failing tests, fixes it and reruns the tests](docs/demo/cli.gif)
+### Interactive CLI
 
-## Benchmark results
+![An interactive session on a telemetry watchdog: the agent correlates reset logs with SQLite readings, adds a thermal guard, and verifies it](docs/demo/cli.gif)
 
-Both benchmarks were run with the same setup:
+Run `rho-agent` in a project for an interactive session (or pass a prompt to run one-shot and exit). Sessions save automatically so you can resume with `rho-agent -r latest`.
 
-| Harness | Model | Reasoning effort | Tools |
-|---|---|---|---|
-| **rho-agent** | **GPT-6.1 Sol** | **medium** | `bash`, `read`, `write`, `edit`, `glob`, `grep`, `list`, `view_image` |
+### Live fleet monitor
 
-### [Terminal-Bench 2.1](https://tbench.ai/leaderboard/terminal-bench/2.1)
+![The monitor: inspect a session's history and subagent tree, then switch to Live Mission Control to approve waiting agents and steer them mid-run](docs/demo/monitor.gif)
 
-Terminal-Bench is a leading benchmark for agents that work in a terminal. Each
-task drops the agent into a Linux container with a real job and no further
-help, such as building POV-Ray from source, installing Windows 3.11, cracking a
-password-protected 7z archive or training a fastText model, and hidden tests
-then check the result. We ran all 89 tasks of version 2.1.
-
-| Category | Score | Model cost |
-|---|---|---|
-| Software engineering | **24 / 26 (92.3%)** | $3.84 |
-| Data science and processing | **12 / 13 (92.3%)** | $1.43 |
-| System administration | **7 / 9 (77.8%)** | $1.05 |
-| Scientific computing | **7 / 8 (87.5%)** | $0.74 |
-| Security | **6 / 8 (75.0%)** | $0.54 |
-| Machine learning and model training | **7 / 7 (100%)** | $0.94 |
-| Debugging | **5 / 5 (100%)** | $0.42 |
-| File operations | **4 / 5 (80.0%)** | $0.82 |
-| Mathematics and optimization | **4 / 5 (80.0%)** | $0.25 |
-| Other (chess, scheduling, video) | **3 / 3 (100%)** | $0.21 |
-| **Total** | **79 / 89 (88.8%)** | $10.23 |
-
-One attempt per task (November 2026). Details: [experiment E007](experiments/E007-full-terminal-bench-2.1/).
-
-### [Embodied First Exam](https://www.embodied-first-exam.ai/leaderboard/)
-
-The Embodied First Exam asks a coding agent to operate a simulated robot (an
-arm, a five-finger hand or a kitchen robot) toward a goal such as "open the jar"
-or "swap the remote's batteries". The agent sees only through the robot's
-cameras and acts only by writing code that sends motor commands, so it works in
-a loop of moving, looking at camera images and adjusting, against a 30–60
-minute clock. We ran 39 of the 456 core tasks in the leaderboard's
-Standard setting.
-
-| Segment | Score | Model cost |
-|---|---|---|
-| DexHand | **11 / 23 (47.8%)** | $63.22 |
-| RoboCasa, RoboCasa365, RoboCasa-GR1 | **5 / 8 (62.5%)** | $16.49 |
-| DexJoCo, LIBERO-MAX, MetaWorld+, VLABench | **5 / 8 (62.5%)** | $5.88 |
-| **Total** | **21 / 39 (53.8%)** | $85.59 |
-
-One attempt per task (November 2026).
-
-![DexHand remote battery swap, solved: a five-finger robot hand slides open a TV remote's battery door, moves the old AA cell to a tray, seats the new one and slides the door shut](docs/demo/efe-dexhand-remote-battery-swap.gif)
-
-DexHand remote battery swap, solved in 18.7 minutes for $0.84. rho-agent drove the hand by writing Python that sends joint-angle targets to the simulator, looking at camera images between moves. The replay shows the graded episode (after one reset) at about 4× real time.
-
-## Install
-
-You need Python 3.11 or newer, [uv](https://docs.astral.sh/uv/), and an API key from a model provider that offers an OpenAI-compatible API: OpenAI, OpenRouter, xAI, Groq, DeepSeek and many others. A server you run yourself (vLLM, Ollama) works too. rho-agent is not on PyPI yet, so install it from GitHub.
-
-For the command-line tool:
-
-```bash
-uv tool install git+https://github.com/smith-nathanh/rho-agent
-```
-
-This puts `rho-agent` and `rho-eval` on your `PATH`.
-
-To use it as a library, add it to your project instead:
-
-```bash
-uv add git+https://github.com/smith-nathanh/rho-agent
-```
-
-Then tell it which provider to use. rho-agent reads three variables, and only these. It never picks up `OPENAI_API_KEY` or another key you set for a different tool.
-
-| Variable | What to put there |
-|---|---|
-| `RHO_AGENT_API_KEY` | The API key from your provider |
-| `RHO_AGENT_BASE_URL` | Your provider's endpoint. Leave it unset for OpenAI |
-| `RHO_AGENT_MODEL` | The model name as your provider spells it. Default: `gpt-6.1-terra` |
-
-For OpenAI:
-
-```bash
-export RHO_AGENT_API_KEY=sk-...
-```
-
-For another provider, set the endpoint and a model too. OpenRouter, for example:
-
-```bash
-export RHO_AGENT_API_KEY=sk-or-...
-export RHO_AGENT_BASE_URL=https://openrouter.ai/api/v1
-export RHO_AGENT_MODEL=anthropic/claude-haiku-4.5
-```
-
-| Provider | `RHO_AGENT_BASE_URL` | Example `RHO_AGENT_MODEL` |
-|---|---|---|
-| OpenAI | leave unset | `gpt-6.1-terra` |
-| OpenRouter | `https://openrouter.ai/api/v1` | `anthropic/claude-haiku-4.5` |
-| xAI | `https://api.x.ai/v1` | `grok-4.7` |
-| Groq | `https://api.groq.com/openai/v1` | `openai/gpt-oss-120b` |
-| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
-| Cerebras | `https://api.cerebras.ai/v1` | `gpt-oss-120b` |
-| vLLM or Ollama on your machine | e.g. `http://localhost:8000/v1` | the model you serve (no key needed) |
-
-`--model` and `--base-url` on the command line override the variables for one run. A `.env` file in the directory you run from works too. See [Installation](docs/site/installation.md) for extras (database drivers, Daytona, evals) and the other install options.
-
-Models are called through the Responses API, so they reason between tool calls; `--reasoning-effort` (or `AgentConfig.reasoning_effort`) sets how much. That works with OpenAI and with other providers that implement Responses, such as OpenRouter, xAI, Groq and DeepSeek. If a server has no Responses endpoint (Gemini's OpenAI-compatible API, Cerebras, llama.cpp), rho-agent switches to Chat Completions on its own. The [FAQ](docs/site/faq.md) has the details.
-
-## Quick start
-
-In the terminal, go to a project and start a conversation:
-
-```bash
-cd ~/proj/myapp
-rho-agent
-```
-
-```
-> where is the retry logic for failed webhooks, and what does it do on the third failure?
-```
-
-In Python, the same thing is a few lines. Save this as `ask.py` in a project and run it with `uv run python ask.py`:
-
-```python
-import asyncio
-
-from rho_agent import Agent, AgentConfig, Session
-
-
-async def main() -> None:
-    config = AgentConfig(
-        system_prompt="You answer questions about the code in the current directory.",
-        access="read-only",
-    )
-    async with Session(Agent(config)) as session:
-        result = await session.run("At what quantity does the bulk discount start? One sentence.")
-        print(result.text)
-        print(result.status)
-
-
-asyncio.run(main())
-```
-
-Run in a copy of this repository's [`docs/demo/projects/orders`](docs/demo/projects/orders), it prints:
-
-```
-The bulk discount starts at 11 units in the implementation, though the documentation says 10.
-completed
-```
-
-The Python example uses `read-only` access, which can look but not change anything. The default, `workspace`, lets the agent edit the project; see [Access](#access). The rest of this page covers the terminal first, then [Python](#in-python).
-
-## In the terminal
-
-### Work with an agent
-
-Run `rho-agent` in a project to start a conversation. The agent can edit files there and run commands, inside a sandbox.
-
-```bash
-cd ~/proj/myapp
-rho-agent
-```
-
-```
-> test_webhook has been flaky in CI. find the race condition and fix it
-> now run the whole suite
-```
-
-When the agent needs something outside the project, such as writing a sibling repository, it asks at the prompt and waits for your answer. Ctrl+C stops the current turn without ending the session, `/help` lists the commands available inside it, and the status bar shows how many tokens the session has used.
-
-Sessions are saved as you go, so you can leave and come back:
-
-```bash
-rho-agent --list          # saved sessions
-rho-agent -r latest       # pick up the most recent one
-```
-
-The agent reads `AGENTS.md` (or `CLAUDE.md`) from the project for instructions, and can hand parts of a job to subagents that run in parallel.
-
-### Hand off a task
-
-Give a prompt on the command line and the agent runs it to completion and exits.
-
-```bash
-rho-agent \
-  "migrate sync_client.py to async with aiohttp, update all callers, run the tests"
-
-# Write the final answer to a file
-rho-agent "summarise the error handling in this repo" --output summary.md
-
-# A reusable prompt file with variables
-rho-agent --prompt examples/log_debugger/debug.md --var log_path=/mnt/logs/12345
-```
-
-[Prompt files](docs/site/prompt-files.md) are Markdown with a little frontmatter, for tasks you run repeatedly with different inputs.
-
-### Run several and supervise them
-
-Agents started in the background keep working on their own. `rho-agent monitor` shows all of them, grouped by project, with subagents listed under the agent that started them.
-
-![The monitor: two agents in different projects wait for approval, get approved, and one is redirected while it works](docs/demo/monitor.gif)
-
-From the monitor you can:
-
-- see which agents are working, waiting for input, waiting for an approval, or dead
-- `watch` one live, including a single subagent
-- answer approval requests with `approve` and `deny`
-- `pause`, `resume` and `cancel`
-- send a `directive` that the agent reads before its next step
-
-An agent with no terminal attached cannot ask you anything directly, so when it needs access outside its sandbox it queues the request and waits for an answer in the monitor:
-
-```bash
-rho-agent "split payments don't add up to the invoice total. fix it" &
-```
-
-There is no daemon and no server behind this. Each session is a directory of plain files under `~/.config/rho-agent/sessions`, and the monitor reads and writes those files. See [Monitor](docs/site/monitor.md).
+Run `rho-agent monitor` (or `rho-agent monitor --live` for the split-pane dashboard) to supervise running agents and their subagent trees, inspect history, answer queued approval requests, pause/cancel, or send mid-run directives. Sessions are plain files under `~/.config/rho-agent/sessions` — no daemon or server — so you can SSH onto a remote VM or edge device and run the monitor directly on the box.
 
 ## In Python
 
-There are three objects. An `Agent` is configuration and tools, and can be reused. A `Session` is one conversation with it. The session's `State` is the full record of what happened: messages, token usage and status.
-
-This program lets an agent change files, prints each tool call as it happens, then asks a follow-up in the same conversation:
+The CLI is a thin layer over three classes: `Agent` (config and tools), `Session` (one conversation), and `State` (messages, usage and trace).
 
 ```python
 import asyncio
-
 from rho_agent import Agent, AgentConfig, AgentEvent, SessionStore
 
 
@@ -252,99 +39,125 @@ async def main() -> None:
 
     checked = await session.run("Run the tests and report the result in one line.")
     print(checked.text)
-    print(session.state.usage)
 
 
 asyncio.run(main())
 ```
 
+See the [Python SDK](docs/site/python-sdk.md) guide for events, approval callbacks, MCP servers, OpenTelemetry export and custom tools, or browse [`examples/`](examples/).
+
+## Benchmark results
+
+### [Terminal-Bench 2.1](https://tbench.ai/leaderboard/terminal-bench/2.1) — **79 / 89 (88.8%)**
+
+> **Model:** `GPT-6.1 Sol` (`medium` reasoning) · **Cost:** `$10.23` · **Run:** 1 attempt/task (Nov 2026) · [experiment E007](experiments/E007-full-terminal-bench-2.1/)
+
+Terminal-Bench 2.1 evaluates coding agents across 89 end-to-end tasks inside isolated Linux containers — spanning compiler builds, distributed PyTorch parallelism, statistical model migrations, systems debugging, and data pipelines — graded by hidden test suites with no human hints.
+
+<details>
+<summary>Results</summary>
+
+| Category | Score | Model cost |
+|---|---|---|
+| Software engineering | **24 / 26 (92.3%)** | $3.84 |
+| Data science and processing | **12 / 13 (92.3%)** | $1.43 |
+| System administration | **7 / 9 (77.8%)** | $1.05 |
+| Scientific computing | **7 / 8 (87.5%)** | $0.74 |
+| Security | **6 / 8 (75.0%)** | $0.54 |
+| Machine learning and model training | **7 / 7 (100%)** | $0.94 |
+| Debugging | **5 / 5 (100%)** | $0.42 |
+| File operations | **4 / 5 (80.0%)** | $0.82 |
+| Mathematics and optimization | **4 / 5 (80.0%)** | $0.25 |
+| Other (chess, scheduling, video) | **3 / 3 (100%)** | $0.21 |
+| **Total** | **79 / 89 (88.8%)** | $10.23 |
+
+</details>
+
+### [Embodied First Exam](https://www.embodied-first-exam.ai/leaderboard/) — **21 / 39 (53.8%)**
+
+> **Model:** `GPT-6.1 Sol` (`medium` reasoning) · **Cost:** `$85.59` · **Run:** 39 of 456 core tasks, Standard setting, 1 attempt/task (Nov 2026) · [experiment E011](experiments/E011-efe-cpu-standard-sol/)
+
+The Embodied First Exam asks a coding agent to operate a simulated robot (an arm, a five-finger hand or a kitchen robot) toward a goal such as "open the jar" or "swap the remote's batteries" — seeing only through camera images and acting by writing Python motor commands against a 30–60 minute clock.
+
+<details>
+<summary>Results</summary>
+
+| Segment | Score | Model cost |
+|---|---|---|
+| DexHand | **11 / 23 (47.8%)** | $63.22 |
+| RoboCasa, RoboCasa365, RoboCasa-GR1 | **5 / 8 (62.5%)** | $16.49 |
+| DexJoCo, LIBERO-MAX, MetaWorld+, VLABench | **5 / 8 (62.5%)** | $5.88 |
+| **Total** | **21 / 39 (53.8%)** | $85.59 |
+
+</details>
+
+![DexHand remote battery swap, solved: a five-finger robot hand slides open a TV remote's battery door, moves the old AA cell to a tray, seats the new one and slides the door shut](docs/demo/efe-dexhand-remote-battery-swap.gif)
+
+*DexHand remote battery swap, solved in 18.7 minutes for $0.84. Replay shows the graded episode (after one reset) at ~4× real time.*
+
+## Setup
+
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/). Install from GitHub (not on PyPI yet):
+
+```bash
+# CLI (`rho-agent` and `rho-eval`)
+uv tool install git+https://github.com/smith-nathanh/rho-agent
+
+# Or as a Python library in a project
+uv add git+https://github.com/smith-nathanh/rho-agent
 ```
-  bash
-  bash
-  read
-  read
-  bash
-  edit
-  bash
-Fixed the bulk discount to apply at the threshold in `pricing.py:12`.
 
-All 4 pricing tests pass.
-4 tests passed.
-{'input_tokens': 27114, 'output_tokens': 799, 'cached_tokens': 22489, 'reasoning_tokens': 9, 'cost_usd': 0.0}
+rho-agent works with any OpenAI-compatible API and reads only its own `RHO_AGENT_*` variables (it never picks up `OPENAI_API_KEY`):
+
+```bash
+export RHO_AGENT_API_KEY=sk-...
 ```
 
-A few things to know:
+<details>
+<summary>Using other providers (OpenRouter, xAI, Groq, DeepSeek, Ollama/vLLM)</summary>
 
-- **The agent works in the directory your program runs from.** With the default `workspace` access it can change anything there, so try it on a copy of a project first.
-- **No one is asked anything by default.** A session created in Python stays inside its sandbox, and commands that need more just fail. Set `session.approval_callback` to let the agent ask for access outside it.
-- **`Session(agent)` keeps nothing on disk.** `SessionStore().create_session(agent)` saves the session under `~/.config/rho-agent/sessions`, where `rho-agent monitor`, `rho-agent --list` and `rho-agent -r` find it.
-- **Leave out `system_prompt`** to get the same built-in prompt the CLI uses, or pass your own text or a prompt file.
+Set `RHO_AGENT_BASE_URL` and `RHO_AGENT_MODEL` (default: `gpt-6.1-terra`), or pass `--base-url` / `--model` / `--reasoning-effort` on the command line. `.env` files in the working directory are loaded automatically.
 
-The [Python SDK](docs/site/python-sdk.md) guide covers every `AgentConfig` field, the event types, cancellation and custom tools. There are complete programs in [`examples/`](examples/): a single agent, several agents working in parallel, and a Streamlit app that streams an agent's work into a chat window.
+```bash
+export RHO_AGENT_API_KEY=sk-or-...
+export RHO_AGENT_BASE_URL=https://openrouter.ai/api/v1
+export RHO_AGENT_MODEL=anthropic/claude-haiku-4.5
+```
+
+Calls use the Responses API and fall back to Chat Completions automatically when a server doesn't expose Responses. See [Installation](docs/site/installation.md) for optional extras (MCP, databases, Daytona, OpenTelemetry) and the [FAQ](docs/site/faq.md) for provider details.
+
+</details>
 
 ## Access
 
-One setting decides what an agent can change: `--access` on the command line, `AgentConfig(access=...)` in Python.
+`--access` (or `AgentConfig(access=...)`) controls what an agent can change:
 
-| Access | The agent can write | For |
+| Access | Can write | Typical use |
 |---|---|---|
-| `workspace` (default) | The working directory, temp directories and package caches | Everyday work in a project |
-| `read-only` | Temp directories only | Investigating without changing anything |
-| `full` | Anywhere you can; no sandbox | Containers, CI and other disposable machines |
+| `workspace` (default) | Working directory, temp dirs, package caches | Everyday project work |
+| `read-only` | Temp dirs only | Inspecting code safely |
+| `full` | Anywhere (no sandbox) | Containers, CI, disposable VMs |
 
-`read-only` and `workspace` run every command inside the operating system's sandbox: Seatbelt on macOS (built in), [bubblewrap](https://github.com/containers/bubblewrap) on Linux (`sudo apt install bubblewrap`). The kernel enforces the limits, so they hold whatever the command is and for everything it starts:
-
-- Writes outside the writable directories fail, and `.git/hooks` and `.git/config` stay read-only even inside the project.
-- Credentials such as `~/.ssh`, `~/.aws` and `~/.config/gh` are unreadable, and API keys are removed from commands' environment.
-- Local services that run outside the sandbox, such as Docker, ssh-agent and tmux, are unreachable over their Unix sockets.
-- The network is on; `network: false` turns it off.
-
-The file tools check the same rules themselves. If the sandbox can't run, rho-agent stops rather than run unsandboxed; `rho-agent sandbox check` tests it. Windows has no sandbox yet (use WSL2).
-
-When the agent needs more, it asks: *"Agent wants write access outside the sandbox: ~/proj/shared-lib. Allow for this session? [y/N]"*. You answer in the terminal, or in `rho-agent monitor` for agents running in the background. With nobody to ask, as in a Python program without an approval callback, it stays inside the sandbox.
-
-```bash
-rho-agent --access read-only
-rho-agent --add-dir ../shared-lib      # allow this directory up front
-rho-agent --access full                # inside a container
-```
-
-Inside a session, `/access` shows what the agent can reach and `/access read-only` changes it. See [Access](docs/site/access.md) for settings and how the sandbox works on each platform.
-
-The sandbox stops an agent changing things outside the project by mistake. It doesn't yet stop every deliberate escape: on macOS a command can still ask another app to act for it, local TCP services are reachable while the network is on, and there's no per-domain network allowlist. See [Known limits](docs/site/access.md#known-limits), and [docs/sandboxing-known-issues.md](docs/sandboxing-known-issues.md) for details and planned fixes.
-
-## What else is in the box
-
-The built-in tools cover shell, file reading and editing, search, images and Excel files, plus query tools for SQLite, PostgreSQL, MySQL, Oracle and Vertica. See [Tools](docs/site/tools.md).
-
-An agent can also use the tools of any [MCP](https://modelcontextprotocol.io) server, over stdio, SSE or streamable HTTP. List the servers in `mcp_servers` in the agent's config and each tool appears as `mcp__<server>__<tool>`. A server that can't be reached is skipped with a warning. This needs the `mcp` extra (`uv pip install -e ".[mcp]"`). See [MCP server tools](docs/site/tools.md#mcp-server-tools).
-
-With `--backend daytona`, the shell and file tools run in a [Daytona](docs/site/daytona.md) cloud sandbox instead of on your machine.
-
-Every session writes a `trace.jsonl` of each model call, tool call and result. You can read it with `jq`, replay it in Python, or [export it](rho_agent/export/README.md) to Harbor's ATIF trajectory format. See [Observability](docs/site/observability.md).
-
-The same traces export as OpenTelemetry spans, following the GenAI semantic conventions, for tools such as Langfuse, Arize Phoenix, LangSmith or any OTLP collector. A run becomes an agent span with its model calls and tool calls under it, and child agents are nested under the tool call that started them. Message content is left out unless you ask for it. Send a finished session with `rho-agent export <session-id> --format otlp --endpoint <url>`, or set `RHO_AGENT_OTLP_ENDPOINT` to send spans while the agent runs. Protobuf transport needs the `otel` extra (`uv pip install -e ".[otel]"`). See [OpenTelemetry export](docs/site/observability.md#opentelemetry-export).
-
-`rho-eval` runs the agent against [BIRD-Bench](rho_agent/eval/birdbench/) (text-to-SQL) and [TerminalBench](rho_agent/eval/harbor/).
+`workspace` and `read-only` confine every command in an OS sandbox (Seatbelt on macOS, [bubblewrap](https://github.com/containers/bubblewrap) on Linux): `.git/hooks`, `.git/config`, `~/.ssh`, `~/.aws`, and API keys stay protected, and local Unix sockets are blocked. When an agent needs more, it asks in the terminal or queues an approval in `rho-agent monitor`. Pass `--add-dir <path>` up front, use `/access` mid-session, or run `rho-agent sandbox check` to verify. See [Access](docs/site/access.md) for details and known limits.
 
 ## Documentation
 
 | | |
 |---|---|
 | [Quickstart](docs/site/quickstart.md) | Get running in minutes |
-| [Installation](docs/site/installation.md) | Environment setup and install options |
+| [Installation](docs/site/installation.md) | Environment setup, extras, and install options |
 | [Architecture](docs/site/architecture.md) | System design, agent loop, and session protocol |
 | [CLI Reference](docs/site/cli-reference.md) | Commands, flags, and usage examples |
 | [Python SDK](docs/site/python-sdk.md) | Create and run agents programmatically |
-| [Tools](docs/site/tools.md) | Complete tool handler reference |
-| [Access](docs/site/access.md) | What agents can change, the sandbox, and access requests |
-| [Daytona](docs/site/daytona.md) | Remote sandbox execution via Daytona |
-| [Observability](docs/site/observability.md) | Session traces, offline inspection, observers, and OpenTelemetry export |
-| [Export](rho_agent/export/README.md) | Convert traces to ATIF for training data or OTLP for observability tools |
+| [Tools](docs/site/tools.md) | Built-in tools, databases, and MCP servers |
+| [Access](docs/site/access.md) | Sandbox policy, access levels, and approvals |
+| [Daytona](docs/site/daytona.md) | Remote cloud sandbox execution via Daytona |
+| [Observability](docs/site/observability.md) | Session traces, offline inspection, and OpenTelemetry |
+| [Export](rho_agent/export/README.md) | Convert traces to ATIF or OTLP |
 | [Monitor](docs/site/monitor.md) | Watch, control, and steer running agents |
 | [Prompt files](docs/site/prompt-files.md) | Reusable prompts with variables |
-| [Continuum](docs/site/continuum.md) | Build a project from a requirements document across many sessions |
-| [FAQ](docs/site/faq.md) | Models, reasoning, endpoints and common problems |
+| [Continuum](docs/site/continuum.md) | Build a project from a requirements doc across sessions |
+| [FAQ](docs/site/faq.md) | Models, reasoning, endpoints, and troubleshooting |
 
 ## Development
 
@@ -355,7 +168,7 @@ uv sync --group dev
 uv run pytest
 ```
 
-The recordings in this README are made by [`docs/demo/record.sh`](docs/demo/record.sh) against a real model, using the small projects in `docs/demo/projects`.
+The CLI and monitor recordings are generated with [`docs/demo/record.sh`](docs/demo/record.sh) against a real model using [`docs/demo/projects`](docs/demo/projects).
 
 ## License
 

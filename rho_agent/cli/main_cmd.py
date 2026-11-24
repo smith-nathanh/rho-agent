@@ -7,7 +7,6 @@ import dataclasses
 import os
 import platform
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -31,11 +30,10 @@ from .errors import (
     InvalidModeError,
     PromptLoadError,
 )
-from .events import ApprovalHandler, announce_queued_approval
+from .events import ApprovalHandler
 from .formatting import (
     _is_interactive_terminal,
     _markup,
-    access_summary,
 )
 from .interactive import run_interactive
 from .single import run_single, run_single_with_output
@@ -47,7 +45,8 @@ from .state import (
     console,
     settings,
 )
-from .theme import THEME
+from .theme import THEME, THEMES, set_theme
+from .ui import render_saved_sessions_table, render_single_header
 
 SANDBOX_CONFIG_FILE = ".rho-agent.toml"
 
@@ -452,9 +451,23 @@ def main(
             help="Turn automatic history compaction on or off (default on)",
         ),
     ] = None,
+    theme: Annotated[
+        str | None,
+        typer.Option(
+            "--theme",
+            help=f"Color theme override ({', '.join(THEMES)})",
+        ),
+    ] = None,
 ) -> None:
     """rho-agent: an agent harness and CLI. Runs sandboxed: it can edit the working
     directory and asks before going outside it (see --access)."""
+    if theme:
+        try:
+            set_theme(theme)
+        except ValueError as exc:
+            console.print(_markup(str(exc), THEME.error))
+            raise typer.Exit(1) from exc
+
     # --- Daytona sandbox configuration ---
     # When --backend daytona, read .rho-agent.toml from the project root.
     # CLI flags (--dockerfile, --registered-image, --upload, --working-dir) override the toml.
@@ -504,18 +517,7 @@ def main(
             console.print(_markup("No saved sessions found.", THEME.muted))
             raise typer.Exit(0)
 
-        console.print("[bold]Saved sessions:[/bold]\n")
-        for info in sessions:
-            try:
-                started_dt = datetime.fromisoformat(info.created_at)
-                time_str = started_dt.strftime("%Y-%m-%d %H:%M")
-            except ValueError:
-                time_str = info.id
-            console.print(
-                f"{_markup(info.id, THEME.accent)}  {time_str}  {_markup(info.model, THEME.muted)}"
-            )
-            console.print(f"  {info.display_preview}")
-            console.print()
+        console.print(render_saved_sessions_table(sessions))
         raise typer.Exit(0)
 
     # Handle --resume: find the session to load
@@ -673,13 +675,14 @@ def main(
 
     # Set up approval handler
     approval_handler = ApprovalHandler()
+    approval_handler.working_dir = resolved_working_dir
     if queue_approvals or not sys.stdin.isatty():
         # Nobody can answer a prompt here; the monitor answers instead.
-        approval_handler.queue = ApprovalQueue(session, on_request=announce_queued_approval)
+        approval_handler.queue = ApprovalQueue(session, on_request=approval_handler.announce_queued)
     session.approval_callback = approval_handler.check_approval
 
     if run_prompt_text:
-        console.print(_markup(access_summary(agent), THEME.accent))
+        console.print(render_single_header(session, resolved_working_dir))
         if output:
             asyncio.run(
                 run_single_with_output(
@@ -688,6 +691,7 @@ def main(
                     output,
                     upload_mappings=upload_mappings,
                     setup_commands=setup_commands,
+                    approval_handler=approval_handler,
                 )
             )
         else:
@@ -697,6 +701,7 @@ def main(
                     run_prompt_text,
                     upload_mappings=upload_mappings,
                     setup_commands=setup_commands,
+                    approval_handler=approval_handler,
                 )
             )
     else:

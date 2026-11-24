@@ -12,17 +12,20 @@ import time
 import uuid
 import warnings
 from collections.abc import AsyncIterator, Callable
+from dataclasses import replace
 from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from ..client.catalog import CatalogModel
     from .agent import Agent
 
 from ..client.model import Message, ModelCallError, Prompt, StreamEvent
 from ..sandbox.policy import Grant
 from ..tools.base import ToolInvocation
 from ..tools.registry import ToolRegistry
+from .config import AgentConfig
 from .events import (
     COMPACTION_SYSTEM_PROMPT,
     IMAGE_ATTACHMENT_PREFIX,
@@ -309,6 +312,46 @@ class Session:
             cost_usd=usage.get("cost_usd", 0.0),
             **fields,
         )
+
+    async def list_models(self) -> list[CatalogModel]:
+        """Discover models on the session's active connection."""
+        return await self._client.list_models()
+
+    @property
+    def is_openrouter(self) -> bool:
+        return self._client.is_openrouter
+
+    def switch_model(self, model: str, *, context_window: int | None = None) -> None:
+        """Select the model for subsequent turns on this interactive session."""
+        config = self._agent.config
+        if model == config.model:
+            return
+        # Responses items can contain reasoning encrypted for the old model.
+        # Keep the portable text, tool calls and results for the new model.
+        if any(m.get("response_items") for m in self._state.messages):
+            self._state.replace_messages(
+                [
+                    {key: value for key, value in message.items() if key != "response_items"}
+                    for message in self._state.messages
+                ]
+            )
+        if self._session_dir is not None:
+            path = self._session_dir / "config.yaml"
+            saved = AgentConfig.from_file(path) if path.exists() else replace(config)
+            # Save the selection on the effective provider, including when launched
+            # with a different endpoint from the one originally saved.
+            saved.model = model
+            saved.base_url = config.base_url
+            temp = path.with_suffix(".yaml.tmp")
+            saved.to_file(temp)
+            temp.replace(path)
+        self._client.set_model(model)
+        config.model = model
+        self.context_window = config.context_window or context_window
+        self._last_input_tokens = 0
+        self._compact_retry_above = 0
+        self._warned_unpriced = False
+        self._update_meta(model=model)
 
     def set_status(self, status: str) -> None:
         """Record a status between runs, such as ``waiting_input``."""
